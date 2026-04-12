@@ -1,10 +1,10 @@
 {
   "name": "create-metaclaw",
-  "version": "3.3.0",
+  "version": "3.3.1",
   "description": "MetaClaw — Autonomous AI Agent Platform by Yonder Zenith LLC",
   "type": "module",
   "bin": {
-    "create-metaclaw": "installer/index.ts"
+    "create-metaclaw": "bin/create-metaclaw.mjs"
   },
   "scripts": {
     "start": "tsx installer/index.ts",
