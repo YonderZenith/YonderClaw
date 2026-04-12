@@ -441,6 +441,15 @@ nav .container {
   background: var(--cyan); opacity: 0.5;
 }
 
+.roadmap-body-specs {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px;
+}
+.roadmap-body-specs span {
+  padding: 4px 10px; border-radius: 50px; font-size: 11px;
+  background: rgba(255, 215, 0, 0.08); border: 1px solid rgba(255, 215, 0, 0.15);
+  color: var(--text-muted);
+}
+
 /* ── Footer ── */
 footer {
   padding: 60px 0 40px;
@@ -844,13 +853,20 @@ footer .links a:hover { color: var(--cyan); }
   <div class="roadmap-grid reveal">
 
     <div class="roadmap-card roadmap-hot">
-      <div class="roadmap-tag">Days Away</div>
+      <div class="roadmap-tag">Live Now</div>
       <div class="roadmap-icon">&#129302;</div>
-      <h3>MetaClaw Body</h3>
-      <p>Give your agent a face. A companion package with <strong>LED matrix eyes, animated mouth, camera vision (YOLO), and voice</strong> — plug into any MetaClaw agent. Hardware specs + 3D print files included. Your AI gets a physical presence.</p>
+      <h3>AXIOM Body</h3>
+      <p>Give your agent a <strong>physical body for ~$150</strong>. USB webcam with YOLOv8 vision, Whisper speech recognition, ElevenLabs voice, 64x64 BLE LED matrix face with synchronized mouth — all driven by <strong>file-based IPC</strong>. Works with any LLM. Wheels coming soon.</p>
+      <div class="roadmap-body-specs">
+        <span>&#128065; YOLOv8 Vision</span>
+        <span>&#128266; Whisper STT</span>
+        <span>&#128483; ElevenLabs TTS</span>
+        <span>&#128566; LED Matrix Face</span>
+        <span>&#129518; Wheels (Soon)</span>
+      </div>
       <div class="roadmap-status">
         <span class="status-dot hot"></span>
-        In Development — Companion Package
+        Live &mdash; <a href="https://github.com/YonderZenith/AXIOM-Body" style="color:var(--gold); text-decoration:none;">github.com/YonderZenith/AXIOM-Body</a>
       </div>
     </div>
 
