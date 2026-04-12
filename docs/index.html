@@ -256,7 +256,7 @@ nav .container {
 
 /* ── Why MetaClaw ── */
 .why-grid {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  display: grid; grid-template-columns: repeat(2, 1fr);
   gap: 24px;
 }
 .why-card {
@@ -282,6 +282,14 @@ nav .container {
 .why-card h3 { font-size: 20px; margin-bottom: 10px; }
 .why-card p { font-size: 15px; color: var(--text-muted); line-height: 1.7; }
 .why-card strong { color: var(--text); }
+.channel-pills {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px;
+}
+.channel-pills span {
+  padding: 4px 10px; border-radius: 50px; font-size: 11px;
+  background: rgba(0, 190, 234, 0.08); border: 1px solid rgba(0, 190, 234, 0.15);
+  color: var(--text-muted);
+}
 
 /* ── Agent Type Cards ── */
 .agent-grid {
@@ -544,6 +552,7 @@ footer .links a:hover { color: var(--cyan); }
   .section { padding: 80px 0; }
   .arch-visual { font-size: 11px; padding: 24px 16px; }
   .roadmap-grid { grid-template-columns: 1fr; }
+  .why-grid { grid-template-columns: 1fr; }
   .stats-grid { gap: 24px; }
   .stat-value { font-size: 30px; }
   .step::after { display: none; }
@@ -665,6 +674,20 @@ footer .links a:hover { color: var(--cyan); }
       <div class="why-icon">&#129302;</div>
       <h3>Truly Autonomous</h3>
       <p>Agents run on a cron schedule, improve their own prompts, track their own metrics, and recover from errors — all without human intervention.</p>
+    </div>
+    <div class="why-card">
+      <div class="why-icon">&#128242;</div>
+      <h3>Talk to Your Agent Anywhere</h3>
+      <p><strong>Email, WhatsApp, console, phone, voice</strong> — your agent meets you where you are. Use Claude Remote from your phone, send an email, or just open the terminal. Want a new channel? Ask your agent to set it up — it'll walk you through it and do the heavy lifting.</p>
+      <div class="channel-pills">
+        <span>&#128231; Email</span>
+        <span>&#128172; WhatsApp</span>
+        <span>&#128187; Console</span>
+        <span>&#128241; Phone</span>
+        <span>&#127908; Voice</span>
+        <span>&#128297; Text API</span>
+        <span>+ More</span>
+      </div>
     </div>
   </div>
 </div>
