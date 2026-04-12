@@ -1,0 +1,129 @@
+/**
+ * MetaClaw Boardroom — Meeting Mode Agent Script
+ *
+ * When a cron agent detects a meeting, this script runs instead of the normal cycle.
+ * It joins the meeting, enters a polling loop, responds when signaled,
+ * and exits ONLY when the meeting ends.
+ *
+ * Usage: npx tsx boardroom/meeting-agent.ts <meeting_id> <agent_name> [coordinator_url]
+ */
+
+const meetingId = process.argv[2];
+const agentName = process.argv[3];
+const coordinator = process.argv[4] || "http://localhost:7890";
+
+if (!meetingId || !agentName) {
+  console.error("Usage: npx tsx boardroom/meeting-agent.ts <meeting_id> <agent_name> [coordinator_url]");
+  process.exit(1);
+}
+
+const POLL_INTERVAL = 2000; // 2 seconds
+let lastMessageId = 0;
+
+async function post(path: string, body: any): Promise<any> {
+  const res = await fetch(`${coordinator}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return res.json();
+}
+
+async function get(path: string): Promise<any> {
+  const res = await fetch(`${coordinator}${path}`);
+  return res.json();
+}
+
+async function joinMeeting() {
+  console.log(`[${agentName}] Joining meeting ${meetingId}...`);
+  const result = await post(`/meetings/${meetingId}/join`, {
+    agent_name: agentName,
+    expertise: [], // Agent should fill this based on its config
+  });
+  console.log(`[${agentName}] Joined. Participants: ${result.context?.participants?.join(", ") || "unknown"}`);
+  console.log(`[${agentName}] Topic: ${result.context?.meeting_topic || "unknown"}`);
+  return result;
+}
+
+async function pollLoop() {
+  console.log(`[${agentName}] Entering meeting polling loop...`);
+
+  while (true) {
+    try {
+      const data = await get(`/meetings/${meetingId}/poll?agent=${encodeURIComponent(agentName)}&since=${lastMessageId}`);
+
+      // Meeting ended?
+      if (data.meeting_status === "ended") {
+        console.log(`[${agentName}] Meeting ended.`);
+        break;
+      }
+
+      // Process new messages
+      if (data.messages && data.messages.length > 0) {
+        for (const msg of data.messages) {
+          lastMessageId = Math.max(lastMessageId, msg.id);
+          if (msg.agent_name !== agentName) {
+            console.log(`[${msg.agent_name}]: ${msg.content.slice(0, 100)}${msg.content.length > 100 ? "..." : ""}`);
+          }
+        }
+      }
+
+      // Coverage check — should we re-evaluate?
+      if (data.coverage_check && data.coverage_check.action_required === "re-evaluate") {
+        console.log(`[${agentName}] Coverage detected — re-evaluating relevance...`);
+        // In a real implementation, the Claude session would evaluate this
+        // For now, we lower our score slightly
+        await post(`/meetings/${meetingId}/re-evaluate`, {
+          agent_name: agentName,
+          new_self_score: 0.4,
+          reason: "covered",
+        });
+      }
+
+      // Turn signal — should we speak?
+      if (data.turn_signal && data.turn_signal.should_speak) {
+        console.log(`[${agentName}] My turn (score: ${data.turn_signal.final_score || data.turn_signal.score}, reason: ${data.turn_signal.reason})`);
+        // In a real Claude session, the agent generates a thoughtful response here
+        // For this template, we signal readiness but the actual content comes from the Claude session
+        console.log(`[${agentName}] Generating response...`);
+        // The Claude session would call speak() here
+      }
+
+      // Queue position info
+      if (data.queue_position) {
+        console.log(`[${agentName}] Queue position: ${data.queue_position}/${data.queue_size}`);
+      }
+
+    } catch (err) {
+      console.error(`[${agentName}] Poll error (retrying):`, (err as Error).message);
+    }
+
+    await new Promise(r => setTimeout(r, POLL_INTERVAL));
+  }
+}
+
+async function main() {
+  try {
+    await joinMeeting();
+    await pollLoop();
+    console.log(`[${agentName}] Meeting mode complete. Returning to normal cycle.`);
+  } catch (err) {
+    console.error(`[${agentName}] Meeting mode error:`, err);
+  }
+
+  // Clean up
+  try {
+    const fs = await import("fs");
+    // Remove meeting lock
+    fs.unlinkSync("data/.meeting-lock");
+    // Remove MEETING_READY sentinel
+    const inbox = `__INBOX_ROOT__\\${agentName.toLowerCase()}`;
+    const files = fs.readdirSync(inbox).filter((f: string) => f.includes(`MEETING_READY_${meetingId}`));
+    for (const f of files) fs.unlinkSync(`${inbox}/${f}`);
+    // Remove MEETING_ENDED sentinel
+    const endFiles = fs.readdirSync(inbox).filter((f: string) => f.includes(`MEETING_ENDED_${meetingId}`));
+    for (const f of endFiles) fs.unlinkSync(`${inbox}/${f}`);
+  } catch {}
+}
+
+main();

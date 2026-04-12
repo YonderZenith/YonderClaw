@@ -1,0 +1,376 @@
+/**
+ * MetaClaw Swarm — DHT Client
+ *
+ * Decentralized bucket routing via Hyperswarm (Kademlia DHT).
+ * Every bucket = a DHT topic (SHA-256 of bucket path).
+ * Every node holds its own packets + serves them to querying peers.
+ * Querying node pulls ALL packets, tallies locally. Simple.
+ *
+ * Fallback: HTTP relay (configured in data/swarm-config.json)
+ */
+
+import Hyperswarm from "hyperswarm";
+import crypto from "crypto";
+import fs from "fs";
+import path from "path";
+
+const RELAY_URL = "__RELAY_URL__";
+const KEYPAIR_PATH = path.join(process.cwd(), "data", "dht-keypair.json");
+const TOPICS_PATH = path.join(process.cwd(), "data", "dht-topics.json");
+
+export interface DHTPacket {
+  bucket: string;
+  agent_id: string;
+  treatment?: string;
+  method?: string;
+  outcome?: string;
+  signal: "positive" | "negative" | "neutral";
+  confidence: number;
+  insight: string;
+  context: Record<string, any>;
+  metrics: Record<string, any>;
+  ts: number;
+}
+
+export class DHTClient {
+  private swarm: Hyperswarm | null = null;
+  private localPackets: Map<string, DHTPacket[]> = new Map(); // topic hex → my packets
+  private peerPackets: Map<string, DHTPacket[]> = new Map();  // topic hex → collected from peers
+  private connections: Map<string, Set<any>> = new Map();      // topic hex → active sockets
+  private agentId: string;
+  private ready: boolean = false;
+
+  constructor(agentId: string) {
+    this.agentId = agentId;
+  }
+
+  async start(): Promise<void> {
+    const keyPair = this.getOrCreateKeypair();
+    this.swarm = new Hyperswarm({ keyPair });
+
+    this.swarm.on("connection", (socket: any, info: any) => {
+      this.handleConnection(socket, info);
+    });
+
+    this.swarm.on("error", (err: Error) => {
+      console.error("[DHT] Error (non-fatal):", err.message);
+    });
+
+    // Rejoin previously announced topics
+    const savedTopics = this.loadTopics();
+    for (const topicHex of savedTopics) {
+      const topic = Buffer.from(topicHex, "hex");
+      this.swarm.join(topic, { server: true, client: true });
+    }
+
+    this.ready = true;
+    console.log(`[DHT] Online. Node: ${keyPair.publicKey.toString("hex").slice(0, 12)}...`);
+  }
+
+  async stop(): Promise<void> {
+    if (this.swarm) {
+      await this.swarm.destroy();
+      this.swarm = null;
+    }
+    this.ready = false;
+  }
+
+  // --- Core Operations ---
+
+  /**
+   * Join a bucket topic — announce that you have data for this problem
+   */
+  async joinBucket(bucketPath: string): Promise<string> {
+    if (!this.swarm) throw new Error("DHT not started");
+    const topic = this.hashBucket(bucketPath);
+    const topicHex = topic.toString("hex");
+
+    this.swarm.join(topic, { server: true, client: true });
+    this.saveTopicList(topicHex);
+
+    return topicHex;
+  }
+
+  /**
+   * Deposit your packet for a bucket — stores locally + pushes to connected peers + relay
+   */
+  async deposit(bucketPath: string, packet: DHTPacket): Promise<void> {
+    const topicHex = this.hashBucket(bucketPath).toString("hex");
+
+    // Store locally
+    if (!this.localPackets.has(topicHex)) this.localPackets.set(topicHex, []);
+    const existing = this.localPackets.get(topicHex)!;
+    const idx = existing.findIndex(p => p.agent_id === packet.agent_id);
+    if (idx >= 0) existing[idx] = packet;
+    else existing.push(packet);
+
+    // Push to connected peers on this topic
+    const sockets = this.connections.get(topicHex);
+    if (sockets) {
+      for (const socket of sockets) {
+        this.send(socket, { type: "PACKET", data: packet });
+      }
+    }
+
+    // Push to relay (fire and forget)
+    try {
+      fetch(`${RELAY_URL}/packets`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bucket: bucketPath,
+          agent_id: packet.agent_id,
+          outcome: {
+            signal: packet.signal,
+            confidence: packet.confidence,
+            insight: packet.insight,
+            context: packet.context,
+            metrics: packet.metrics,
+          },
+        }),
+      }).catch(() => {});
+    } catch {}
+  }
+
+  /**
+   * Query a bucket — pull ALL packets from DHT peers + relay, return everything
+   * The querying node tallies locally. We just deliver the raw packets.
+   */
+  async query(bucketPath: string, timeoutMs: number = 8000): Promise<DHTPacket[]> {
+    const allPackets: Map<string, DHTPacket> = new Map(); // agent_id → packet (dedup)
+    const topicHex = this.hashBucket(bucketPath).toString("hex");
+
+    // 1. Local packets first (instant)
+    const local = this.localPackets.get(topicHex) || [];
+    for (const p of local) allPackets.set(p.agent_id, p);
+
+    // 2. Previously collected peer packets
+    const cached = this.peerPackets.get(topicHex) || [];
+    for (const p of cached) allPackets.set(p.agent_id, p);
+
+    // 3. DHT peers (stream packets as connections come in)
+    if (this.swarm && this.ready) {
+      try {
+        const topic = Buffer.from(topicHex, "hex");
+        const discovery = this.swarm.join(topic, { server: false, client: true });
+
+        await Promise.race([
+          this.collectFromPeers(topicHex, allPackets, timeoutMs),
+          new Promise(r => setTimeout(r, timeoutMs)),
+        ]);
+      } catch {}
+    }
+
+    // 4. Relay fallback (always check — it has the canonical copy)
+    try {
+      const res = await fetch(`${RELAY_URL}/lookup?path=${encodeURIComponent(bucketPath)}`);
+      if (res.ok) {
+        const data = await res.json();
+        for (const p of data.packets || []) {
+          if (!allPackets.has(p.agent_id)) {
+            allPackets.set(p.agent_id, {
+              bucket: bucketPath,
+              agent_id: p.agent_id,
+              signal: p.signal,
+              confidence: p.confidence,
+              insight: p.insight,
+              context: typeof p.context === "string" ? JSON.parse(p.context) : p.context,
+              metrics: typeof p.metrics === "string" ? JSON.parse(p.metrics) : p.metrics,
+              ts: p.ts,
+            });
+          }
+        }
+      }
+    } catch {}
+
+    return Array.from(allPackets.values());
+  }
+
+  /**
+   * Search for buckets by keyword — uses relay (DHT doesn't support text search)
+   */
+  async search(keyword: string): Promise<any[]> {
+    try {
+      const res = await fetch(`${RELAY_URL}/buckets?q=${encodeURIComponent(keyword)}`);
+      if (res.ok) {
+        const data = await res.json();
+        return data.buckets || [];
+      }
+    } catch {}
+    return [];
+  }
+
+  /**
+   * Tally packets locally — the edge synthesis
+   * This is where QIS happens: count what's working from your exact twins
+   */
+  static tally(packets: DHTPacket[]): {
+    total: number;
+    positive: number;
+    negative: number;
+    neutral: number;
+    positive_pct: number;
+    avg_confidence: number;
+    top_insights: Array<{ insight: string; count: number; avg_confidence: number }>;
+  } {
+    const total = packets.length;
+    const positive = packets.filter(p => p.signal === "positive").length;
+    const negative = packets.filter(p => p.signal === "negative").length;
+    const neutral = total - positive - negative;
+    const avgConf = total > 0 ? packets.reduce((s, p) => s + p.confidence, 0) / total : 0;
+
+    // Group similar insights and count
+    const insightGroups: Map<string, { count: number; totalConf: number }> = new Map();
+    for (const p of packets) {
+      // Normalize insight to first 100 chars lowercase for grouping
+      const key = p.insight.toLowerCase().slice(0, 100).trim();
+      const group = insightGroups.get(key) || { count: 0, totalConf: 0 };
+      group.count++;
+      group.totalConf += p.confidence;
+      insightGroups.set(key, group);
+    }
+
+    const topInsights = Array.from(insightGroups.entries())
+      .map(([insight, g]) => ({ insight, count: g.count, avg_confidence: g.totalConf / g.count }))
+      .sort((a, b) => b.count * b.avg_confidence - a.count * a.avg_confidence)
+      .slice(0, 10);
+
+    return {
+      total,
+      positive,
+      negative,
+      neutral,
+      positive_pct: total > 0 ? Math.round((positive / total) * 100) : 0,
+      avg_confidence: Math.round(avgConf * 100) / 100,
+      top_insights: topInsights,
+    };
+  }
+
+  // --- Connection Handling ---
+
+  private handleConnection(socket: any, info: any) {
+    const peerId = info.publicKey?.toString("hex").slice(0, 12) || "unknown";
+    let buffer = "";
+
+    socket.on("data", (chunk: Buffer) => {
+      buffer += chunk.toString();
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        if (line.trim()) {
+          try { this.handleMessage(socket, info, JSON.parse(line)); } catch {}
+        }
+      }
+    });
+
+    socket.on("error", () => {});
+    socket.on("close", () => {
+      // Remove from connections
+      for (const [topic, sockets] of this.connections) {
+        sockets.delete(socket);
+      }
+    });
+
+    // Track connection by topics
+    for (const topic of info.topics || []) {
+      const hex = topic.toString("hex");
+      if (!this.connections.has(hex)) this.connections.set(hex, new Set());
+      this.connections.get(hex)!.add(socket);
+    }
+
+    // Send our packets for shared topics
+    for (const topic of info.topics || []) {
+      const hex = topic.toString("hex");
+      const myPackets = this.localPackets.get(hex) || [];
+      for (const p of myPackets) {
+        this.send(socket, { type: "PACKET", data: p });
+      }
+    }
+
+    // Request their packets
+    this.send(socket, { type: "GET_PACKETS" });
+  }
+
+  private handleMessage(socket: any, info: any, msg: any) {
+    switch (msg.type) {
+      case "PACKET":
+        // Store peer's packet
+        if (msg.data && msg.data.agent_id) {
+          const bucket = msg.data.bucket || "";
+          const topicHex = this.hashBucket(bucket).toString("hex");
+          if (!this.peerPackets.has(topicHex)) this.peerPackets.set(topicHex, []);
+          const packets = this.peerPackets.get(topicHex)!;
+          const idx = packets.findIndex(p => p.agent_id === msg.data.agent_id);
+          if (idx >= 0) packets[idx] = msg.data;
+          else packets.push(msg.data);
+        }
+        break;
+
+      case "GET_PACKETS":
+        // Send all our local packets for shared topics
+        for (const topic of info.topics || []) {
+          const hex = topic.toString("hex");
+          const myPackets = this.localPackets.get(hex) || [];
+          for (const p of myPackets) {
+            this.send(socket, { type: "PACKET", data: p });
+          }
+        }
+        break;
+    }
+  }
+
+  private async collectFromPeers(topicHex: string, allPackets: Map<string, DHTPacket>, timeoutMs: number): Promise<void> {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const cached = this.peerPackets.get(topicHex) || [];
+      for (const p of cached) allPackets.set(p.agent_id, p);
+      await new Promise(r => setTimeout(r, 500));
+    }
+  }
+
+  private send(socket: any, msg: any) {
+    try { socket.write(JSON.stringify(msg) + "\n"); } catch {}
+  }
+
+  // --- Persistence ---
+
+  private getOrCreateKeypair(): { publicKey: Buffer; secretKey: Buffer } {
+    try {
+      if (fs.existsSync(KEYPAIR_PATH)) {
+        const saved = JSON.parse(fs.readFileSync(KEYPAIR_PATH, "utf-8"));
+        return {
+          publicKey: Buffer.from(saved.publicKey, "hex"),
+          secretKey: Buffer.from(saved.secretKey, "hex"),
+        };
+      }
+    } catch {}
+
+    // Let Hyperswarm generate one, save it
+    const tempSwarm = new Hyperswarm();
+    const kp = tempSwarm.keyPair;
+    fs.mkdirSync(path.dirname(KEYPAIR_PATH), { recursive: true });
+    fs.writeFileSync(KEYPAIR_PATH, JSON.stringify({
+      publicKey: kp.publicKey.toString("hex"),
+      secretKey: kp.secretKey.toString("hex"),
+    }));
+    tempSwarm.destroy();
+    return kp;
+  }
+
+  private hashBucket(bucketPath: string): Buffer {
+    return crypto.createHash("sha256").update(bucketPath).digest();
+  }
+
+  private loadTopics(): string[] {
+    try { return JSON.parse(fs.readFileSync(TOPICS_PATH, "utf-8")); } catch { return []; }
+  }
+
+  private saveTopicList(newTopicHex: string) {
+    const topics = this.loadTopics();
+    if (!topics.includes(newTopicHex)) {
+      topics.push(newTopicHex);
+      fs.mkdirSync(path.dirname(TOPICS_PATH), { recursive: true });
+      fs.writeFileSync(TOPICS_PATH, JSON.stringify(topics));
+    }
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "name": "core",
+  "displayName": "Core — Database, Safety & Self-Improvement",
+  "version": "3.3.0",
+  "description": "Foundation: SQLite database, safety guardrails, observability, self-improvement, health checks, state management, hooks system",
+  "category": "foundation",
+  "alwaysInstall": true,
+  "engines": { "metaclaw": ">=3.3.0" },
+  "requires": { "modules": [], "env": [], "bins": ["node"] },
+  "contributes": {
+    "src": {
+      "db.ts.txt": "src/db.ts",
+      "safety.ts.txt": "src/safety.ts",
+      "observability.ts.txt": "src/observability.ts",
+      "self-improve.ts.txt": "src/self-improve.ts",
+      "self-update.ts.txt": "src/self-update.ts",
+      "health-check.ts.txt": "src/health-check.ts",
+      "tasks.ts.txt": "src/tasks.ts",
+      "scan-capabilities.ts.txt": "src/scan-capabilities.ts",
+      "sync-context.ts.txt": "src/sync-context.ts"
+    },
+    "data": {
+      "state.json.txt": "data/state.json",
+      "system-context.json.txt": "data/system-context.json"
+    },
+    "memory": {
+      "CAPABILITIES.md.txt": "memory/CAPABILITIES.md",
+      "stuck-patterns.md.txt": "memory/stuck-patterns.md",
+      "logic-log.jsonl.txt": "memory/logic-log.jsonl",
+      "reflections.jsonl.txt": "memory/reflections.jsonl",
+      "curiosity.md.txt": "memory/curiosity.md"
+    },
+    "npmScripts": {
+      "status": "tsx src/agent.ts --status",
+      "self-update": "tsx src/self-update.ts",
+      "health-check": "tsx src/health-check.ts",
+      "scan": "tsx src/scan-capabilities.ts",
+      "sync-context": "tsx src/sync-context.ts"
+    },
+    "claudeMd": ["identity", "first-launch", "meta-cognition", "state-management", "tasks", "commands"],
+    "directories": ["src", "src/tools", "data", "data/logs", "scripts", "memory", "memory/capabilities"],
+    "dependencies": {
+      "@anthropic-ai/claude-agent-sdk": "latest",
+      "@types/better-sqlite3": "latest",
+      "better-sqlite3": "latest",
+      "tsx": "latest",
+      "typescript": "latest"
+    }
+  },
+  "placeholders": ["__AGENT_NAME__", "__SESSION_NAME__", "__CLAW_TYPE__", "__TIMESTAMP__", "__SAFETY_CONFIG__", "__SYSTEM_PROMPT__"]
+}

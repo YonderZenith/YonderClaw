@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>__AGENT_NAME__ Command Center</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;500;600;700&family=Orbitron:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --cyan: #00BEEA; --cyan-bright: #00D9FF; --purple: #8B5CF6;
+  --green: #10B981; --gold: #F59E0B; --red: #EF4444;
+  --bg: #0A0A0A; --border: rgba(0,190,234,0.15);
+  --text: #E8F5E9; --text-muted: rgba(232,245,233,0.45);
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background: var(--bg); color: var(--text); font-family: 'Rajdhani', sans-serif; overflow: hidden; height: 100vh; }
+h1,h2,.label { font-family: 'Orbitron', sans-serif; }
+.mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+
+/* === OFFICE LAYER (background) === */
+#office {
+  position: fixed; inset: 0; z-index: 1;
+  background: linear-gradient(180deg, #0d1117 0%, #0a0e14 100%);
+  transition: opacity 0.5s;
+}
+
+/* Floor grid */
+#office::before {
+  content: '';
+  position: absolute; bottom: 0; left: 0; right: 0; height: 60%;
+  background:
+    repeating-linear-gradient(90deg, rgba(0,190,234,0.03) 0px, transparent 1px, transparent 80px),
+    repeating-linear-gradient(0deg, rgba(0,190,234,0.03) 0px, transparent 1px, transparent 80px);
+  transform: perspective(500px) rotateX(30deg);
+  transform-origin: bottom;
+}
+
+/* Desk styling */
+.desk {
+  position: absolute;
+  width: 100px; height: 50px;
+  background: rgba(30,40,55,0.8);
+  border: 1px solid rgba(0,190,234,0.15);
+  border-radius: 4px;
+  transition: all 0.5s;
+}
+.desk.active { border-color: rgba(0,190,234,0.4); box-shadow: 0 0 15px rgba(0,190,234,0.1); }
+.desk-label {
+  position: absolute; bottom: -18px; left: 0; right: 0; text-align: center;
+  font-family: 'JetBrains Mono', monospace; font-size: 9px; color: var(--text-muted);
+  letter-spacing: 1px; text-transform: uppercase;
+}
+
+/* Agent avatars */
+.agent {
+  position: absolute;
+  width: 24px; height: 36px;
+  transition: all 0.8s ease-in-out;
+  opacity: 0;
+}
+.agent.visible { opacity: 1; }
+.agent svg { width: 100%; height: 100%; }
+
+/* Typing animation */
+.agent.working::after {
+  content: '...';
+  position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
+  font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--cyan);
+  animation: typing 1.5s infinite;
+}
+@keyframes typing { 0%{content:'.'} 33%{content:'..'} 66%{content:'...'} }
+
+/* Meeting pulse */
+.agent.meeting { animation: meetPulse 2s infinite; }
+@keyframes meetPulse { 0%,100%{filter:brightness(1)} 50%{filter:brightness(1.3)} }
+
+/* Boardroom table */
+#boardroom-table {
+  position: absolute; top: 15%; left: 50%; transform: translateX(-50%);
+  width: 180px; height: 90px;
+  background: rgba(20,30,45,0.9);
+  border: 1px solid rgba(139,92,246,0.3);
+  border-radius: 50%;
+  opacity: 0; transition: opacity 0.5s;
+  box-shadow: 0 0 30px rgba(139,92,246,0.1);
+}
+#boardroom-table.active { opacity: 1; }
+#boardroom-label {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  font-family: 'Orbitron', sans-serif; font-size: 8px; letter-spacing: 2px;
+  color: rgba(139,92,246,0.5); text-transform: uppercase;
+  opacity: 0; transition: opacity 0.5s;
+}
+#boardroom-table.active + #boardroom-label,
+#boardroom-table.active ~ #boardroom-label { opacity: 1; }
+
+/* Envelope animation for courier */
+.envelope {
+  position: absolute; font-size: 14px;
+  animation: float 3s ease-in-out infinite;
+  opacity: 0; transition: opacity 0.3s;
+}
+.envelope.visible { opacity: 1; }
+@keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-5px)} }
+
+/* === HUD OVERLAY (foreground) === */
+#hud {
+  position: fixed; inset: 0; z-index: 10;
+  pointer-events: none;
+  display: flex; flex-direction: column;
+}
+#hud > * { pointer-events: auto; }
+
+/* Top bar */
+#topbar {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 16px;
+  background: rgba(10,10,10,0.85);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+#topbar h1 {
+  font-size: 14px; letter-spacing: 2px;
+  background: linear-gradient(180deg, #fff, var(--cyan));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+
+/* Status dot */
+.dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; animation:pulse 2s infinite; }
+.dot.g { background:var(--green); box-shadow:0 0 6px var(--green); }
+.dot.r { background:var(--red); box-shadow:0 0 6px var(--red); }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+/* KPI strip */
+#kpis {
+  display: flex; gap: 2px; padding: 8px 16px;
+  background: rgba(10,10,10,0.7);
+}
+.kpi {
+  flex: 1; text-align: center; padding: 8px 4px;
+  background: rgba(0,0,0,0.3); border: 1px solid rgba(0,190,234,0.08); border-radius: 4px;
+}
+.kpi-label { font-family:'Orbitron',sans-serif; font-size:8px; letter-spacing:1px; color:var(--text-muted); text-transform:uppercase; }
+.kpi-value { font-family:'Orbitron',sans-serif; font-size:22px; font-weight:700; line-height:1.2; }
+
+/* Bottom panel */
+#bottom {
+  margin-top: auto;
+  background: rgba(10,10,10,0.85);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid var(--border);
+  max-height: 35vh;
+  display: flex;
+}
+#activity {
+  flex: 1; padding: 10px 16px; overflow-y: auto;
+  font-family: 'JetBrains Mono', monospace; font-size: 11px; line-height: 1.8;
+}
+#activity::-webkit-scrollbar { width: 3px; }
+#activity::-webkit-scrollbar-thumb { background: var(--border); }
+
+#agents-panel {
+  width: 220px; padding: 10px 16px; border-left: 1px solid var(--border);
+  overflow-y: auto;
+}
+.agent-row {
+  display: flex; align-items: center; gap: 8px; padding: 4px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+.agent-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+.agent-dot.idle { background: var(--text-muted); }
+.agent-dot.working { background: var(--green); animation: pulse 1.5s infinite; }
+.agent-dot.meeting { background: var(--purple); animation: pulse 1.5s infinite; }
+.agent-dot.sending { background: var(--gold); animation: pulse 1s infinite; }
+.agent-dot.alert { background: var(--red); animation: pulse 0.5s infinite; }
+
+.cyan { color: var(--cyan); }
+.green { color: var(--green); }
+.purple { color: var(--purple); }
+.gold { color: var(--gold); }
+.red { color: var(--red); }
+</style>
+</head>
+<body>
+
+<!-- OFFICE SCENE -->
+<div id="office">
+  <!-- Desks -->
+  <div class="desk" id="desk-scout" style="left:15%;top:40%"><div class="desk-label">Scout</div></div>
+  <div class="desk" id="desk-writer" style="left:38%;top:40%"><div class="desk-label">Writer</div></div>
+  <div class="desk" id="desk-guard" style="left:15%;top:60%"><div class="desk-label">Guard</div></div>
+  <div class="desk" id="desk-analyst" style="left:38%;top:60%"><div class="desk-label">Analyst</div></div>
+  <div class="desk" id="desk-courier" style="left:62%;top:40%"><div class="desk-label">Courier</div></div>
+  <div class="desk" id="desk-chief" style="left:62%;top:60%;width:120px;border-color:rgba(0,190,234,0.3)"><div class="desk-label">Chief</div></div>
+
+  <!-- Boardroom table (hidden until meeting) -->
+  <div id="boardroom-table"></div>
+  <div id="boardroom-label">Board Meeting</div>
+
+  <!-- Agent avatars -->
+  <div class="agent" id="agent-scout" data-role="scout">
+    <svg viewBox="0 0 24 36"><circle cx="12" cy="8" r="6" fill="#00BEEA" opacity="0.8"/><rect x="6" y="16" width="12" height="16" rx="3" fill="#00BEEA" opacity="0.6"/><circle cx="12" cy="8" r="3" fill="#0A0A0A"/></svg>
+  </div>
+  <div class="agent" id="agent-writer" data-role="writer">
+    <svg viewBox="0 0 24 36"><circle cx="12" cy="8" r="6" fill="#8B5CF6" opacity="0.8"/><rect x="6" y="16" width="12" height="16" rx="3" fill="#8B5CF6" opacity="0.6"/><circle cx="12" cy="8" r="3" fill="#0A0A0A"/></svg>
+  </div>
+  <div class="agent" id="agent-guard" data-role="guard">
+    <svg viewBox="0 0 24 36"><circle cx="12" cy="8" r="6" fill="#EF4444" opacity="0.8"/><rect x="6" y="16" width="12" height="16" rx="3" fill="#EF4444" opacity="0.6"/><circle cx="12" cy="8" r="3" fill="#0A0A0A"/></svg>
+  </div>
+  <div class="agent" id="agent-analyst" data-role="analyst">
+    <svg viewBox="0 0 24 36"><circle cx="12" cy="8" r="6" fill="#F59E0B" opacity="0.8"/><rect x="6" y="16" width="12" height="16" rx="3" fill="#F59E0B" opacity="0.6"/><circle cx="12" cy="8" r="3" fill="#0A0A0A"/></svg>
+  </div>
+  <div class="agent" id="agent-courier" data-role="courier">
+    <svg viewBox="0 0 24 36"><circle cx="12" cy="8" r="6" fill="#10B981" opacity="0.8"/><rect x="6" y="16" width="12" height="16" rx="3" fill="#10B981" opacity="0.6"/><circle cx="12" cy="8" r="3" fill="#0A0A0A"/></svg>
+  </div>
+  <div class="agent" id="agent-chief" data-role="chief">
+    <svg viewBox="0 0 24 36"><circle cx="12" cy="8" r="7" fill="#00D9FF" opacity="0.9"/><rect x="5" y="16" width="14" height="17" rx="3" fill="#00D9FF" opacity="0.7"/><circle cx="12" cy="8" r="3.5" fill="#0A0A0A"/><rect x="8" y="2" width="8" height="3" rx="1" fill="#FFD700" opacity="0.6"/></svg>
+  </div>
+
+  <!-- Courier envelope -->
+  <div class="envelope" id="envelope">&#9993;</div>
+</div>
+
+<!-- HUD OVERLAY -->
+<div id="hud">
+  <div id="topbar">
+    <div style="display:flex;align-items:center;gap:10px">
+      <img src="favicon.png" alt="YZ" style="height:24px;opacity:0.85">
+      <div>
+        <h1>__AGENT_NAME__</h1>
+        <div class="mono" style="color:var(--text-muted);font-size:10px">__CLAW_TYPE__ &mdash; MetaClaw v3.0</div>
+      </div>
+    </div>
+    <div style="text-align:right">
+      <div id="statusDot"><span class="dot g"></span><span class="mono">ONLINE</span></div>
+      <div class="mono" style="color:var(--text-muted);font-size:10px" id="lastUpdate">--</div>
+    </div>
+  </div>
+
+  <div id="kpis">
+    <div class="kpi"><div class="kpi-label">Actions</div><div class="kpi-value cyan" id="kActions">--</div></div>
+    <div class="kpi"><div class="kpi-label">Success</div><div class="kpi-value green" id="kSuccess">--</div></div>
+    <div class="kpi"><div class="kpi-label">Cost</div><div class="kpi-value purple" id="kCost">--</div></div>
+    <div class="kpi"><div class="kpi-label">Circuit</div><div class="kpi-value green" id="kCircuit">--</div></div>
+    <div class="kpi"><div class="kpi-label">Prompt</div><div class="kpi-value gold" id="kPrompt">--</div></div>
+  </div>
+
+  <div id="bottom">
+    <div id="activity">
+      <div style="color:var(--text-muted);font-size:10px;letter-spacing:1px;font-family:'Orbitron',sans-serif;margin-bottom:6px">ACTIVITY FEED</div>
+      <div id="activityFeed">Waiting for data...</div>
+    </div>
+    <div id="agents-panel">
+      <div style="color:var(--text-muted);font-size:10px;letter-spacing:1px;font-family:'Orbitron',sans-serif;margin-bottom:6px">BOARD MEMBERS</div>
+      <div class="agent-row"><div class="agent-dot idle" id="dot-chief"></div><span class="mono" style="color:var(--cyan)">Chief</span><span class="mono" style="color:var(--text-muted);margin-left:auto" id="state-chief">idle</span></div>
+      <div class="agent-row"><div class="agent-dot idle" id="dot-scout"></div><span class="mono">Scout</span><span class="mono" style="color:var(--text-muted);margin-left:auto" id="state-scout">idle</span></div>
+      <div class="agent-row"><div class="agent-dot idle" id="dot-writer"></div><span class="mono">Writer</span><span class="mono" style="color:var(--text-muted);margin-left:auto" id="state-writer">idle</span></div>
+      <div class="agent-row"><div class="agent-dot idle" id="dot-guard"></div><span class="mono">Guard</span><span class="mono" style="color:var(--text-muted);margin-left:auto" id="state-guard">idle</span></div>
+      <div class="agent-row"><div class="agent-dot idle" id="dot-analyst"></div><span class="mono">Analyst</span><span class="mono" style="color:var(--text-muted);margin-left:auto" id="state-analyst">idle</span></div>
+      <div class="agent-row"><div class="agent-dot idle" id="dot-courier"></div><span class="mono">Courier</span><span class="mono" style="color:var(--text-muted);margin-left:auto" id="state-courier">idle</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const DATA_URL = 'data/dashboard.json';
+const AGENTS = ['chief','scout','writer','guard','analyst','courier'];
+
+// Desk positions (where agents sit when working)
+const DESK_POS = {
+  scout:   { left:'17%', top:'37%' },
+  writer:  { left:'40%', top:'37%' },
+  guard:   { left:'17%', top:'57%' },
+  analyst: { left:'40%', top:'57%' },
+  courier: { left:'64%', top:'37%' },
+  chief:   { left:'66%', top:'57%' },
+};
+
+// Meeting positions (around the boardroom table)
+const MEETING_POS = {
+  chief:   { left:'48%', top:'10%' },
+  scout:   { left:'38%', top:'14%' },
+  writer:  { left:'58%', top:'14%' },
+  guard:   { left:'35%', top:'22%' },
+  analyst: { left:'61%', top:'22%' },
+  courier: { left:'48%', top:'26%' },
+};
+
+let currentStates = {};
+
+function setAgentState(id, state) {
+  const el = document.getElementById('agent-' + id);
+  const dot = document.getElementById('dot-' + id);
+  const stateEl = document.getElementById('state-' + id);
+  const desk = document.getElementById('desk-' + id);
+  if (!el) return;
+
+  // Remove old classes
+  el.classList.remove('visible','working','meeting');
+  if (desk) desk.classList.remove('active');
+
+  currentStates[id] = state;
+
+  if (state === 'idle') {
+    el.classList.remove('visible');
+    dot.className = 'agent-dot idle';
+    stateEl.textContent = 'idle';
+    stateEl.style.color = 'var(--text-muted)';
+  } else if (state === 'working' || state === 'researching') {
+    el.classList.add('visible','working');
+    el.style.left = DESK_POS[id].left;
+    el.style.top = DESK_POS[id].top;
+    if (desk) desk.classList.add('active');
+    dot.className = 'agent-dot working';
+    stateEl.textContent = state === 'researching' ? 'researching' : 'working';
+    stateEl.style.color = 'var(--green)';
+  } else if (state === 'meeting') {
+    el.classList.add('visible','meeting');
+    el.style.left = MEETING_POS[id].left;
+    el.style.top = MEETING_POS[id].top;
+    dot.className = 'agent-dot meeting';
+    stateEl.textContent = 'meeting';
+    stateEl.style.color = 'var(--purple)';
+  } else if (state === 'sending') {
+    el.classList.add('visible','working');
+    el.style.left = DESK_POS[id].left;
+    el.style.top = DESK_POS[id].top;
+    dot.className = 'agent-dot sending';
+    stateEl.textContent = 'sending';
+    stateEl.style.color = 'var(--gold)';
+  } else if (state === 'alert') {
+    el.classList.add('visible');
+    el.style.left = DESK_POS[id].left;
+    el.style.top = DESK_POS[id].top;
+    if (desk) desk.classList.add('active');
+    dot.className = 'agent-dot alert';
+    stateEl.textContent = 'ALERT';
+    stateEl.style.color = 'var(--red)';
+  }
+
+  // Boardroom table visibility
+  const anyMeeting = Object.values(currentStates).some(s => s === 'meeting');
+  document.getElementById('boardroom-table').classList.toggle('active', anyMeeting);
+}
+
+// Determine agent states from dashboard data
+function deriveAgentStates(d) {
+  const m = d.today_metrics || {};
+  const cb = d.circuit_breaker || {};
+  const actions = d.recent_actions || [];
+
+  // Default all to idle
+  const states = { chief:'idle', scout:'idle', writer:'idle', guard:'idle', analyst:'idle', courier:'idle' };
+
+  // Chief is always working if there are any actions today
+  if (m.actions_taken > 0) states.chief = 'working';
+
+  // Guard alerts on circuit breaker open
+  if (cb.state === 'open') states.guard = 'alert';
+  else if (m.actions_taken > 0) states.guard = 'working';
+
+  // Check recent actions to determine who's active
+  if (actions.length > 0) {
+    const recent = actions[0];
+    const age = Date.now() - new Date(recent.created_at).getTime();
+    const isRecent = age < 300000; // 5 minutes
+
+    if (isRecent) {
+      const type = recent.action_type || '';
+      if (type.includes('research') || type.includes('discover') || type.includes('search')) states.scout = 'researching';
+      if (type.includes('draft') || type.includes('write') || type.includes('content')) states.writer = 'working';
+      if (type.includes('send') || type.includes('email') || type.includes('outreach')) states.courier = 'sending';
+      if (type.includes('optimize') || type.includes('self_improve') || type.includes('update')) states.analyst = 'working';
+    }
+  }
+
+  // If self-improvement is running, everyone goes to meeting
+  if (d.self_improvement && d.self_improvement.last_update) {
+    const lastUpdate = new Date(d.self_improvement.last_update).getTime();
+    const age = Date.now() - lastUpdate;
+    if (age < 60000) { // Within last minute = meeting just happened
+      for (const k of AGENTS) states[k] = 'meeting';
+    }
+  }
+
+  return states;
+}
+
+async function loadDashboard() {
+  try {
+    const resp = await fetch(DATA_URL + '?t=' + Date.now());
+    if (!resp.ok) throw new Error('No data');
+    const d = await resp.json();
+
+    // Update HUD
+    document.getElementById('lastUpdate').textContent = d.generated_at || '--';
+    const m = d.today_metrics || {};
+    document.getElementById('kActions').textContent = m.actions_taken || 0;
+    const rate = m.actions_taken > 0 ? ((m.actions_succeeded||0) / m.actions_taken * 100).toFixed(0) : '100';
+    document.getElementById('kSuccess').textContent = rate + '%';
+    document.getElementById('kSuccess').className = 'kpi-value ' + (parseInt(rate) >= 80 ? 'green' : 'gold');
+    document.getElementById('kCost').textContent = '$' + (m.total_cost_usd || 0).toFixed(2);
+    const cb = d.circuit_breaker || {};
+    document.getElementById('kCircuit').textContent = (cb.state || 'closed').toUpperCase();
+    document.getElementById('kCircuit').className = 'kpi-value ' + (cb.state === 'open' ? 'red' : 'green');
+    if (d.prompt_version) document.getElementById('kPrompt').textContent = 'v' + d.prompt_version.version;
+
+    // Status dot
+    const sd = document.getElementById('statusDot');
+    sd.innerHTML = cb.state === 'open'
+      ? '<span class="dot r"></span><span class="mono">CIRCUIT OPEN</span>'
+      : '<span class="dot g"></span><span class="mono">ONLINE</span>';
+
+    // Activity feed
+    const actions = d.recent_actions || [];
+    if (actions.length > 0) {
+      document.getElementById('activityFeed').innerHTML = actions.slice(0,15).map(a =>
+        '<div style="padding:1px 0;border-bottom:1px solid rgba(255,255,255,0.03)">' +
+        '<span style="color:var(--text-muted)">' + (a.created_at||'').slice(11,16) + '</span> ' +
+        '<span style="color:' + (a.status==='success'?'var(--green)':'var(--red)') + '">' + (a.action_type||'') + '</span> ' +
+        '<span style="color:var(--text-muted)">' + ((a.target||'').length > 25 ? (a.target||'').slice(0,25)+'...' : (a.target||'')) + '</span>' +
+        '</div>'
+      ).join('');
+    }
+
+    // Agent states
+    const states = deriveAgentStates(d);
+    for (const [id, state] of Object.entries(states)) {
+      setAgentState(id, state);
+    }
+
+  } catch (e) {
+    document.getElementById('activityFeed').innerHTML = '<span style="color:var(--text-muted)">Waiting for data... Run: npm run dashboard</span>';
+    // Show chief as idle, everyone else hidden
+    setAgentState('chief', 'working');
+  }
+}
+
+// Ambient: chief always visible at desk even with no data
+setAgentState('chief', 'working');
+
+loadDashboard();
+setInterval(loadDashboard, 15000);
+</script>
+</body>
+</html>

@@ -1,0 +1,159 @@
+/**
+ * MetaClaw Task System — HT/AT Tracking
+ *
+ * HT = Human Task — things the agent needs FROM its operator
+ * AT = AI Task — things the agent handles autonomously
+ *
+ * The agent reads data/tasks.json on every session start.
+ * HTs guide the human through setup. ATs track agent work.
+ * ATs can be blocked by incomplete HTs.
+ */
+
+import fs from "fs";
+import path from "path";
+
+const TASKS_PATH = path.join(process.cwd(), "data", "tasks.json");
+
+export interface HumanTask {
+  id: string;
+  title: string;
+  description: string;
+  status: "pending" | "completed" | "blocked";
+  priority: "critical" | "high" | "normal" | "low";
+  category: "setup" | "auth" | "config" | "approval" | "review" | "data";
+  created_at: string;
+  completed_at: string | null;
+  created_by: "system" | "agent" | "operator";
+  blocks: string[];          // AT ids blocked until this HT is done
+  depends_on_ht?: string[];  // HT ids that must complete first
+  instructions: string[];    // Exact copy-paste steps
+  deliver_to?: string;       // File path where result should be saved
+  why: string;               // Why this matters — motivates the human
+  outcome: string;           // What gets unlocked once done
+  estimated_minutes: number;
+  notes: string | null;
+}
+
+export interface AITask {
+  id: string;
+  title: string;
+  description?: string;
+  status: "pending" | "in_progress" | "completed" | "failed" | "blocked";
+  priority: "critical" | "high" | "normal" | "low";
+  category?: string;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+  created_by: "system" | "agent" | "cron";
+  requires_ht?: string[];    // HT ids that must be done first
+  blocked_by?: string;       // Single task id blocking this
+  result?: string;
+  cost_usd?: number;
+  tokens_used?: number;
+  notes?: string;
+}
+
+export interface TasksFile {
+  version: string;
+  agent_name: string;
+  template: string;
+  generated_at: string;
+  setup_progress: {
+    phase: "getting_started" | "fine_tuning" | "operational";
+    total_ht: number;
+    completed_ht: number;
+    percent: number;
+  };
+  human_tasks: HumanTask[];
+  ai_tasks: AITask[];
+}
+
+export function loadTasks(): TasksFile {
+  try { return JSON.parse(fs.readFileSync(TASKS_PATH, "utf-8")); }
+  catch { return { version: "1.0.0", agent_name: "", template: "", generated_at: new Date().toISOString(), setup_progress: { phase: "getting_started", total_ht: 0, completed_ht: 0, percent: 0 }, human_tasks: [], ai_tasks: [] }; }
+}
+
+export function saveTasks(tasks: TasksFile): void {
+  // Update progress
+  const total = tasks.human_tasks.length;
+  const completed = tasks.human_tasks.filter(t => t.status === "completed").length;
+  tasks.setup_progress.total_ht = total;
+  tasks.setup_progress.completed_ht = completed;
+  tasks.setup_progress.percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+  const criticalDone = tasks.human_tasks.filter(t => t.priority === "critical" && t.status === "completed").length;
+  const criticalTotal = tasks.human_tasks.filter(t => t.priority === "critical").length;
+  if (criticalDone >= criticalTotal && criticalTotal > 0) tasks.setup_progress.phase = "fine_tuning";
+  if (tasks.setup_progress.percent >= 90) tasks.setup_progress.phase = "operational";
+
+  // Unblock HTs that depend on completed HTs
+  for (const ht of tasks.human_tasks) {
+    if (ht.status === "blocked" && ht.depends_on_ht) {
+      const allDepsComplete = ht.depends_on_ht.every(dep =>
+        tasks.human_tasks.find(t => t.id === dep)?.status === "completed"
+      );
+      if (allDepsComplete) ht.status = "pending";
+    }
+  }
+
+  // Unblock ATs whose HT requirements are met
+  for (const at of tasks.ai_tasks) {
+    if (at.status === "blocked" && at.requires_ht) {
+      const allHtDone = at.requires_ht.every(htId =>
+        tasks.human_tasks.find(t => t.id === htId)?.status === "completed"
+      );
+      if (allHtDone) at.status = "pending";
+    }
+  }
+
+  fs.writeFileSync(TASKS_PATH, JSON.stringify(tasks, null, 2));
+}
+
+export function getPendingHTs(tasks: TasksFile): HumanTask[] {
+  return tasks.human_tasks.filter(t => t.status === "pending")
+    .sort((a, b) => priorityOrder(a.priority) - priorityOrder(b.priority));
+}
+
+export function getPendingATs(tasks: TasksFile): AITask[] {
+  return tasks.ai_tasks.filter(t => t.status === "pending")
+    .sort((a, b) => priorityOrder(a.priority) - priorityOrder(b.priority));
+}
+
+export function completeHT(tasks: TasksFile, htId: string, notes?: string): void {
+  const ht = tasks.human_tasks.find(t => t.id === htId);
+  if (ht) {
+    ht.status = "completed";
+    ht.completed_at = new Date().toISOString();
+    if (notes) ht.notes = notes;
+  }
+  saveTasks(tasks);
+}
+
+export function completeAT(tasks: TasksFile, atId: string, result: string, cost?: number): void {
+  const at = tasks.ai_tasks.find(t => t.id === atId);
+  if (at) {
+    at.status = "completed";
+    at.completed_at = new Date().toISOString();
+    at.result = result;
+    if (cost !== undefined) at.cost_usd = cost;
+  }
+  saveTasks(tasks);
+}
+
+export function addHT(tasks: TasksFile, ht: Omit<HumanTask, "id" | "created_at" | "completed_at" | "notes">): string {
+  const id = `ht-${String(tasks.human_tasks.length + 1).padStart(3, "0")}`;
+  tasks.human_tasks.push({ ...ht, id, created_at: new Date().toISOString(), completed_at: null, notes: null });
+  saveTasks(tasks);
+  return id;
+}
+
+export function addAT(tasks: TasksFile, at: Omit<AITask, "id" | "created_at">): string {
+  const id = `at-${String(tasks.ai_tasks.length + 1).padStart(3, "0")}`;
+  tasks.ai_tasks.push({ ...at, id, created_at: new Date().toISOString() });
+  saveTasks(tasks);
+  return id;
+}
+
+function priorityOrder(p: string): number {
+  return { critical: 0, high: 1, normal: 2, low: 3 }[p] ?? 2;
+}

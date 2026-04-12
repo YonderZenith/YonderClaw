@@ -1,0 +1,35 @@
+{
+  "name": "boardroom",
+  "displayName": "Boardroom — Agent Meetings",
+  "version": "1.0.0",
+  "description": "Multi-agent meeting system: scheduling, intelligent turn-taking, persistent attendance, post-meeting artifacts",
+  "category": "collaboration",
+  "alwaysInstall": true,
+  "engines": { "metaclaw": ">=3.3.0" },
+  "requires": { "modules": ["core"] },
+  "contributes": {
+    "boardroom": {
+      "types.ts.txt": "boardroom/types.ts",
+      "db.ts.txt": "boardroom/db.ts",
+      "turn.ts.txt": "boardroom/turn.ts",
+      "turn-v2.ts.txt": "boardroom/turn-v2.ts",
+      "server.ts.txt": "boardroom/server.ts",
+      "client.ts.txt": "boardroom/client.ts",
+      "summons.ts.txt": "boardroom/summons.ts",
+      "meeting-agent.ts.txt": "boardroom/meeting-agent.ts",
+      "meeting-scheduler.ts.txt": "boardroom/meeting-scheduler.ts",
+      "start-boardroom.bat.txt": "boardroom/start-boardroom.bat"
+    },
+    "scripts": {
+      "meeting-check.bat.txt": "scripts/meeting-check.bat"
+    },
+    "npmScripts": {
+      "boardroom": "tsx boardroom/server.ts",
+      "boardroom-start": "tsx boardroom/server.ts --port 7890",
+      "meeting-check": "tsx boardroom/meeting-scheduler.ts"
+    },
+    "claudeMd": ["boardroom"],
+    "directories": ["boardroom"]
+  },
+  "placeholders": ["__PROJECT_DIR__", "__COORDINATOR_URL__"]
+}

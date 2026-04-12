@@ -1,0 +1,29 @@
+{
+  "name": "outreach",
+  "displayName": "Outreach Agent",
+  "version": "1.0.0",
+  "description": "Email prospecting, follow-ups, inbox monitoring, morning reports, reply classification",
+  "category": "agent-type",
+  "engines": { "metaclaw": ">=3.3.0" },
+  "requires": { "modules": ["core", "scheduler"] },
+  "contributes": {
+    "src": {
+      "agent-outreach.ts.txt": "src/agent.ts",
+      "inbox-agent.ts.txt": "src/inbox-agent.ts",
+      "morning-report.ts.txt": "src/morning-report.ts"
+    },
+    "npmScripts": {
+      "start": "tsx src/agent.ts",
+      "dry-run": "tsx src/agent.ts --dry-run",
+      "check-inbox": "tsx src/inbox-agent.ts",
+      "morning-report": "tsx src/morning-report.ts"
+    },
+    "claudeMd": ["outreach-commands"],
+    "dependencies": {
+      "nodemailer": "latest",
+      "imapflow": "latest",
+      "mailparser": "latest"
+    }
+  },
+  "placeholders": ["__AGENT_NAME__", "__SESSION_NAME__", "__SYSTEM_PROMPT__"]
+}

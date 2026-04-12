@@ -1,0 +1,26 @@
+@echo off
+setlocal enabledelayedexpansion
+title MetaClaw Boardroom Coordinator
+
+set PATH=C:\Program Files\nodejs;%USERPROFILE%\AppData\Roaming\npm;%USERPROFILE%\.local\bin;%PATH%
+
+echo.
+echo   ==========================================
+echo   MetaClaw Boardroom Coordinator
+echo   ==========================================
+echo.
+
+cd /d "__PROJECT_DIR__"
+
+set "PORT=7890"
+if not "%1"=="" set "PORT=%1"
+
+echo   Starting on port %PORT%...
+echo   Agents can connect from any machine on the network.
+echo.
+
+npx tsx boardroom/server.ts --port %PORT%
+
+echo.
+echo   Boardroom coordinator stopped.
+pause

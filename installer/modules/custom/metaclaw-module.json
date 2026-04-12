@@ -1,0 +1,15 @@
+{
+  "name": "custom",
+  "displayName": "Custom Agent",
+  "version": "1.0.0",
+  "description": "General-purpose agent — describe what you need, AI configures it",
+  "category": "agent-type",
+  "engines": { "metaclaw": ">=3.3.0" },
+  "requires": { "modules": ["core", "scheduler"] },
+  "contributes": {
+    "src": { "agent-custom.ts.txt": "src/agent.ts" },
+    "npmScripts": { "start": "tsx src/agent.ts", "dry-run": "tsx src/agent.ts --dry-run" },
+    "claudeMd": ["custom-commands"]
+  },
+  "placeholders": ["__AGENT_NAME__", "__SESSION_NAME__", "__SYSTEM_PROMPT__"]
+}

@@ -1,0 +1,76 @@
+/**
+ * MetaClaw Boardroom — Meeting Summons
+ * Drops invitation JSON into agent's shared inbox
+ */
+
+import fs from "fs";
+import path from "path";
+import type { MeetingSummons } from "./types.js";
+
+const INBOX_ROOT = "__INBOX_ROOT__";
+
+export function summonAgent(
+  targetAgent: string,
+  meetingId: string,
+  topic: string,
+  coordinatorUrl: string,
+  fromAgent: string
+): string {
+  const inboxPath = path.join(INBOX_ROOT, targetAgent.toLowerCase());
+  fs.mkdirSync(inboxPath, { recursive: true });
+
+  const ts = new Date().toISOString();
+  const slug = ts.replace(/[:.]/g, "-");
+  const filename = `${slug}_boardroom-summons.json`;
+  const filepath = path.join(inboxPath, filename);
+
+  const summons: MeetingSummons = {
+    id: `mtg_summons_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`,
+    from: fromAgent,
+    to: targetAgent,
+    timestamp: ts,
+    subject: `Boardroom Meeting: ${topic}`,
+    body: [
+      `You are invited to a boardroom meeting.`,
+      ``,
+      `Topic: ${topic}`,
+      `Meeting ID: ${meetingId}`,
+      `Coordinator: ${coordinatorUrl}`,
+      ``,
+      `To join, run: npx tsx boardroom/join.ts ${meetingId}`,
+      `Or import BoardroomClient and call joinMeeting("${meetingId}")`,
+    ].join("\n"),
+    type: "request",
+    priority: "high",
+    boardroom: {
+      meeting_id: meetingId,
+      coordinator_url: coordinatorUrl,
+      topic: topic,
+    },
+  };
+
+  fs.writeFileSync(filepath, JSON.stringify(summons, null, 2));
+  return filepath;
+}
+
+export function summonMultiple(
+  agents: string[],
+  meetingId: string,
+  topic: string,
+  coordinatorUrl: string,
+  fromAgent: string
+): string[] {
+  return agents
+    .filter(a => a.toLowerCase() !== fromAgent.toLowerCase())
+    .map(a => summonAgent(a, meetingId, topic, coordinatorUrl, fromAgent));
+}
+
+export function detectSummons(inboxPath: string): MeetingSummons[] {
+  if (!fs.existsSync(inboxPath)) return [];
+  const files = fs.readdirSync(inboxPath).filter(f => f.includes("boardroom-summons"));
+  return files.map(f => {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(inboxPath, f), "utf-8"));
+    } catch { return null; }
+  }).filter(Boolean) as MeetingSummons[];
+}

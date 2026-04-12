@@ -1,0 +1,51 @@
+/**
+ * MetaClaw Swarm — Shared Types
+ * QIS-inspired bucket system for intelligence sharing
+ */
+
+export interface OutcomePacket {
+  v: 1;
+  bucket: string;                    // canonical problem path e.g. "outreach.email.cold.response_rate_low"
+  bucket_id: string;                 // SHA-256 hash of bucket path (first 16 hex chars)
+  ts: number;                        // Unix timestamp
+  agent_id: string;                  // anonymized, e.g. "mc_anon_7f3a"
+  outcome: {
+    signal: "positive" | "negative" | "neutral";
+    confidence: number;              // 0-1
+    insight: string;                 // the actual knowledge
+    context: Record<string, any>;    // structured metadata for filtering
+    metrics?: {
+      sample_size?: number;
+      effect_size?: number;
+      stat_sig?: boolean;
+    };
+  };
+  sig?: string;                      // Ed25519 signature (future)
+}
+
+export interface BucketMeta {
+  bucket_id: string;
+  path: string;                      // canonical problem path
+  domain: string;                    // first segment e.g. "outreach"
+  title: string;                     // human-readable
+  description: string;
+  conditions: string[];              // when this bucket applies
+  exclusions: string[];              // when it does NOT apply
+  packet_count: number;
+  last_updated: string;
+  confidence_avg: number;
+}
+
+export interface BucketIndex {
+  version: number;
+  updated_at: string;
+  buckets: BucketMeta[];
+}
+
+export interface SwarmConfig {
+  relay_url: string;
+  agent_id: string;
+  enabled: boolean;
+  publish: boolean;                  // contribute insights to meta swarm
+  subscribe: boolean;                // pull insights from meta swarm
+}

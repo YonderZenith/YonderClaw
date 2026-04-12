@@ -1,0 +1,25 @@
+{
+  "name": "swarm",
+  "displayName": "QIS Intelligence Network",
+  "version": "1.0.0",
+  "description": "Shared intelligence buckets — local personal swarm + global MetaClaw network. The QIS proof of concept.",
+  "category": "intelligence",
+  "alwaysInstall": true,
+  "engines": { "metaclaw": ">=3.3.0" },
+  "requires": { "modules": ["core"] },
+  "contributes": {
+    "swarm": {
+      "types.ts.txt": "swarm/types.ts",
+      "swarm-client.ts.txt": "swarm/swarm-client.ts",
+      "relay-server.ts.txt": "swarm/relay-server.ts",
+      "dht-client.ts.txt": "swarm/dht-client.ts"
+    },
+    "npmScripts": {
+      "swarm-relay": "tsx swarm/relay-server.ts",
+      "swarm-stats": "tsx swarm/relay-server.ts --port 7891"
+    },
+    "claudeMd": ["swarm"],
+    "directories": ["swarm"]
+  },
+  "placeholders": ["__AGENT_NAME__", "__ENABLE_LOCAL__", "__ENABLE_GLOBAL__", "__RELAY_URL__"]
+}

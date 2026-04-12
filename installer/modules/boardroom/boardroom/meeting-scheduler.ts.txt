@@ -1,0 +1,194 @@
+/**
+ * MetaClaw Boardroom — Meeting Scheduler
+ *
+ * Scans inbox for boardroom summons with scheduled times.
+ * Sets timers to auto-join at the EXACT scheduled time.
+ * No early joins. No late joins. Precise.
+ *
+ * Usage:
+ *   Called at the start of every agent cycle:
+ *   npx tsx boardroom/meeting-scheduler.ts <agent_name>
+ *
+ *   Or run as a persistent watcher:
+ *   npx tsx boardroom/meeting-scheduler.ts <agent_name> --watch
+ */
+
+import fs from "fs";
+import path from "path";
+
+const agentName = process.argv[2];
+const watchMode = process.argv.includes("--watch");
+
+if (!agentName) {
+  console.error("Usage: npx tsx boardroom/meeting-scheduler.ts <agent_name> [--watch]");
+  process.exit(1);
+}
+
+const INBOX_PATH = path.join("__INBOX_ROOT__", agentName.toLowerCase());
+const PENDING_FILE = path.join(process.cwd(), "data", "pending-meetings.json");
+
+interface PendingMeeting {
+  meeting_id: string;
+  coordinator_url: string;
+  topic: string;
+  scheduled_time: string;  // ISO 8601 UTC
+  from: string;
+  timer_set: boolean;
+}
+
+function loadPending(): PendingMeeting[] {
+  try { return JSON.parse(fs.readFileSync(PENDING_FILE, "utf-8")); } catch { return []; }
+}
+
+function savePending(meetings: PendingMeeting[]) {
+  fs.mkdirSync(path.dirname(PENDING_FILE), { recursive: true });
+  fs.writeFileSync(PENDING_FILE, JSON.stringify(meetings, null, 2));
+}
+
+/**
+ * Scan inbox for boardroom summons with scheduled times
+ */
+function scanForSummons(): PendingMeeting[] {
+  if (!fs.existsSync(INBOX_PATH)) return [];
+  const files = fs.readdirSync(INBOX_PATH).filter(f => f.endsWith(".json"));
+  const found: PendingMeeting[] = [];
+
+  for (const file of files) {
+    try {
+      const msg = JSON.parse(fs.readFileSync(path.join(INBOX_PATH, file), "utf-8"));
+      if (msg.boardroom?.scheduled_time && msg.boardroom?.meeting_id) {
+        found.push({
+          meeting_id: msg.boardroom.meeting_id,
+          coordinator_url: msg.boardroom.coordinator_url || "http://localhost:7890",
+          topic: msg.boardroom.topic || msg.subject || "Meeting",
+          scheduled_time: msg.boardroom.scheduled_time,
+          from: msg.from || "unknown",
+          timer_set: false,
+        });
+      }
+    } catch {}
+  }
+  return found;
+}
+
+/**
+ * Join a meeting at the exact scheduled time
+ */
+async function joinAtExactTime(meeting: PendingMeeting) {
+  const scheduledMs = new Date(meeting.scheduled_time).getTime();
+  const now = Date.now();
+  const waitMs = scheduledMs - now;
+
+  if (waitMs < -300000) {
+    // More than 5 min past — meeting probably over
+    console.log(`[${agentName}] Meeting "${meeting.topic}" is ${Math.round(-waitMs/60000)} min past scheduled time. Skipping.`);
+    return;
+  }
+
+  if (waitMs > 0) {
+    console.log(`[${agentName}] Meeting "${meeting.topic}" in ${Math.round(waitMs/60000)} min. Waiting...`);
+    await new Promise(r => setTimeout(r, waitMs));
+  }
+
+  console.log(`[${agentName}] === JOINING MEETING: ${meeting.topic} ===`);
+
+  try {
+    // Join
+    const joinRes = await fetch(`${meeting.coordinator_url}/meetings/${meeting.meeting_id}/join`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agent_name: agentName, expertise: [] }),
+    });
+    const joinData = await joinRes.json();
+    console.log(`[${agentName}] Joined. Entering meeting loop...`);
+
+    // Meeting loop — stay until meeting ends
+    let lastMsgId = 0;
+    while (true) {
+      try {
+        const pollRes = await fetch(
+          `${meeting.coordinator_url}/meetings/${meeting.meeting_id}/poll?agent=${encodeURIComponent(agentName)}&since=${lastMsgId}`
+        );
+        const data = await pollRes.json();
+
+        if (data.meeting_status === "ended") {
+          console.log(`[${agentName}] Meeting ended.`);
+          break;
+        }
+
+        // Log new messages
+        if (data.messages?.length > 0) {
+          for (const msg of data.messages) {
+            lastMsgId = Math.max(lastMsgId, msg.id);
+            if (msg.agent_name !== agentName) {
+              console.log(`  [${msg.agent_name}]: ${msg.content.slice(0, 120)}...`);
+            }
+          }
+        }
+
+        // Turn signal
+        if (data.turn_signal?.should_speak) {
+          console.log(`[${agentName}] MY TURN (score: ${data.turn_signal.score || data.turn_signal.final_score}, reason: ${data.turn_signal.reason})`);
+          // In a real agent session, this is where the LLM generates a response
+          // The meeting-agent.ts or the Claude session handles the actual speaking
+        }
+      } catch (err) {
+        console.error(`[${agentName}] Poll error:`, (err as Error).message);
+      }
+
+      await new Promise(r => setTimeout(r, 2000));
+    }
+  } catch (err) {
+    console.error(`[${agentName}] Join failed:`, (err as Error).message);
+  }
+
+  // Clean up: remove from pending
+  const pending = loadPending().filter(m => m.meeting_id !== meeting.meeting_id);
+  savePending(pending);
+}
+
+/**
+ * Main: scan, schedule, join
+ */
+async function main() {
+  // Load existing pending meetings
+  let pending = loadPending();
+
+  // Scan inbox for new summons
+  const newSummons = scanForSummons();
+  for (const s of newSummons) {
+    if (!pending.find(p => p.meeting_id === s.meeting_id)) {
+      pending.push(s);
+      console.log(`[${agentName}] New meeting scheduled: "${s.topic}" at ${s.scheduled_time} from ${s.from}`);
+    }
+  }
+  savePending(pending);
+
+  // Check for meetings that should be joined NOW (within next 5 min)
+  const now = Date.now();
+  const imminent = pending.filter(m => {
+    const scheduledMs = new Date(m.scheduled_time).getTime();
+    const diff = scheduledMs - now;
+    return diff < 300000 && diff > -300000; // Within 5 min window
+  });
+
+  if (imminent.length > 0) {
+    console.log(`[${agentName}] ${imminent.length} meeting(s) imminent. Joining...`);
+    // Join the first one (if multiple, join highest priority)
+    await joinAtExactTime(imminent[0]);
+  } else if (pending.length > 0) {
+    const next = pending.sort((a, b) => new Date(a.scheduled_time).getTime() - new Date(b.scheduled_time).getTime())[0];
+    const minUntil = Math.round((new Date(next.scheduled_time).getTime() - now) / 60000);
+    console.log(`[${agentName}] Next meeting: "${next.topic}" in ${minUntil} min.`);
+
+    if (watchMode) {
+      // In watch mode, wait for the meeting
+      console.log(`[${agentName}] Watch mode — waiting for meeting time...`);
+      await joinAtExactTime(next);
+    }
+  } else {
+    console.log(`[${agentName}] No pending meetings.`);
+  }
+}
+
+main().catch(console.error);

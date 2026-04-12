@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 180">
+  <defs>
+    <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#00BEEA;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#00D9FF;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#00BEEA;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#FFD700;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#00BEEA;stop-opacity:1" />
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="softGlow">
+      <feGaussianBlur stdDeviation="8" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="700" height="180" fill="#0a0e17" rx="12"/>
+
+  <!-- Subtle grid lines -->
+  <g opacity="0.05" stroke="#00BEEA">
+    <line x1="0" y1="45" x2="700" y2="45"/>
+    <line x1="0" y1="90" x2="700" y2="90"/>
+    <line x1="0" y1="135" x2="700" y2="135"/>
+    <line x1="175" y1="0" x2="175" y2="180"/>
+    <line x1="350" y1="0" x2="350" y2="180"/>
+    <line x1="525" y1="0" x2="525" y2="180"/>
+  </g>
+
+  <!-- Decorative nodes -->
+  <circle cx="80" cy="40" r="3" fill="#00BEEA" opacity="0.3" filter="url(#softGlow)"/>
+  <circle cx="620" cy="140" r="3" fill="#00BEEA" opacity="0.3" filter="url(#softGlow)"/>
+  <circle cx="150" cy="150" r="2" fill="#00D9FF" opacity="0.2"/>
+  <circle cx="550" cy="30" r="2" fill="#00D9FF" opacity="0.2"/>
+  <circle cx="650" cy="60" r="2" fill="#FFD700" opacity="0.15"/>
+  <circle cx="50" cy="120" r="2" fill="#FFD700" opacity="0.15"/>
+
+  <!-- Decorative connection lines -->
+  <line x1="80" y1="40" x2="150" y2="70" stroke="#00BEEA" stroke-width="0.5" opacity="0.1"/>
+  <line x1="550" y1="30" x2="620" y2="60" stroke="#00BEEA" stroke-width="0.5" opacity="0.1"/>
+  <line x1="550" y1="140" x2="620" y2="140" stroke="#00D9FF" stroke-width="0.5" opacity="0.1"/>
+
+  <!-- Claw icon -->
+  <g transform="translate(115, 55)" filter="url(#glow)">
+    <path d="M0 35 Q5 0 20 10 Q25 20 20 35" fill="none" stroke="url(#cyanGrad)" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M15 30 Q20 -5 35 5 Q40 15 35 35" fill="none" stroke="url(#cyanGrad)" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M30 30 Q35 0 50 10 Q55 20 50 35" fill="none" stroke="url(#cyanGrad)" stroke-width="2.5" stroke-linecap="round"/>
+    <!-- Palm arc -->
+    <path d="M5 35 Q25 55 45 35" fill="none" stroke="url(#goldGrad)" stroke-width="2" stroke-linecap="round"/>
+  </g>
+
+  <!-- Main title -->
+  <text x="185" y="95" font-family="'Segoe UI', system-ui, -apple-system, sans-serif" font-size="56" font-weight="700" fill="url(#cyanGrad)" filter="url(#glow)" letter-spacing="-1">
+    MetaClaw
+  </text>
+
+  <!-- Version badge -->
+  <rect x="470" y="70" width="70" height="24" rx="12" fill="#FFD700" opacity="0.15"/>
+  <rect x="470" y="70" width="70" height="24" rx="12" fill="none" stroke="#FFD700" stroke-width="1" opacity="0.4"/>
+  <text x="505" y="87" font-family="'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="600" fill="#FFD700" text-anchor="middle">v3.3.0</text>
+
+  <!-- Tagline -->
+  <text x="188" y="125" font-family="'Segoe UI', system-ui, sans-serif" font-size="16" fill="#7F8C8D" letter-spacing="3">
+    AUTONOMOUS AI AGENTS
+  </text>
+
+  <!-- Bottom accent line -->
+  <rect x="185" y="140" width="120" height="2" rx="1" fill="url(#cyanGrad)" opacity="0.6"/>
+  <rect x="315" y="140" width="40" height="2" rx="1" fill="url(#goldGrad)" opacity="0.4"/>
+
+  <!-- Yonder Zenith -->
+  <text x="188" y="165" font-family="'Segoe UI', system-ui, sans-serif" font-size="11" fill="#7F8C8D" opacity="0.6">
+    by Yonder Zenith LLC
+  </text>
+</svg>

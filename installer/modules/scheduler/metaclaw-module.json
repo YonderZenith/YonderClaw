@@ -1,0 +1,27 @@
+{
+  "name": "scheduler",
+  "displayName": "Scheduler — Cron & Launch Scripts",
+  "version": "1.0.0",
+  "description": "Windows Task Scheduler integration, session launch scripts, autonomous cycle automation",
+  "category": "automation",
+  "alwaysInstall": true,
+  "engines": { "metaclaw": ">=3.3.0" },
+  "requires": { "modules": ["core"] },
+  "contributes": {
+    "src": {
+      "cron-manager.ts.txt": "src/cron-manager.ts"
+    },
+    "scripts": {
+      "launch.bat.txt": "scripts/launch.bat",
+      "agent-cycle.bat.txt": "scripts/agent-cycle.bat",
+      "detect-session.bat.txt": "scripts/detect-session.bat"
+    },
+    "npmScripts": {
+      "crons": "tsx src/cron-manager.ts",
+      "crons-setup": "tsx src/cron-manager.ts setup",
+      "crons-list": "tsx src/cron-manager.ts list"
+    },
+    "claudeMd": ["scripts"]
+  },
+  "placeholders": ["__AGENT_NAME__", "__SESSION_NAME__", "__PROJECT_DIR__", "__ENCODED_PATH__", "__SELF_UPDATE_INTERVAL__"]
+}

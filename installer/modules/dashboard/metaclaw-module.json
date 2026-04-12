@@ -1,0 +1,23 @@
+{
+  "name": "dashboard",
+  "displayName": "Dashboard — Command Center",
+  "version": "1.0.0",
+  "description": "HTML Command Center with real-time metrics, KPIs per agent type, Edge app-mode launcher",
+  "category": "ui",
+  "alwaysInstall": true,
+  "engines": { "metaclaw": ">=3.3.0" },
+  "requires": { "modules": ["core"] },
+  "contributes": {
+    "src": {
+      "update-dashboard.ts.txt": "src/update-dashboard.ts"
+    },
+    "scripts": {
+      "build-dashboard.cjs.txt": "scripts/build-dashboard.cjs"
+    },
+    "npmScripts": {
+      "dashboard": "tsx src/update-dashboard.ts && node scripts/build-dashboard.cjs"
+    },
+    "claudeMd": ["dashboard"]
+  },
+  "placeholders": ["__AGENT_NAME__", "__CLAW_TYPE__", "__PROJECT_DIR__"]
+}

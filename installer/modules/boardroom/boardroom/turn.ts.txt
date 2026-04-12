@@ -1,0 +1,208 @@
+/**
+ * MetaClaw Boardroom — Intelligent Turn-Taking Algorithm
+ * 4-signal scoring: direct address (40%), expertise (30%), recency (20%), pending (10%)
+ */
+
+import type Database from "better-sqlite3";
+import type { TurnScore } from "./types.js";
+import { getRecentMessages, getTurnStates, getParticipants } from "./db.js";
+
+const WEIGHTS = {
+  direct_address: 0.40,
+  expertise: 0.30,
+  recency: 0.20,
+  pending_flag: 0.10,
+};
+
+const THRESHOLD = 30;
+
+// Common words to skip when matching expertise
+const STOP_WORDS = new Set([
+  "the", "and", "for", "are", "but", "not", "you", "all", "can", "had",
+  "her", "was", "one", "our", "out", "has", "have", "this", "that", "with",
+  "they", "been", "from", "will", "what", "when", "make", "like", "just",
+  "over", "such", "take", "than", "them", "very", "some", "could", "other",
+  "into", "more", "also", "back", "after", "should", "would", "about",
+  "think", "know", "going", "want", "need", "meeting", "agent", "yeah",
+]);
+
+export function scoreTurns(
+  meetingId: string,
+  db: Database.Database,
+  excludeAgent?: string
+): TurnScore[] {
+  const participants = getParticipants(db, meetingId);
+  const activeParticipants = participants.filter((p: any) => p.status === "active");
+  const recentMessages = getRecentMessages(db, meetingId, 3);
+  const turnStates = getTurnStates(db, meetingId);
+  const turnMap = new Map(turnStates.map((t: any) => [t.agent_name, t]));
+
+  const scores: TurnScore[] = [];
+
+  for (const p of activeParticipants) {
+    const name = p.agent_name;
+    if (name === excludeAgent) continue;
+
+    const ts = turnMap.get(name) || { wants_turn: 0, last_spoke_at: null, speak_count: 0 };
+    const expertise: string[] = safeParseJson(p.expertise, []);
+
+    // Signal 1: Direct Address
+    const addressScore = scoreDirectAddress(name, recentMessages);
+
+    // Signal 2: Expertise Relevance
+    const expertiseScore = scoreExpertise(expertise, recentMessages);
+
+    // Signal 3: Recency
+    const recencyScore = scoreRecency(ts, turnStates);
+
+    // Signal 4: Pending Flag
+    const pendingScore = ts.wants_turn ? 100 : 0;
+
+    const composite = Math.round(
+      addressScore * WEIGHTS.direct_address +
+      expertiseScore * WEIGHTS.expertise +
+      recencyScore * WEIGHTS.recency +
+      pendingScore * WEIGHTS.pending_flag
+    );
+
+    const reasons: string[] = [];
+    if (addressScore > 50) reasons.push("addressed directly");
+    if (expertiseScore > 50) reasons.push("expertise match");
+    if (recencyScore > 70) reasons.push("hasn't spoken recently");
+    if (ts.wants_turn) reasons.push("requested turn");
+
+    scores.push({
+      agent_name: name,
+      score: composite,
+      reason: reasons.length > 0 ? reasons.join(", ") : "waiting",
+      should_speak: composite >= THRESHOLD,
+    });
+  }
+
+  // Sort by score descending, then by speak_count ascending (less talkative wins ties)
+  scores.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    const tsA = turnMap.get(a.agent_name);
+    const tsB = turnMap.get(b.agent_name);
+    return (tsA?.speak_count || 0) - (tsB?.speak_count || 0);
+  });
+
+  return scores;
+}
+
+export function getNextSpeaker(
+  meetingId: string,
+  db: Database.Database,
+  lastSpeaker?: string
+): TurnScore | null {
+  const scores = scoreTurns(meetingId, db, lastSpeaker);
+  return scores.length > 0 && scores[0].should_speak ? scores[0] : null;
+}
+
+export function scoreForAgent(
+  meetingId: string,
+  agentName: string,
+  db: Database.Database
+): TurnScore {
+  const all = scoreTurns(meetingId, db);
+  return all.find(s => s.agent_name === agentName) || {
+    agent_name: agentName,
+    score: 0,
+    reason: "not in meeting",
+    should_speak: false,
+  };
+}
+
+// --- Signal Scoring Functions ---
+
+function scoreDirectAddress(agentName: string, recentMessages: any[]): number {
+  if (recentMessages.length === 0) return 0;
+
+  const nameLower = agentName.toLowerCase();
+  let best = 0;
+
+  for (const msg of recentMessages) {
+    // Check explicit addresses field
+    const addresses: string[] = safeParseJson(msg.addresses, []);
+    if (addresses.some((a: string) => a.toLowerCase() === nameLower)) {
+      return 100; // Explicitly addressed
+    }
+
+    // Check content for name mentions
+    const contentLower = msg.content.toLowerCase();
+    if (contentLower.includes(nameLower)) {
+      best = Math.max(best, 70);
+    }
+
+    // Check if it's a question (increases likelihood someone should respond)
+    if (msg.msg_type === "question" && msg.agent_name !== agentName) {
+      best = Math.max(best, 30);
+    }
+  }
+
+  return best;
+}
+
+function scoreExpertise(expertise: string[], recentMessages: any[]): number {
+  if (expertise.length === 0 || recentMessages.length === 0) return 0;
+
+  const expertiseLower = new Set(expertise.map(e => e.toLowerCase()));
+
+  // Extract meaningful words from recent messages
+  const messageWords = new Set<string>();
+  for (const msg of recentMessages) {
+    const words = msg.content.toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, " ")
+      .split(/\s+/)
+      .filter((w: string) => w.length > 3 && !STOP_WORDS.has(w));
+    words.forEach((w: string) => messageWords.add(w));
+  }
+
+  // Count matches
+  let matches = 0;
+  for (const tag of expertiseLower) {
+    // Check exact match and partial match (tag "pricing" matches word "pricing")
+    for (const word of messageWords) {
+      if (word.includes(tag) || tag.includes(word)) {
+        matches++;
+        break;
+      }
+    }
+  }
+
+  return Math.min(100, Math.round((matches / expertise.length) * 100));
+}
+
+function scoreRecency(turnState: any, allTurnStates: any[]): number {
+  // Never spoken = maximum recency score
+  if (!turnState.last_spoke_at) return 100;
+
+  const lastSpoke = new Date(turnState.last_spoke_at + "Z").getTime();
+  const now = Date.now();
+
+  // Find the most recent speaker's time
+  let mostRecent = 0;
+  let oldest = Infinity;
+  for (const ts of allTurnStates) {
+    if (ts.last_spoke_at) {
+      const t = new Date(ts.last_spoke_at + "Z").getTime();
+      mostRecent = Math.max(mostRecent, t);
+      oldest = Math.min(oldest, t);
+    }
+  }
+
+  if (mostRecent === oldest) return 50; // Everyone spoke at the same time
+
+  // Scale: most recent speaker = 0, oldest speaker = 100
+  const range = mostRecent - oldest;
+  if (range === 0) return 50;
+  return Math.round(((mostRecent - lastSpoke) / range) * 100);
+}
+
+function safeParseJson(val: any, fallback: any): any {
+  if (Array.isArray(val)) return val;
+  if (typeof val === "string") {
+    try { return JSON.parse(val); } catch { return fallback; }
+  }
+  return fallback;
+}

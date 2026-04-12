@@ -1,0 +1,196 @@
+/**
+ * MetaClaw — Capability Scanner
+ *
+ * Deterministic, NON-LLM scan of what this agent can actually do.
+ * Runs in cron pre-flight before the agent starts thinking.
+ * Writes raw inventory to memory/capabilities/_auto.md.
+ *
+ * The agent diffs this against memory/capabilities/tools.md to detect drift.
+ * Guarantee: the agent cannot forget capabilities that exist on disk.
+ */
+
+import fs from "fs";
+import path from "path";
+
+const PROJECT_ROOT = process.cwd();
+const OUTPUT = path.join(PROJECT_ROOT, "memory", "capabilities", "_auto.md");
+
+interface Inventory {
+  scripts: string[];
+  srcFiles: string[];
+  npmScripts: string[];
+  dependencies: string[];
+  allowedTools: string[];
+  mcpServers: string[];
+  envVars: string[];
+  dataFiles: string[];
+  modules: any[];
+  boardroom: boolean;
+  swarm: boolean;
+  timestamp: string;
+}
+
+function scan(): Inventory {
+  const inv: Inventory = {
+    scripts: [],
+    srcFiles: [],
+    npmScripts: [],
+    dependencies: [],
+    allowedTools: [],
+    mcpServers: [],
+    envVars: [],
+    dataFiles: [],
+    modules: [],
+    boardroom: false,
+    swarm: false,
+    timestamp: new Date().toISOString(),
+  };
+
+  // scripts/ directory
+  try {
+    const scriptsDir = path.join(PROJECT_ROOT, "scripts");
+    if (fs.existsSync(scriptsDir)) {
+      inv.scripts = fs.readdirSync(scriptsDir).filter(f => !f.startsWith("."));
+    }
+  } catch {}
+
+  // src/ directory
+  try {
+    const srcDir = path.join(PROJECT_ROOT, "src");
+    if (fs.existsSync(srcDir)) {
+      inv.srcFiles = fs.readdirSync(srcDir).filter(f => f.endsWith(".ts"));
+    }
+  } catch {}
+
+  // package.json scripts + deps
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, "package.json"), "utf-8"));
+    inv.npmScripts = Object.keys(pkg.scripts || {});
+    inv.dependencies = Object.keys(pkg.dependencies || {});
+  } catch {}
+
+  // .claude/settings.json allowed tools
+  try {
+    const settings = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, ".claude", "settings.json"), "utf-8"));
+    inv.allowedTools = settings.permissions?.allow || [];
+  } catch {}
+
+  // .mcp.json MCP servers
+  try {
+    const mcp = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, ".mcp.json"), "utf-8"));
+    inv.mcpServers = Object.keys(mcp.mcpServers || {});
+  } catch {}
+
+  // Env vars (names only, no values) matching API_KEY/TOKEN/SECRET
+  try {
+    const envPath = path.join(PROJECT_ROOT, ".env");
+    if (fs.existsSync(envPath)) {
+      const envContent = fs.readFileSync(envPath, "utf-8");
+      const matches = envContent.match(/^([A-Z_]+(?:API_KEY|TOKEN|SECRET|PASS|USER|HOST|URL))=/gm) || [];
+      inv.envVars = matches.map(m => m.replace(/=$/, ""));
+    }
+  } catch {}
+
+  // data/ files
+  try {
+    const dataDir = path.join(PROJECT_ROOT, "data");
+    if (fs.existsSync(dataDir)) {
+      inv.dataFiles = fs.readdirSync(dataDir).filter(f => !f.startsWith(".") && !f.includes("-wal") && !f.includes("-shm"));
+    }
+  } catch {}
+
+  // Modules installed
+  try {
+    const modulesJson = JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, "data", "modules.json"), "utf-8"));
+    inv.modules = modulesJson.modules || [];
+  } catch {}
+
+  // Feature detection
+  inv.boardroom = fs.existsSync(path.join(PROJECT_ROOT, "boardroom", "client.ts"));
+  inv.swarm = fs.existsSync(path.join(PROJECT_ROOT, "swarm", "swarm-client.ts"));
+
+  return inv;
+}
+
+function format(inv: Inventory): string {
+  const lines: string[] = [];
+  lines.push("# Auto-Generated Capability Inventory");
+  lines.push(`**Generated:** ${inv.timestamp}`);
+  lines.push("**Source:** Deterministic scan (not LLM — cannot hallucinate)");
+  lines.push("");
+  lines.push("If something in CAPABILITIES.md disagrees with this file, THIS FILE IS RIGHT.");
+  lines.push("This is a forensic inventory of what actually exists on disk.");
+  lines.push("");
+
+  lines.push("## Installed Modules");
+  if (inv.modules.length > 0) {
+    for (const m of inv.modules) lines.push(`- ${m.name} (${m.category}) v${m.version}`);
+  } else {
+    lines.push("- (none detected — data/modules.json missing)");
+  }
+  lines.push("");
+
+  lines.push("## NPM Scripts (runnable commands)");
+  if (inv.npmScripts.length > 0) {
+    for (const s of inv.npmScripts) lines.push(`- \`npm run ${s}\``);
+  }
+  lines.push("");
+
+  lines.push("## Source Files (src/)");
+  for (const f of inv.srcFiles) lines.push(`- src/${f}`);
+  lines.push("");
+
+  lines.push("## Scripts (scripts/)");
+  for (const s of inv.scripts) lines.push(`- scripts/${s}`);
+  lines.push("");
+
+  lines.push("## Dependencies (npm)");
+  for (const d of inv.dependencies) lines.push(`- ${d}`);
+  lines.push("");
+
+  lines.push("## Data Files (data/)");
+  for (const d of inv.dataFiles) lines.push(`- data/${d}`);
+  lines.push("");
+
+  lines.push("## Allowed Tools (.claude/settings.json)");
+  if (inv.allowedTools.length > 0) {
+    for (const t of inv.allowedTools) lines.push(`- ${t}`);
+  } else {
+    lines.push("- (none detected — permissions may not be configured)");
+  }
+  lines.push("");
+
+  lines.push("## MCP Servers");
+  if (inv.mcpServers.length > 0) {
+    for (const s of inv.mcpServers) lines.push(`- ${s}`);
+  } else {
+    lines.push("- (none — no .mcp.json)");
+  }
+  lines.push("");
+
+  lines.push("## Environment Variables (names only — values never logged)");
+  if (inv.envVars.length > 0) {
+    for (const v of inv.envVars) lines.push(`- ${v}`);
+  } else {
+    lines.push("- (none detected)");
+  }
+  lines.push("");
+
+  lines.push("## Features Available");
+  lines.push(`- Boardroom: ${inv.boardroom ? "YES" : "no"}`);
+  lines.push(`- Swarm/QIS: ${inv.swarm ? "YES" : "no"}`);
+  lines.push("");
+
+  lines.push("---");
+  lines.push("**Meta-rule:** If you need a capability, check this file first. If it's here, use it. If it's not here but you need it, see memory/CAPABILITIES.md for the self-extension checklist.");
+
+  return lines.join("\n");
+}
+
+// Run
+const inv = scan();
+const output = format(inv);
+fs.mkdirSync(path.dirname(OUTPUT), { recursive: true });
+fs.writeFileSync(OUTPUT, output);
+
+console.log(`Capability scan complete: ${inv.scripts.length + inv.srcFiles.length} files, ${inv.npmScripts.length} commands, ${inv.allowedTools.length} tools allowed. Written to ${OUTPUT}`);

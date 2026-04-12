@@ -1,0 +1,100 @@
+/**
+ * MetaClaw Boardroom — Shared Types
+ * Multi-agent meeting system with intelligent turn-taking
+ */
+
+export interface Meeting {
+  id: string;
+  topic: string;
+  created_by: string;
+  status: "active" | "paused" | "ended";
+  max_participants: number;
+  created_at: string;
+  ended_at: string | null;
+  summary: string | null;
+}
+
+export interface Participant {
+  id: number;
+  meeting_id: string;
+  agent_name: string;
+  expertise: string[];
+  status: "active" | "left" | "idle";
+  joined_at: string;
+  last_poll_at: string | null;
+}
+
+export interface Message {
+  id: number;
+  meeting_id: string;
+  agent_name: string;
+  content: string;
+  addresses: string[] | null;
+  msg_type: "statement" | "question" | "proposal" | "decision" | "summary";
+  created_at: string;
+}
+
+export interface TurnState {
+  meeting_id: string;
+  agent_name: string;
+  wants_turn: boolean;
+  last_spoke_at: string | null;
+  speak_count: number;
+}
+
+export interface TurnScore {
+  agent_name: string;
+  score: number;
+  reason: string;
+  should_speak: boolean;
+}
+
+export interface ContextPackage {
+  meeting_topic: string;
+  meeting_id: string;
+  participants: string[];
+  recent_messages: Message[];
+  running_summary: string | null;
+  your_turn: TurnScore;
+  total_messages: number;
+}
+
+export interface PollResult {
+  messages: Message[];
+  turn_signal: TurnScore;
+  context: ContextPackage | null;
+}
+
+export interface CreateMeetingRequest {
+  topic: string;
+  created_by: string;
+  expertise?: string[];
+}
+
+export interface JoinMeetingRequest {
+  agent_name: string;
+  expertise?: string[];
+}
+
+export interface SpeakRequest {
+  agent_name: string;
+  content: string;
+  addresses?: string[];
+  msg_type?: Message["msg_type"];
+}
+
+export interface MeetingSummons {
+  id: string;
+  from: string;
+  to: string;
+  timestamp: string;
+  subject: string;
+  body: string;
+  type: "request";
+  priority: "high";
+  boardroom: {
+    meeting_id: string;
+    coordinator_url: string;
+    topic: string;
+  };
+}

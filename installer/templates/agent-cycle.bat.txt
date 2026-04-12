@@ -1,0 +1,19 @@
+@echo off
+setlocal
+title __AGENT_NAME__ — Autonomous Cycle
+set PATH=C:\Program Files\nodejs;%USERPROFILE%\AppData\Roaming\npm;%USERPROFILE%\.local\bin;%PATH%
+cd /d "__PROJECT_DIR__"
+
+echo [%date% %time%] __AGENT_NAME__ cycle starting... >> data\logs\scheduler.log
+
+REM Run the main agent with SPECIFIC instructions (not generic "do your job")
+REM The cron agent (Sonnet, 30 turns, no context) needs EXPLICIT steps
+call npm start -- "AUTONOMOUS CYCLE. Do these steps in order: 1. Use Read tool to read __PROJECT_DIR__\data\state.json — get next_priority_action and current metrics. 2. Use Read tool to read __PROJECT_DIR__\data\system-context.json — get whatWorks, whatDoesntWork, coreRules. 3. Execute the next_priority_action. Produce at least 1 tangible output. 4. Update state.json with what you accomplished and set a new next_priority_action. 5. Append a log entry to data\logs\cycle.log with timestamp and what you did."
+
+echo [%date% %time%] __AGENT_NAME__ cycle completed. >> data\logs\scheduler.log
+
+REM Rebuild dashboard with fresh data (AFTER agent, not inside)
+call npx tsx src/update-dashboard.ts 2>nul
+node scripts\build-dashboard.cjs 2>nul
+
+exit /b 0

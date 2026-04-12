@@ -1,0 +1,473 @@
+/**
+ * MetaClaw Boardroom — Coordinator Server
+ * Thin HTTP server with SQLite backend. Manages meetings, turn-taking, context.
+ *
+ * Usage:
+ *   Standalone:  npx tsx boardroom/server.ts [--port 7890]
+ *   Embedded:    import { startBoardroomServer } from "./boardroom/server.js"
+ */
+
+import { createServer, IncomingMessage, ServerResponse } from "node:http";
+import { URL } from "node:url";
+import { getBoardroomDb, createMeeting, getMeeting, listActiveMeetings, endMeeting as dbEndMeeting,
+  addParticipant, getParticipants, updatePollTime, markIdleParticipants, reactivateParticipant,
+  addMessage, getMessagesSince, getRecentMessages, getMessageCount, setWantsTurn,
+  buildRunningSummary, createScheduledMeeting, getUpcomingMeetings, activateScheduledMeeting,
+  raiseHand, lowerHand, reEvaluateHand, getPendingHandRaises, clearHandRaise,
+  getArtifacts, generateMeetingArtifacts } from "./db.js";
+import { scoreForAgent, getNextSpeaker } from "./turn.js";
+import { computePriorityQueue, getNextSpeakerV2, scoreForAgentV2, checkCoverage } from "./turn-v2.js";
+import type { ContextPackage } from "./types.js";
+import { summonMultiple } from "./summons.js";
+import fs from "fs";
+
+function genId(): string {
+  return `mtg_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
+}
+
+async function readBody(req: IncomingMessage): Promise<any> {
+  return new Promise((resolve) => {
+    let data = "";
+    req.on("data", (chunk) => (data += chunk));
+    req.on("end", () => {
+      try { resolve(JSON.parse(data)); } catch { resolve({}); }
+    });
+  });
+}
+
+function respond(res: ServerResponse, status: number, body: any) {
+  res.writeHead(status, {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+  });
+  res.end(JSON.stringify(body));
+}
+
+function match(method: string, reqMethod: string, pattern: string, pathname: string): Record<string, string> | null {
+  if (method !== reqMethod) return null;
+  const regex = new RegExp("^" + pattern.replace(/:(\w+)/g, "(?<$1>[^/]+)") + "$");
+  const m = pathname.match(regex);
+  if (!m) return null;
+  return m.groups || {};
+}
+
+export function startBoardroomServer(opts: { port?: number; dbPath?: string } = {}) {
+  const port = opts.port || 7890;
+  const db = getBoardroomDb(opts.dbPath);
+
+  const server = createServer(async (req, res) => {
+    // Handle CORS preflight
+    if (req.method === "OPTIONS") { respond(res, 200, {}); return; }
+
+    const url = new URL(req.url!, `http://${req.headers.host}`);
+    const path = url.pathname;
+    const method = req.method!;
+    let params: Record<string, string> | null;
+
+    try {
+      // --- Health ---
+      if ((params = match("GET", method, "/health", path))) {
+        const meetings = listActiveMeetings(db);
+        respond(res, 200, { status: "ok", meetings_active: meetings.length });
+        return;
+      }
+
+      // --- Create Meeting ---
+      if ((params = match("POST", method, "/meetings", path))) {
+        const body = await readBody(req);
+        if (!body.topic || !body.created_by) {
+          respond(res, 400, { error: "topic and created_by required" }); return;
+        }
+        const id = genId();
+        createMeeting(db, id, body.topic, body.created_by);
+        addParticipant(db, id, body.created_by, body.expertise || []);
+
+        // Send summons to invited agents
+        if (body.invite && Array.isArray(body.invite)) {
+          const coordUrl = `http://${req.headers.host}`;
+          summonMultiple(body.invite, id, body.topic, coordUrl, body.created_by);
+        }
+
+        respond(res, 201, { meeting_id: id, status: "created" });
+        return;
+      }
+
+      // --- List Active Meetings ---
+      if ((params = match("GET", method, "/meetings", path))) {
+        const meetings = listActiveMeetings(db);
+        respond(res, 200, { meetings });
+        return;
+      }
+
+      // --- Get Meeting Details ---
+      if ((params = match("GET", method, "/meetings/:id", path))) {
+        const meeting = getMeeting(db, params.id);
+        if (!meeting) { respond(res, 404, { error: "meeting not found" }); return; }
+        const participants = getParticipants(db, params.id);
+        const recent = getRecentMessages(db, params.id, 5);
+        respond(res, 200, {
+          meeting,
+          participants: participants.map((p: any) => ({
+            name: p.agent_name, expertise: safeJson(p.expertise), status: p.status,
+          })),
+          recent_messages: recent.map(parseMsg),
+          total_messages: getMessageCount(db, params.id),
+        });
+        return;
+      }
+
+      // --- Join Meeting ---
+      if ((params = match("POST", method, "/meetings/:id/join", path))) {
+        const body = await readBody(req);
+        if (!body.agent_name) { respond(res, 400, { error: "agent_name required" }); return; }
+        const meeting = getMeeting(db, params.id);
+        if (!meeting) { respond(res, 404, { error: "meeting not found" }); return; }
+        if (meeting.status !== "active") { respond(res, 400, { error: "meeting not active" }); return; }
+
+        addParticipant(db, params.id, body.agent_name, body.expertise || []);
+        reactivateParticipant(db, params.id, body.agent_name);
+
+        const ctx = buildContext(db, params.id, body.agent_name);
+        respond(res, 200, { ok: true, context: ctx });
+        return;
+      }
+
+      // --- Schedule Future Meeting ---
+      if ((params = match("POST", method, "/meetings/schedule", path))) {
+        const body = await readBody(req);
+        if (!body.topic || !body.created_by || !body.scheduled_for) {
+          respond(res, 400, { error: "topic, created_by, scheduled_for required" }); return;
+        }
+        const schedId = `sched_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
+        createScheduledMeeting(db, schedId, body.topic, body.created_by, body.scheduled_for,
+          body.invited || [], body.priority || "normal", body.time_limit_minutes || 30);
+
+        // Send summons with scheduled time
+        if (body.invited && Array.isArray(body.invited)) {
+          const coordUrl = `http://${req.headers.host}`;
+          summonMultiple(body.invited, schedId, body.topic, coordUrl, body.created_by);
+        }
+
+        respond(res, 201, { schedule_id: schedId, scheduled_for: body.scheduled_for, status: "scheduled" });
+        return;
+      }
+
+      // --- Upcoming Scheduled Meetings ---
+      if ((params = match("GET", method, "/meetings/upcoming", path))) {
+        const agentName = url.searchParams.get("agent");
+        const upcoming = getUpcomingMeetings(db, agentName || undefined);
+        const now = Date.now();
+        respond(res, 200, {
+          upcoming: upcoming.map((m: any) => ({
+            ...m,
+            invited_agents: safeJson(m.invited_agents),
+            minutes_until: Math.max(0, Math.round((new Date(m.scheduled_for).getTime() - now) / 60000)),
+          })),
+        });
+        return;
+      }
+
+      // --- Speak ---
+      if ((params = match("POST", method, "/meetings/:id/speak", path))) {
+        const body = await readBody(req);
+        if (!body.agent_name || !body.content) {
+          respond(res, 400, { error: "agent_name and content required" }); return;
+        }
+        const meeting = getMeeting(db, params.id);
+        if (!meeting || meeting.status !== "active") {
+          respond(res, 400, { error: "meeting not active" }); return;
+        }
+
+        // Clear this agent's hand-raise since they're now speaking
+        clearHandRaise(db, params.id, body.agent_name);
+
+        const msgId = addMessage(db, params.id, body.agent_name, body.content, body.addresses, body.msg_type);
+
+        // v2: compute priority queue for next speaker from hand-raises
+        const nextV2 = getNextSpeakerV2(params.id, db);
+        // Fallback to v1 if no hand-raises
+        const next = nextV2 || getNextSpeaker(params.id, db, body.agent_name);
+
+        // Check coverage: see if any pending hand-raise's intent overlaps with this message
+        const pendingRaises = getPendingHandRaises(db, params.id);
+        const coverageAlerts: any[] = [];
+        for (const hr of pendingRaises as any[]) {
+          if (hr.intent_hash) {
+            const overlap = checkCoverage(hr.intent_hash, body.content);
+            if (overlap > 0.5) {
+              coverageAlerts.push({
+                agent: hr.agent_name,
+                overlap_score: Math.round(overlap * 100),
+                message: "Your intended response may overlap with what was just said. Consider re-evaluating.",
+              });
+            }
+          }
+        }
+
+        respond(res, 200, {
+          ok: true,
+          message_id: msgId,
+          next_speaker: next ? { agent: next.agent_name, reason: next.reason, score: next.final_score || (next as any).score } : null,
+          coverage_alerts: coverageAlerts,
+          queue: computePriorityQueue(params.id, db).slice(0, 5),
+        });
+        return;
+      }
+
+      // --- Hand Raise (v2 turn-taking) ---
+      if ((params = match("POST", method, "/meetings/:id/hand-raise", path))) {
+        const body = await readBody(req);
+        if (!body.agent_name) { respond(res, 400, { error: "agent_name required" }); return; }
+        raiseHand(db, params.id, body.agent_name,
+          body.self_score ?? 0.5, body.intent_hash || "", body.in_response_to || null, body.urgency || "normal");
+        const queue = computePriorityQueue(params.id, db);
+        const myPos = queue.findIndex(q => q.agent_name === body.agent_name);
+        respond(res, 200, { ok: true, queue_position: myPos + 1, queue_size: queue.length });
+        return;
+      }
+
+      // --- Hand Lower ---
+      if ((params = match("POST", method, "/meetings/:id/hand-lower", path))) {
+        const body = await readBody(req);
+        if (!body.agent_name) { respond(res, 400, { error: "agent_name required" }); return; }
+        lowerHand(db, params.id, body.agent_name);
+        respond(res, 200, { ok: true });
+        return;
+      }
+
+      // --- Re-evaluate hand raise ---
+      if ((params = match("POST", method, "/meetings/:id/re-evaluate", path))) {
+        const body = await readBody(req);
+        if (!body.agent_name) { respond(res, 400, { error: "agent_name required" }); return; }
+        reEvaluateHand(db, params.id, body.agent_name, body.new_self_score ?? 0.5, body.reason || "no_change");
+        const queue = computePriorityQueue(params.id, db);
+        const myPos = queue.findIndex(q => q.agent_name === body.agent_name);
+        respond(res, 200, { ok: true, queue_position: myPos >= 0 ? myPos + 1 : null });
+        return;
+      }
+
+      // --- Request Turn (v1 compat — maps to hand-raise) ---
+      if ((params = match("POST", method, "/meetings/:id/request-turn", path))) {
+        const body = await readBody(req);
+        if (!body.agent_name) { respond(res, 400, { error: "agent_name required" }); return; }
+        raiseHand(db, params.id, body.agent_name, 0.7, "", null, "normal");
+        respond(res, 200, { ok: true });
+        return;
+      }
+
+      // --- View Priority Queue ---
+      if ((params = match("GET", method, "/meetings/:id/queue", path))) {
+        const queue = computePriorityQueue(params.id, db);
+        respond(res, 200, { queue });
+        return;
+      }
+
+      // --- Poll ---
+      if ((params = match("GET", method, "/meetings/:id/poll", path))) {
+        const agentName = url.searchParams.get("agent");
+        const sinceStr = url.searchParams.get("since") || "0";
+        const since = parseInt(sinceStr) || 0;
+
+        if (!agentName) { respond(res, 400, { error: "agent param required" }); return; }
+
+        const meeting = getMeeting(db, params.id);
+        if (!meeting) { respond(res, 404, { error: "meeting not found" }); return; }
+
+        // Check time limit
+        if (meeting.auto_end_at && new Date(meeting.auto_end_at) <= new Date()) {
+          dbEndMeeting(db, params.id, "Meeting time limit reached.");
+          addMessage(db, params.id, "SYSTEM", "Meeting time limit reached. Meeting ended automatically.", undefined, "summary");
+        }
+
+        // Update heartbeat
+        updatePollTime(db, params.id, agentName);
+        reactivateParticipant(db, params.id, agentName);
+        markIdleParticipants(db, params.id);
+
+        // Get new messages
+        const messages = getMessagesSince(db, params.id, since).map(parseMsg);
+
+        // v2: check if this agent has a pending hand-raise and compute their position
+        const queue = computePriorityQueue(params.id, db);
+        const myQueueEntry = queue.find(q => q.agent_name === agentName);
+        const isNextSpeaker = queue.length > 0 && queue[0].agent_name === agentName;
+
+        // v1 fallback turn signal
+        const turnSignalV1 = scoreForAgent(params.id, agentName, db);
+
+        // Combined turn signal
+        const turnSignal = myQueueEntry
+          ? { ...myQueueEntry, should_speak: isNextSpeaker && myQueueEntry.should_speak }
+          : { ...turnSignalV1, should_speak: turnSignalV1.should_speak && queue.length === 0 };
+
+        // Coverage check for agents with pending hand-raises
+        let coverageCheck = null;
+        if (myQueueEntry && messages.length > 0) {
+          const lastMsg = messages[messages.length - 1];
+          if (lastMsg.agent_name !== agentName && myQueueEntry.intent_hash) {
+            const overlap = checkCoverage(myQueueEntry.intent_hash, lastMsg.content);
+            if (overlap > 0.3) {
+              coverageCheck = {
+                new_message_by: lastMsg.agent_name,
+                overlap_score: Math.round(overlap * 100),
+                your_intent: myQueueEntry.intent_hash,
+                action_required: overlap > 0.6 ? "re-evaluate" : "consider",
+              };
+            }
+          }
+        }
+
+        // Build context if needed
+        let context: ContextPackage | null = null;
+        if (since === 0 || messages.length > 10) {
+          context = buildContext(db, params.id, agentName);
+        }
+
+        const refreshedMeeting = getMeeting(db, params.id);
+
+        respond(res, 200, {
+          messages,
+          turn_signal: turnSignal,
+          context,
+          meeting_status: refreshedMeeting?.status || meeting.status,
+          queue_position: myQueueEntry ? queue.indexOf(myQueueEntry) + 1 : null,
+          queue_size: queue.length,
+          coverage_check: coverageCheck,
+        });
+        return;
+      }
+
+      // --- End Meeting ---
+      if ((params = match("POST", method, "/meetings/:id/end", path))) {
+        const body = await readBody(req);
+        const meeting = getMeeting(db, params.id);
+        if (!meeting) { respond(res, 404, { error: "meeting not found" }); return; }
+
+        // Generate artifacts before ending
+        const artifacts = generateMeetingArtifacts(db, params.id);
+        dbEndMeeting(db, params.id, body.summary);
+
+        // Write MEETING_ENDED sentinel for agents in meeting-lock mode
+        const participants = getParticipants(db, params.id);
+        for (const p of participants as any[]) {
+          try {
+            const endFile = `__INBOX_ROOT__\\${p.agent_name.toLowerCase()}\\MEETING_ENDED_${params.id}.json`;
+            fs.writeFileSync(endFile, JSON.stringify({
+              meeting_id: params.id, status: "ended", summary: body.summary, artifacts
+            }));
+          } catch {}
+        }
+
+        respond(res, 200, { ok: true, status: "ended", artifacts });
+        return;
+      }
+
+      // --- Meeting Summary + Artifacts ---
+      if ((params = match("GET", method, "/meetings/:id/summary", path))) {
+        const meeting = getMeeting(db, params.id);
+        if (!meeting) { respond(res, 404, { error: "meeting not found" }); return; }
+        const artifacts = getArtifacts(db, params.id);
+        const messages = getRecentMessages(db, params.id, 100);
+        const summary = buildRunningSummary(db, params.id);
+        respond(res, 200, { meeting, artifacts, summary, transcript: messages.map(parseMsg) });
+        return;
+      }
+
+      // --- Meeting Transcript ---
+      if ((params = match("GET", method, "/meetings/:id/transcript", path))) {
+        const messages = db.prepare("SELECT * FROM messages WHERE meeting_id = ? ORDER BY id").all(params.id);
+        respond(res, 200, { transcript: messages.map(parseMsg) });
+        return;
+      }
+
+      respond(res, 404, { error: "not found" });
+    } catch (err: any) {
+      console.error("Boardroom error:", err);
+      respond(res, 500, { error: err.message || "internal error" });
+    }
+  });
+
+  // Meeting activation timer — checks every 30s for scheduled meetings to activate
+  setInterval(() => {
+    try {
+      const upcoming = db.prepare(
+        "SELECT * FROM scheduled_meetings WHERE status = 'scheduled' AND datetime(scheduled_for) <= datetime('now', '+2 minutes')"
+      ).all() as any[];
+
+      for (const sched of upcoming) {
+        const mtgId = genId();
+        createMeeting(db, mtgId, sched.topic, sched.created_by);
+
+        // Set time limit
+        if (sched.time_limit_minutes) {
+          db.prepare("UPDATE meetings SET scheduled_for = ?, time_limit_minutes = ?, auto_end_at = datetime(?, '+' || ? || ' minutes'), priority = ? WHERE id = ?")
+            .run(sched.scheduled_for, sched.time_limit_minutes, sched.scheduled_for, sched.time_limit_minutes, sched.priority || "normal", mtgId);
+        }
+
+        activateScheduledMeeting(db, sched.id, mtgId);
+
+        // Write MEETING_READY sentinel files
+        const invited = safeJson(sched.invited_agents) || [];
+        for (const agent of [sched.created_by, ...invited]) {
+          try {
+            const readyFile = `__INBOX_ROOT__\\${agent.toLowerCase()}\\MEETING_READY_${mtgId}.json`;
+            fs.writeFileSync(readyFile, JSON.stringify({
+              meeting_id: mtgId, schedule_id: sched.id, topic: sched.topic,
+              coordinator_url: `http://0.0.0.0:${port}`, priority: sched.priority || "normal",
+            }));
+          } catch {}
+        }
+
+        console.log(`Activated scheduled meeting: ${sched.topic} → ${mtgId}`);
+      }
+    } catch (e) { console.error("Meeting activation check error:", e); }
+  }, 30000);
+
+  server.listen(port, "0.0.0.0", () => {
+    console.log(`Boardroom coordinator v2 running on http://0.0.0.0:${port}`);
+    console.log(`Features: scheduling, hand-raise turn-taking, meeting lock, auto-activation`);
+    console.log(`Agents can connect from any machine on the network.`);
+  });
+
+  return server;
+}
+
+function buildContext(db: ReturnType<typeof getBoardroomDb>, meetingId: string, agentName: string): ContextPackage {
+  const meeting = getMeeting(db, meetingId);
+  const participants = getParticipants(db, meetingId);
+  const recent = getRecentMessages(db, meetingId, 5);
+  const summary = buildRunningSummary(db, meetingId);
+  const turnSignal = scoreForAgent(meetingId, agentName, db);
+  const total = getMessageCount(db, meetingId);
+
+  return {
+    meeting_topic: meeting.topic,
+    meeting_id: meetingId,
+    participants: participants.map((p: any) => p.agent_name),
+    recent_messages: recent.map(parseMsg),
+    running_summary: summary,
+    your_turn: turnSignal,
+    total_messages: total,
+  };
+}
+
+function parseMsg(m: any) {
+  return {
+    ...m,
+    addresses: safeJson(m.addresses),
+  };
+}
+
+function safeJson(val: any): any {
+  if (typeof val === "string") { try { return JSON.parse(val); } catch { return val; } }
+  return val;
+}
+
+// --- CLI entry point ---
+if (process.argv[1]?.replace(/\\/g, "/").includes("boardroom/server")) {
+  const portArg = process.argv.indexOf("--port");
+  const port = portArg >= 0 ? parseInt(process.argv[portArg + 1]) : 7890;
+  startBoardroomServer({ port });
+}

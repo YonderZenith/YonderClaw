@@ -1,0 +1,38 @@
+@echo off
+REM MetaClaw Boardroom — Meeting Check
+REM Called at the start of every agent cycle.
+REM Checks if this agent has an active meeting to attend.
+REM Returns ERRORLEVEL 0 = meeting found (enter meeting mode)
+REM Returns ERRORLEVEL 1 = no meeting (proceed with normal cycle)
+
+setlocal enabledelayedexpansion
+set "AGENT_NAME=%~1"
+set "COORDINATOR=__COORDINATOR_URL__"
+set "INBOX=__INBOX_ROOT__\%AGENT_NAME%"
+set "MEETING_ID="
+
+REM Check 1: MEETING_READY sentinel file in inbox
+for %%f in ("%INBOX%\MEETING_READY_*.json") do (
+    if exist "%%f" (
+        echo [MEETING] Found meeting-ready sentinel: %%~nf
+        REM Extract meeting_id from the JSON file
+        for /f "usebackq tokens=*" %%j in (`node -e "const d=JSON.parse(require('fs').readFileSync('%%f','utf-8'));console.log(d.meeting_id)"`) do (
+            set "MEETING_ID=%%j"
+        )
+        if defined MEETING_ID (
+            echo !MEETING_ID!> "data\.meeting-id"
+            exit /b 0
+        )
+    )
+)
+
+REM Check 2: Active meeting where this agent is a participant
+for /f "usebackq delims=" %%r in (`node -e "fetch('%COORDINATOR%/meetings').then(r=>r.json()).then(d=>{const m=d.meetings.find(m=>m.status==='active');if(m)console.log(m.id);else console.log('NONE')}).catch(()=>console.log('NONE'))"`) do (
+    if not "%%r"=="NONE" (
+        echo [MEETING] Active meeting found: %%r
+        echo %%r> "data\.meeting-id"
+        exit /b 0
+    )
+)
+
+exit /b 1

@@ -1,0 +1,201 @@
+/**
+ * MetaClaw Boardroom — Client Library
+ * Import this in any agent to participate in boardroom meetings.
+ *
+ * Usage:
+ *   const client = new BoardroomClient("http://192.168.1.50:7890", "Atlas");
+ *   await client.createMeeting("Q2 Strategy", ["pricing", "outreach"], ["Rory", "AXIOM"]);
+ *   // or
+ *   await client.joinMeeting("mtg_1234...");
+ *   client.onTurn(async (signal) => { ... generate response ... await client.speak(response); });
+ *   client.startPolling();
+ */
+
+import type { Message, TurnScore, ContextPackage, PollResult } from "./types.js";
+
+export class BoardroomClient {
+  private baseUrl: string;
+  private agentName: string;
+  private meetingId: string | null = null;
+  private lastMessageId: number = 0;
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private messageHandlers: Array<(msg: Message) => void> = [];
+  private turnHandlers: Array<(signal: TurnScore, ctx: ContextPackage | null) => void> = [];
+  private speaking: boolean = false;
+
+  constructor(coordinatorUrl: string, agentName: string) {
+    this.baseUrl = coordinatorUrl.replace(/\/$/, "");
+    this.agentName = agentName;
+  }
+
+  // --- Meeting Lifecycle ---
+
+  async createMeeting(topic: string, expertise?: string[], invite?: string[]): Promise<string> {
+    const res = await this.post("/meetings", {
+      topic,
+      created_by: this.agentName,
+      expertise: expertise || [],
+      invite: invite || [],
+    });
+    this.meetingId = res.meeting_id;
+    this.lastMessageId = 0;
+    return res.meeting_id;
+  }
+
+  async joinMeeting(meetingId: string, expertise?: string[]): Promise<ContextPackage> {
+    const res = await this.post(`/meetings/${meetingId}/join`, {
+      agent_name: this.agentName,
+      expertise: expertise || [],
+    });
+    this.meetingId = meetingId;
+    this.lastMessageId = 0;
+    return res.context;
+  }
+
+  async endMeeting(summary?: string): Promise<void> {
+    if (!this.meetingId) throw new Error("Not in a meeting");
+    await this.post(`/meetings/${this.meetingId}/end`, {
+      agent_name: this.agentName,
+      summary,
+    });
+    this.stopPolling();
+    this.meetingId = null;
+  }
+
+  // --- Communication ---
+
+  async speak(content: string, addresses?: string[], msgType?: string): Promise<number> {
+    if (!this.meetingId) throw new Error("Not in a meeting");
+    this.speaking = true;
+    try {
+      const res = await this.post(`/meetings/${this.meetingId}/speak`, {
+        agent_name: this.agentName,
+        content,
+        addresses,
+        msg_type: msgType,
+      });
+      return res.message_id;
+    } finally {
+      this.speaking = false;
+    }
+  }
+
+  async askQuestion(content: string, to?: string[]): Promise<number> {
+    return this.speak(content, to, "question");
+  }
+
+  async propose(content: string): Promise<number> {
+    return this.speak(content, undefined, "proposal");
+  }
+
+  async requestTurn(): Promise<void> {
+    if (!this.meetingId) return;
+    await this.post(`/meetings/${this.meetingId}/request-turn`, {
+      agent_name: this.agentName,
+    });
+  }
+
+  // --- Polling ---
+
+  startPolling(intervalMs: number = 1500): void {
+    if (this.pollTimer) return;
+    this.pollTimer = setInterval(() => this.poll(), intervalMs);
+    this.poll(); // immediate first poll
+  }
+
+  stopPolling(): void {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+  }
+
+  // --- Event Handlers ---
+
+  onMessage(handler: (msg: Message) => void): void {
+    this.messageHandlers.push(handler);
+  }
+
+  onTurn(handler: (signal: TurnScore, ctx: ContextPackage | null) => void): void {
+    this.turnHandlers.push(handler);
+  }
+
+  // --- State ---
+
+  get currentMeetingId(): string | null { return this.meetingId; }
+  get isSpeaking(): boolean { return this.speaking; }
+  get isPolling(): boolean { return this.pollTimer !== null; }
+
+  async listMeetings(): Promise<any[]> {
+    const res = await this.get("/meetings");
+    return res.meetings;
+  }
+
+  async getMeetingDetails(): Promise<any> {
+    if (!this.meetingId) throw new Error("Not in a meeting");
+    return this.get(`/meetings/${this.meetingId}`);
+  }
+
+  async healthCheck(): Promise<any> {
+    return this.get("/health");
+  }
+
+  // --- Internal ---
+
+  private async poll(): Promise<void> {
+    if (!this.meetingId || this.speaking) return;
+
+    try {
+      const data = await this.get(
+        `/meetings/${this.meetingId}/poll?agent=${encodeURIComponent(this.agentName)}&since=${this.lastMessageId}`
+      );
+
+      // Process new messages
+      if (data.messages && data.messages.length > 0) {
+        for (const msg of data.messages) {
+          this.lastMessageId = Math.max(this.lastMessageId, msg.id);
+          for (const handler of this.messageHandlers) {
+            try { handler(msg); } catch (e) { console.error("Message handler error:", e); }
+          }
+        }
+      }
+
+      // Check turn signal
+      if (data.turn_signal && data.turn_signal.should_speak && !this.speaking) {
+        for (const handler of this.turnHandlers) {
+          try { handler(data.turn_signal, data.context || null); } catch (e) { console.error("Turn handler error:", e); }
+        }
+      }
+
+      // Meeting ended
+      if (data.meeting_status === "ended") {
+        this.stopPolling();
+      }
+    } catch (err) {
+      // Network error — silent retry on next poll
+      console.error("Boardroom poll error (will retry):", (err as Error).message);
+    }
+  }
+
+  private async get(path: string): Promise<any> {
+    const res = await fetch(`${this.baseUrl}${path}`);
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`${res.status}: ${body}`);
+    }
+    return res.json();
+  }
+
+  private async post(path: string, body: any): Promise<any> {
+    const res = await fetch(`${this.baseUrl}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`${res.status}: ${text}`);
+    }
+    return res.json();
+  }
+}

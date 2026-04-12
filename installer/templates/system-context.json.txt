@@ -1,0 +1,33 @@
+{
+  "lastUpdated": "__TIMESTAMP__",
+
+  "campaignStats": {
+    "totalActions": 0,
+    "totalSucceeded": 0,
+    "totalFailed": 0,
+    "successRate": "0%"
+  },
+
+  "coreRules": [
+    "Read state.json at the START of every session",
+    "Update state.json at the END of every session",
+    "Self-update runs AFTER tasks, never before",
+    "Never create one-off scripts — use existing tools",
+    "Produce at least 1 tangible output per cycle"
+  ],
+
+  "whatWorks": [],
+  "whatDoesntWork": [],
+
+  "topObjections": [],
+
+  "latestStrategyInsight": "",
+
+  "processNotes": [
+    "Cron agent needs SPECIFIC numbered instructions — not goals",
+    "Email > Dashboard for operator communication",
+    "next_priority_action in state.json bridges main session and cron agent"
+  ],
+
+  "lastSelfEval": null
+}

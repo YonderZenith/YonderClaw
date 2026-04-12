@@ -1,0 +1,322 @@
+/**
+ * MetaClaw Boardroom — Database Layer
+ * SQLite WAL mode, local to coordinator machine only (never on network share)
+ */
+
+import Database from "better-sqlite3";
+import path from "path";
+import fs from "fs";
+
+let db: Database.Database | null = null;
+
+export function getBoardroomDb(dbPath?: string): Database.Database {
+  if (db) return db;
+  const p = dbPath || path.join(process.cwd(), "data", "boardroom.db");
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  db = new Database(p);
+  db.pragma("journal_mode = WAL");
+  db.pragma("busy_timeout = 5000");
+  initSchema(db);
+  return db;
+}
+
+function initSchema(db: Database.Database) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS meetings (
+      id TEXT PRIMARY KEY,
+      topic TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      status TEXT DEFAULT 'active',
+      max_participants INTEGER DEFAULT 8,
+      scheduled_for TEXT,
+      time_limit_minutes INTEGER DEFAULT 30,
+      auto_end_at TEXT,
+      priority TEXT DEFAULT 'normal',
+      created_at TEXT DEFAULT (datetime('now')),
+      ended_at TEXT,
+      summary TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS scheduled_meetings (
+      id TEXT PRIMARY KEY,
+      topic TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      scheduled_for TEXT NOT NULL,
+      invited_agents TEXT DEFAULT '[]',
+      status TEXT DEFAULT 'scheduled',
+      meeting_id TEXT,
+      priority TEXT DEFAULT 'normal',
+      time_limit_minutes INTEGER DEFAULT 30,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS participants (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      meeting_id TEXT NOT NULL REFERENCES meetings(id),
+      agent_name TEXT NOT NULL,
+      expertise TEXT DEFAULT '[]',
+      status TEXT DEFAULT 'active',
+      joined_at TEXT DEFAULT (datetime('now')),
+      last_poll_at TEXT,
+      UNIQUE(meeting_id, agent_name)
+    );
+
+    CREATE TABLE IF NOT EXISTS messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      meeting_id TEXT NOT NULL REFERENCES meetings(id),
+      agent_name TEXT NOT NULL,
+      content TEXT NOT NULL,
+      addresses TEXT,
+      msg_type TEXT DEFAULT 'statement',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS turn_state (
+      meeting_id TEXT NOT NULL REFERENCES meetings(id),
+      agent_name TEXT NOT NULL,
+      wants_turn INTEGER DEFAULT 0,
+      last_spoke_at TEXT,
+      speak_count INTEGER DEFAULT 0,
+      PRIMARY KEY (meeting_id, agent_name)
+    );
+
+    CREATE TABLE IF NOT EXISTS hand_raises (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      meeting_id TEXT NOT NULL REFERENCES meetings(id),
+      agent_name TEXT NOT NULL,
+      raised_at TEXT DEFAULT (datetime('now')),
+      in_response_to INTEGER,
+      self_score REAL DEFAULT 0.5,
+      intent_hash TEXT DEFAULT '',
+      urgency TEXT DEFAULT 'normal',
+      status TEXT DEFAULT 'pending',
+      UNIQUE(meeting_id, agent_name, status)
+    );
+
+    CREATE TABLE IF NOT EXISTS meeting_artifacts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      meeting_id TEXT NOT NULL REFERENCES meetings(id),
+      artifact_type TEXT NOT NULL,
+      content TEXT NOT NULL,
+      assigned_to TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_messages_meeting ON messages(meeting_id, id);
+    CREATE INDEX IF NOT EXISTS idx_participants_meeting ON participants(meeting_id);
+    CREATE INDEX IF NOT EXISTS idx_hand_raises_meeting ON hand_raises(meeting_id, status);
+    CREATE INDEX IF NOT EXISTS idx_scheduled_meetings ON scheduled_meetings(status, scheduled_for);
+  `);
+}
+
+// --- Meeting Operations ---
+
+export function createMeeting(db: Database.Database, id: string, topic: string, createdBy: string): void {
+  db.prepare("INSERT INTO meetings (id, topic, created_by) VALUES (?, ?, ?)").run(id, topic, createdBy);
+}
+
+export function getMeeting(db: Database.Database, id: string): any {
+  return db.prepare("SELECT * FROM meetings WHERE id = ?").get(id);
+}
+
+export function listActiveMeetings(db: Database.Database): any[] {
+  return db.prepare("SELECT id, topic, created_by, status, created_at FROM meetings WHERE status = 'active'").all();
+}
+
+export function endMeeting(db: Database.Database, id: string, summary?: string): void {
+  db.prepare("UPDATE meetings SET status = 'ended', ended_at = datetime('now'), summary = ? WHERE id = ?").run(summary || null, id);
+}
+
+// --- Participant Operations ---
+
+export function addParticipant(db: Database.Database, meetingId: string, agentName: string, expertise: string[]): void {
+  db.prepare(`
+    INSERT OR IGNORE INTO participants (meeting_id, agent_name, expertise) VALUES (?, ?, ?)
+  `).run(meetingId, agentName, JSON.stringify(expertise));
+  db.prepare(`
+    INSERT OR IGNORE INTO turn_state (meeting_id, agent_name) VALUES (?, ?)
+  `).run(meetingId, agentName);
+}
+
+export function getParticipants(db: Database.Database, meetingId: string): any[] {
+  return db.prepare("SELECT * FROM participants WHERE meeting_id = ? AND status = 'active'").all(meetingId);
+}
+
+export function updatePollTime(db: Database.Database, meetingId: string, agentName: string): void {
+  db.prepare("UPDATE participants SET last_poll_at = datetime('now') WHERE meeting_id = ? AND agent_name = ?").run(meetingId, agentName);
+}
+
+export function markIdleParticipants(db: Database.Database, meetingId: string, timeoutSeconds: number = 30): void {
+  db.prepare(`
+    UPDATE participants SET status = 'idle'
+    WHERE meeting_id = ? AND status = 'active'
+    AND last_poll_at IS NOT NULL
+    AND (julianday('now') - julianday(last_poll_at)) * 86400 > ?
+  `).run(meetingId, timeoutSeconds);
+}
+
+export function reactivateParticipant(db: Database.Database, meetingId: string, agentName: string): void {
+  db.prepare("UPDATE participants SET status = 'active', last_poll_at = datetime('now') WHERE meeting_id = ? AND agent_name = ?").run(meetingId, agentName);
+}
+
+// --- Message Operations ---
+
+export function addMessage(db: Database.Database, meetingId: string, agentName: string, content: string, addresses?: string[], msgType?: string): number {
+  const result = db.prepare(`
+    INSERT INTO messages (meeting_id, agent_name, content, addresses, msg_type)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(meetingId, agentName, content, addresses ? JSON.stringify(addresses) : null, msgType || "statement");
+
+  // Update turn state
+  db.prepare(`
+    UPDATE turn_state SET last_spoke_at = datetime('now'), speak_count = speak_count + 1, wants_turn = 0
+    WHERE meeting_id = ? AND agent_name = ?
+  `).run(meetingId, agentName);
+
+  return Number(result.lastInsertRowid);
+}
+
+export function getMessagesSince(db: Database.Database, meetingId: string, sinceId: number): any[] {
+  return db.prepare("SELECT * FROM messages WHERE meeting_id = ? AND id > ? ORDER BY id ASC").all(meetingId, sinceId);
+}
+
+export function getRecentMessages(db: Database.Database, meetingId: string, limit: number = 5): any[] {
+  return db.prepare("SELECT * FROM messages WHERE meeting_id = ? ORDER BY id DESC LIMIT ?").all(meetingId, limit).reverse();
+}
+
+export function getMessageCount(db: Database.Database, meetingId: string): number {
+  const row = db.prepare("SELECT COUNT(*) as count FROM messages WHERE meeting_id = ?").get(meetingId) as any;
+  return row?.count || 0;
+}
+
+// --- Turn State Operations ---
+
+export function getTurnStates(db: Database.Database, meetingId: string): any[] {
+  return db.prepare("SELECT * FROM turn_state WHERE meeting_id = ?").all(meetingId);
+}
+
+export function setWantsTurn(db: Database.Database, meetingId: string, agentName: string): void {
+  db.prepare("UPDATE turn_state SET wants_turn = 1 WHERE meeting_id = ? AND agent_name = ?").run(meetingId, agentName);
+}
+
+// --- Running Summary ---
+
+export function buildRunningSummary(db: Database.Database, meetingId: string): string | null {
+  const count = getMessageCount(db, meetingId);
+  if (count <= 5) return null;
+
+  // Get messages beyond the most recent 5
+  const older = db.prepare(`
+    SELECT agent_name, content, msg_type FROM messages
+    WHERE meeting_id = ? AND id NOT IN (
+      SELECT id FROM messages WHERE meeting_id = ? ORDER BY id DESC LIMIT 5
+    )
+    ORDER BY id ASC
+  `).all(meetingId, meetingId) as any[];
+
+  if (older.length === 0) return null;
+
+  const lines = older.map((m: any) => {
+    const prefix = m.msg_type === "question" ? "asked" : m.msg_type === "proposal" ? "proposed" : "said";
+    const snippet = m.content.length > 120 ? m.content.slice(0, 120) + "..." : m.content;
+    return `[${m.agent_name}] ${prefix}: ${snippet}`;
+  });
+
+  return lines.join("\n");
+}
+
+// --- Scheduling Operations ---
+
+export function createScheduledMeeting(db: Database.Database, id: string, topic: string, createdBy: string, scheduledFor: string, invited: string[], priority: string = "normal", timeLimit: number = 30): void {
+  db.prepare(`INSERT INTO scheduled_meetings (id, topic, created_by, scheduled_for, invited_agents, priority, time_limit_minutes) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .run(id, topic, createdBy, scheduledFor, JSON.stringify(invited), priority, timeLimit);
+}
+
+export function getUpcomingMeetings(db: Database.Database, agentName?: string): any[] {
+  const all = db.prepare("SELECT * FROM scheduled_meetings WHERE status = 'scheduled' ORDER BY scheduled_for ASC").all() as any[];
+  if (!agentName) return all;
+  return all.filter((m: any) => {
+    const invited = safeParseArr(m.invited_agents);
+    return m.created_by === agentName || invited.includes(agentName);
+  });
+}
+
+export function activateScheduledMeeting(db: Database.Database, scheduleId: string, meetingId: string): void {
+  db.prepare("UPDATE scheduled_meetings SET status = 'activated', meeting_id = ? WHERE id = ?").run(meetingId, scheduleId);
+}
+
+// --- Hand-Raise Operations ---
+
+export function raiseHand(db: Database.Database, meetingId: string, agentName: string, selfScore: number, intentHash: string, inResponseTo: number | null, urgency: string = "normal"): void {
+  // Withdraw any existing pending hand-raise
+  db.prepare("UPDATE hand_raises SET status = 'withdrawn' WHERE meeting_id = ? AND agent_name = ? AND status = 'pending'").run(meetingId, agentName);
+  // Insert new
+  db.prepare(`INSERT INTO hand_raises (meeting_id, agent_name, self_score, intent_hash, in_response_to, urgency) VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(meetingId, agentName, selfScore, intentHash, inResponseTo, urgency);
+}
+
+export function lowerHand(db: Database.Database, meetingId: string, agentName: string): void {
+  db.prepare("UPDATE hand_raises SET status = 'withdrawn' WHERE meeting_id = ? AND agent_name = ? AND status = 'pending'").run(meetingId, agentName);
+}
+
+export function reEvaluateHand(db: Database.Database, meetingId: string, agentName: string, newScore: number, reason: string): void {
+  if (reason === "withdraw") {
+    lowerHand(db, meetingId, agentName);
+    return;
+  }
+  db.prepare("UPDATE hand_raises SET self_score = ? WHERE meeting_id = ? AND agent_name = ? AND status = 'pending'").run(newScore, meetingId, agentName);
+}
+
+export function getPendingHandRaises(db: Database.Database, meetingId: string): any[] {
+  return db.prepare("SELECT * FROM hand_raises WHERE meeting_id = ? AND status = 'pending' ORDER BY raised_at ASC").all(meetingId);
+}
+
+export function clearHandRaise(db: Database.Database, meetingId: string, agentName: string): void {
+  db.prepare("UPDATE hand_raises SET status = 'speaking' WHERE meeting_id = ? AND agent_name = ? AND status = 'pending'").run(meetingId, agentName);
+}
+
+export function expireStaleHandRaises(db: Database.Database, meetingId: string, maxAgeSec: number = 300): void {
+  db.prepare(`UPDATE hand_raises SET status = 'expired' WHERE meeting_id = ? AND status = 'pending' AND (julianday('now') - julianday(raised_at)) * 86400 > ?`).run(meetingId, maxAgeSec);
+}
+
+// --- Meeting Artifacts ---
+
+export function addArtifact(db: Database.Database, meetingId: string, type: string, content: string, assignedTo?: string): void {
+  db.prepare("INSERT INTO meeting_artifacts (meeting_id, artifact_type, content, assigned_to) VALUES (?, ?, ?, ?)").run(meetingId, type, content, assignedTo || null);
+}
+
+export function getArtifacts(db: Database.Database, meetingId: string): any[] {
+  return db.prepare("SELECT * FROM meeting_artifacts WHERE meeting_id = ? ORDER BY id").all(meetingId);
+}
+
+export function generateMeetingArtifacts(db: Database.Database, meetingId: string): any {
+  const meeting = getMeeting(db, meetingId);
+  const messages = db.prepare("SELECT * FROM messages WHERE meeting_id = ? ORDER BY id").all(meetingId) as any[];
+  const participants = getParticipants(db, meetingId);
+
+  const decisions = messages.filter((m: any) => m.msg_type === "decision");
+  const actionPattern = /(?:I will|I'll|action[: ]|TODO[: ]|will do|my task|assigned to me)/i;
+  const actionItems = messages.filter((m: any) => actionPattern.test(m.content));
+
+  for (const d of decisions) {
+    addArtifact(db, meetingId, "decision", d.content, d.agent_name);
+  }
+  for (const a of actionItems) {
+    addArtifact(db, meetingId, "action_item", a.content, a.agent_name);
+  }
+
+  return {
+    meeting_id: meetingId,
+    topic: meeting?.topic,
+    participant_count: participants.length,
+    message_count: messages.length,
+    decisions: decisions.length,
+    action_items: actionItems.length,
+  };
+}
+
+function safeParseArr(val: any): string[] {
+  if (Array.isArray(val)) return val;
+  if (typeof val === "string") { try { return JSON.parse(val); } catch { return []; } }
+  return [];
+}

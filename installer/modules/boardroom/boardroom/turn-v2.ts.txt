@@ -1,0 +1,172 @@
+/**
+ * MetaClaw Boardroom — Turn-Taking v2
+ *
+ * Dynamic priority queue with 5 signals:
+ *   1. Self-assessment (25%) — agent's own relevance judgment
+ *   2. Direct address (25%) — were they called on by name
+ *   3. Freshness (20%) — are they responding to recent conversation
+ *   4. Equity (15%) — balance participation
+ *   5. Urgency (15%) — critical > high > normal
+ *   × Staleness decay — old hand-raises lose weight
+ *
+ * After every message, ALL waiting agents re-evaluate.
+ * The queue reorders dynamically based on current conversation state.
+ */
+
+import type Database from "better-sqlite3";
+import { getRecentMessages, getMessageCount, getTurnStates, getParticipants, getPendingHandRaises, expireStaleHandRaises } from "./db.js";
+
+const V2_WEIGHTS = {
+  self_score: 0.25,
+  address: 0.25,
+  freshness: 0.20,
+  equity: 0.15,
+  urgency: 0.15,
+};
+
+const THRESHOLD = 20;
+
+export interface QueueEntry {
+  agent_name: string;
+  final_score: number;
+  components: {
+    self_score: number;
+    address_score: number;
+    freshness_score: number;
+    equity_score: number;
+    urgency_bonus: number;
+    staleness_decay: number;
+  };
+  reason: string;
+  should_speak: boolean;
+  intent_hash: string;
+  in_response_to: number | null;
+}
+
+export function computePriorityQueue(meetingId: string, db: Database.Database): QueueEntry[] {
+  // Expire old hand-raises
+  expireStaleHandRaises(db, meetingId, 300);
+
+  const handRaises = getPendingHandRaises(db, meetingId);
+  if (handRaises.length === 0) return [];
+
+  const recentMessages = getRecentMessages(db, meetingId, 5);
+  const currentMsgCount = getMessageCount(db, meetingId);
+  const turnStates = getTurnStates(db, meetingId);
+  const maxSpeakCount = Math.max(1, ...turnStates.map((t: any) => t.speak_count || 0));
+  const now = Date.now();
+
+  const queue: QueueEntry[] = [];
+
+  for (const hr of handRaises as any[]) {
+    // 1. SELF_SCORE — agent's own assessment
+    const selfScore = (hr.self_score || 0.5) * 100;
+
+    // 2. ADDRESS_SCORE — were they called on
+    const addressScore = scoreDirectAddress(hr.agent_name, recentMessages);
+
+    // 3. FRESHNESS_SCORE — responding to recent conversation?
+    let freshnessScore = 100;
+    if (hr.in_response_to) {
+      const pos = db.prepare("SELECT COUNT(*) as pos FROM messages WHERE meeting_id = ? AND id <= ?")
+        .get(meetingId, hr.in_response_to) as any;
+      const gap = currentMsgCount - (pos?.pos || 0);
+      freshnessScore = Math.max(0, 100 - gap * 30);
+    }
+
+    // 4. EQUITY_SCORE — balance participation
+    const myState = turnStates.find((t: any) => t.agent_name === hr.agent_name);
+    const mySpeakCount = myState?.speak_count || 0;
+    const equityScore = Math.max(10, 100 - (mySpeakCount / maxSpeakCount) * 90);
+
+    // 5. URGENCY_BONUS
+    const urgencyMap: Record<string, number> = { critical: 100, high: 70, normal: 30 };
+    const urgencyBonus = urgencyMap[hr.urgency] || 30;
+
+    // STALENESS_DECAY — old hand-raises lose weight
+    const raisedAt = new Date(hr.raised_at + "Z").getTime();
+    const secondsSinceRaise = (now - raisedAt) / 1000;
+    const stalenessDecay = Math.max(0.3, 1.0 - secondsSinceRaise / 300);
+
+    // COMPOSITE
+    const rawScore =
+      selfScore * V2_WEIGHTS.self_score +
+      addressScore * V2_WEIGHTS.address +
+      freshnessScore * V2_WEIGHTS.freshness +
+      equityScore * V2_WEIGHTS.equity +
+      urgencyBonus * V2_WEIGHTS.urgency;
+
+    const finalScore = Math.round(rawScore * stalenessDecay);
+
+    // Build reason
+    const reasons: string[] = [];
+    if (selfScore >= 70) reasons.push("high self-assessment");
+    if (addressScore >= 70) reasons.push("directly addressed");
+    if (freshnessScore >= 70) reasons.push("responding to recent");
+    if (equityScore >= 80) reasons.push("hasn't spoken much");
+    if (hr.urgency === "critical") reasons.push("CRITICAL");
+    else if (hr.urgency === "high") reasons.push("high urgency");
+    if (stalenessDecay < 0.7) reasons.push("hand-raise aging");
+
+    queue.push({
+      agent_name: hr.agent_name,
+      final_score: finalScore,
+      components: { self_score: selfScore, address_score: addressScore, freshness_score: freshnessScore, equity_score: equityScore, urgency_bonus: urgencyBonus, staleness_decay: stalenessDecay },
+      reason: reasons.join(", ") || "in queue",
+      should_speak: finalScore >= THRESHOLD,
+      intent_hash: hr.intent_hash || "",
+      in_response_to: hr.in_response_to,
+    });
+  }
+
+  // Sort: critical urgency always first, then by score, then by equity (less talkative wins ties)
+  queue.sort((a, b) => {
+    // Critical urgency trumps everything
+    if (a.components.urgency_bonus === 100 && b.components.urgency_bonus !== 100) return -1;
+    if (b.components.urgency_bonus === 100 && a.components.urgency_bonus !== 100) return 1;
+    // Then by score
+    if (b.final_score !== a.final_score) return b.final_score - a.final_score;
+    // Tie-break: less talkative goes first
+    return a.components.equity_score - b.components.equity_score;
+  });
+
+  return queue;
+}
+
+export function getNextSpeakerV2(meetingId: string, db: Database.Database): QueueEntry | null {
+  const queue = computePriorityQueue(meetingId, db);
+  return queue.length > 0 && queue[0].should_speak ? queue[0] : null;
+}
+
+export function scoreForAgentV2(meetingId: string, agentName: string, db: Database.Database): QueueEntry | null {
+  const queue = computePriorityQueue(meetingId, db);
+  return queue.find(q => q.agent_name === agentName) || null;
+}
+
+// Check if another agent's message overlaps with a pending hand-raise
+export function checkCoverage(intentHash: string, messageContent: string): number {
+  if (!intentHash || !messageContent) return 0;
+  const intentWords = new Set(intentHash.toLowerCase().split(/\s+/).filter(w => w.length > 3));
+  const msgWords = new Set(messageContent.toLowerCase().split(/\s+/).filter(w => w.length > 3));
+  let overlap = 0;
+  for (const w of intentWords) {
+    if (msgWords.has(w)) overlap++;
+  }
+  return intentWords.size > 0 ? overlap / intentWords.size : 0;
+}
+
+// --- Helper ---
+function scoreDirectAddress(agentName: string, recentMessages: any[]): number {
+  if (recentMessages.length === 0) return 0;
+  const nameLower = agentName.toLowerCase();
+  let best = 0;
+
+  for (const msg of recentMessages) {
+    let addresses: string[] = [];
+    try { addresses = typeof msg.addresses === "string" ? JSON.parse(msg.addresses) : (msg.addresses || []); } catch {}
+    if (addresses.some((a: string) => a.toLowerCase() === nameLower)) return 100;
+    if (msg.content.toLowerCase().includes(nameLower)) best = Math.max(best, 70);
+    if (msg.msg_type === "question" && msg.agent_name !== agentName) best = Math.max(best, 30);
+  }
+  return best;
+}

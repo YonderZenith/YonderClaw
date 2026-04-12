@@ -1,0 +1,33 @@
+{
+  "version": "1.0.0",
+  "initialized_at": "__TIMESTAMP__",
+  "days_operational": 0,
+  "agent_name": "__AGENT_NAME__",
+  "template": "__CLAW_TYPE__",
+  "operator": "",
+
+  "metrics": {
+    "sessions_completed": 0,
+    "tasks_completed": 0,
+    "tasks_failed": 0,
+    "error_rate": 0
+  },
+
+  "platforms": {},
+
+  "active_strategies": [],
+  "killed_strategies": [],
+
+  "current_focus": "Initial setup — read CLAUDE.md and SOUL.md",
+  "next_priority_action": "Run npm run status to verify systems, then introduce yourself to operator",
+
+  "system_context": {
+    "what_works": [],
+    "what_doesnt_work": [],
+    "core_rules": [],
+    "top_issues": [],
+    "last_self_eval": null
+  },
+
+  "session_notes": []
+}

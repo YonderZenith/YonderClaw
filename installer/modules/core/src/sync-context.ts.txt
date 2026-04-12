@@ -1,0 +1,133 @@
+/**
+ * MetaClaw — Context Auto-Sync
+ *
+ * Builds a fresh memory/CONTEXT.md every 30 min + before/after cron cycles.
+ * Pulls: state.json, tasks.json, system-context.json, recent messages, agent heartbeats.
+ * Gives the cron agent a single-file brain that stays current without LLM calls.
+ *
+ * Borrowed from AXIOM's pattern: "Cron agent went from 0 real work to 15 articles + 3 packages
+ * overnight after implementing this." — QIS bucket ops.memory.navigatable-context-architecture
+ */
+
+import fs from "fs";
+import path from "path";
+
+const PROJECT_ROOT = process.cwd();
+const OUTPUT = path.join(PROJECT_ROOT, "memory", "CONTEXT.md");
+
+function load<T>(file: string, fallback: T): T {
+  try { return JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, file), "utf-8")); }
+  catch { return fallback; }
+}
+
+function build(): string {
+  const state: any = load("data/state.json", {});
+  const tasks: any = load("data/tasks.json", { human_tasks: [], ai_tasks: [] });
+  const context: any = load("data/system-context.json", {});
+
+  const now = new Date().toISOString();
+  const pendingHTs = (tasks.human_tasks || []).filter((t: any) => t.status === "pending").slice(0, 5);
+  const pendingATs = (tasks.ai_tasks || []).filter((t: any) => t.status === "pending").slice(0, 5);
+  const criticalHTs = pendingHTs.filter((t: any) => t.priority === "critical");
+
+  const lines: string[] = [];
+  lines.push(`# CONTEXT.md — Live Agent Brief`);
+  lines.push(`**Synced:** ${now}`);
+  lines.push(`**Agent:** ${state.agent_name || "unknown"}`);
+  lines.push("");
+  lines.push("> This file is auto-generated. Read it FIRST every cycle. It's your single-file brain.");
+  lines.push("");
+
+  lines.push("## Current State");
+  lines.push(`- **Next priority action:** ${state.next_priority_action || "(none set)"}`);
+  if (state.last_action) lines.push(`- **Last action:** ${state.last_action}`);
+  if (state.metrics) lines.push(`- **Metrics:** ${JSON.stringify(state.metrics)}`);
+  lines.push("");
+
+  lines.push("## Setup Progress");
+  const progress = tasks.setup_progress;
+  if (progress) {
+    lines.push(`- Phase: **${progress.phase}**`);
+    lines.push(`- Completed: ${progress.completed_ht}/${progress.total_ht} (${progress.percent}%)`);
+  }
+  lines.push("");
+
+  if (criticalHTs.length > 0) {
+    lines.push("## 🚨 CRITICAL HUMAN TASKS (blocking work)");
+    for (const ht of criticalHTs) {
+      lines.push(`- **${ht.title}** (${ht.estimated_minutes}min) — ${ht.why}`);
+    }
+    lines.push("");
+  }
+
+  if (pendingHTs.length > 0) {
+    lines.push("## Pending Human Tasks (top 5)");
+    for (const ht of pendingHTs) {
+      lines.push(`- [${ht.priority}] ${ht.title}`);
+    }
+    lines.push("");
+  }
+
+  if (pendingATs.length > 0) {
+    lines.push("## Pending AI Tasks (top 5 — your work queue)");
+    for (const at of pendingATs) {
+      const blocked = at.requires_ht && at.requires_ht.length > 0 ? ` [blocked by ${at.requires_ht.join(",")}]` : "";
+      lines.push(`- [${at.priority}] ${at.title}${blocked}`);
+    }
+    lines.push("");
+  }
+
+  if (context.whatWorks && Array.isArray(context.whatWorks) && context.whatWorks.length > 0) {
+    lines.push("## What's Working (from system-context)");
+    for (const w of context.whatWorks.slice(0, 5)) {
+      lines.push(`- ${typeof w === "string" ? w : JSON.stringify(w).slice(0, 150)}`);
+    }
+    lines.push("");
+  }
+
+  if (context.whatDoesntWork && Array.isArray(context.whatDoesntWork) && context.whatDoesntWork.length > 0) {
+    lines.push("## What Doesn't Work (avoid these)");
+    for (const w of context.whatDoesntWork.slice(0, 5)) {
+      lines.push(`- ${typeof w === "string" ? w : JSON.stringify(w).slice(0, 150)}`);
+    }
+    lines.push("");
+  }
+
+  // Inbox — recent messages
+  try {
+    const inboxPath = `__INBOX_ROOT__\\${(state.agent_name || "").toLowerCase()}`;
+    if (fs.existsSync(inboxPath)) {
+      const files = fs.readdirSync(inboxPath).filter(f => f.endsWith(".json")).slice(-5);
+      if (files.length > 0) {
+        lines.push("## Recent Inbox Messages");
+        for (const f of files) lines.push(`- ${f}`);
+        lines.push("");
+      }
+    }
+  } catch {}
+
+  lines.push("## Always-Required Reads");
+  lines.push("- `CLAUDE.md` — identity + rules");
+  lines.push("- `memory/CAPABILITIES.md` — what you can do");
+  lines.push("- `memory/capabilities/_auto.md` — deterministic inventory");
+  lines.push("- Last 20 entries of `memory/logic-log.jsonl`");
+  lines.push("- `memory/stuck-patterns.md` — when stuck");
+  lines.push("");
+
+  lines.push("## Global Intelligence Network");
+  lines.push("- Relay: __RELAY_URL__");
+  lines.push("- Search: `curl -s __RELAY_URL__/buckets?q=KEYWORD`");
+  lines.push("- Before every task: query the network.");
+  lines.push("- After every task: deposit what you learned.");
+  lines.push("");
+
+  lines.push("---");
+  lines.push("Read this file FIRST. Then read CLAUDE.md. Then execute.");
+
+  return lines.join("\n");
+}
+
+// Run
+fs.mkdirSync(path.dirname(OUTPUT), { recursive: true });
+fs.writeFileSync(OUTPUT, build());
+console.log(`CONTEXT.md synced: ${OUTPUT}`);

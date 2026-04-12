@@ -1,0 +1,85 @@
+@echo off
+setlocal enabledelayedexpansion
+title __AGENT_NAME__ — Autonomous Cycle
+set PATH=C:\Program Files\nodejs;%USERPROFILE%\AppData\Roaming\npm;%USERPROFILE%\.local\bin;%PATH%
+cd /d "__PROJECT_DIR__"
+
+echo [%date% %time%] __AGENT_NAME__ cycle starting... >> data\logs\scheduler.log
+
+REM ========================================
+REM PRE-FLIGHT: Deterministic scans (non-LLM)
+REM ========================================
+REM Inventories what exists on disk. Agent cannot forget capabilities.
+call npx tsx src/scan-capabilities.ts 2>nul
+
+REM Syncs memory/CONTEXT.md — live brief pulled from state/tasks/context files.
+REM AXIOM pattern: cron agents went from 0 output to 15 articles overnight.
+call npx tsx src/sync-context.ts 2>nul
+
+REM ========================================
+REM PHASE 0: Meeting Check (BEFORE any work)
+REM ========================================
+if exist "scripts\meeting-check.bat" (
+    call scripts\meeting-check.bat __AGENT_NAME__
+    if !ERRORLEVEL! EQU 0 (
+        echo [%date% %time%] MEETING MODE — entering boardroom >> data\logs\scheduler.log
+        echo .meeting-lock > "data\.meeting-lock"
+        call npx tsx boardroom/meeting-agent.ts !MEETING_ID! __AGENT_NAME__ --dangerously-skip-permissions
+        del "data\.meeting-lock" 2>nul
+        echo [%date% %time%] Meeting completed >> data\logs\scheduler.log
+        goto :post_cycle
+    )
+)
+
+REM ========================================
+REM PHASE 1: Main autonomous cycle
+REM ========================================
+REM The cron agent (Sonnet, 30 turns, no context) needs EXPLICIT numbered steps
+REM "Use Read tool" tells the agent WHICH SDK tool to invoke — critical for Sonnet
+
+claude --dangerously-skip-permissions --print "AUTONOMOUS CYCLE for __AGENT_NAME__. Do these steps in EXACT order:
+
+1. Use Read tool to read __PROJECT_DIR__\CLAUDE.md — know who you are and your rules.
+2. Use Read tool to read __PROJECT_DIR__\memory\CAPABILITIES.md — what you can actually do.
+3. Use Read tool to read __PROJECT_DIR__\memory\capabilities\_auto.md — deterministic inventory (source of truth).
+4. Use Read tool to read last 20 lines of __PROJECT_DIR__\memory\logic-log.jsonl — what past-you decided.
+5. Use Read tool to read __PROJECT_DIR__\data\state.json — get next_priority_action and current metrics.
+6. Use Read tool to read __PROJECT_DIR__\data\tasks.json — find Human Tasks (HT) status and first pending AI Task (AT).
+7. Use Read tool to read __PROJECT_DIR__\data\system-context.json — get whatWorks, whatDoesntWork.
+8. BEFORE starting work — search the global intelligence network:
+   Use Bash tool: curl -s __RELAY_URL__/buckets?q=RELEVANT_KEYWORD
+   Apply what other agents found works.
+9. Execute the first pending AT or next_priority_action. Produce at least 1 tangible output. If blocked by an incomplete HT, skip to the next unblocked AT.
+
+META-COGNITION CHECKS (run during work):
+- Every 15 tool calls: re-read memory\stuck-patterns.md and answer: Am I stuck? What 3 alternatives haven't I tried?
+- Before writes/sends/spends: state the STRONGEST argument AGAINST your chosen approach.
+- After 2 errors: STOP, run the stuck-check, try a different approach.
+- If you gain a new capability: UPDATE memory\CAPABILITIES.md immediately.
+
+10. AFTER completing work:
+    - Append to memory\logic-log.jsonl: log any non-trivial decisions with alternatives considered
+    - Append to memory\reflections.jsonl: what worked, what failed, the lesson (be blame-specific)
+    - Append to memory\curiosity.md: anything you wondered about but didn't investigate
+    - Deposit insight to global network: curl -s -X POST __RELAY_URL__/packets -H 'Content-Type: application/json' -d '{\"bucket\":\"domain.category.problem\",\"agent_id\":\"mc_anon___AGENT_NAME__\",\"outcome\":{\"signal\":\"positive\",\"confidence\":0.9,\"insight\":\"what worked\",\"context\":{},\"metrics\":{}}}'
+    - NEVER deposit private info. Only operational insight.
+11. Update data\tasks.json — mark completed ATs, add new ATs.
+12. Update data\state.json with what you accomplished and set a new next_priority_action.
+13. Append to data\logs\cycle.log: timestamp, task completed, result summary.
+
+RULES:
+- Self-update runs AFTER work, not before. Do NOT run self-update unless 6+ hours since last.
+- Do NOT score self-update as a productive outcome.
+- Produce TANGIBLE output every cycle — an article, code, email, report, or actionable result.
+- If an AT is blocked by an incomplete HT, skip it and do the next unblocked one."
+
+echo [%date% %time%] __AGENT_NAME__ cycle completed. >> data\logs\scheduler.log
+
+:post_cycle
+REM ========================================
+REM POST-CYCLE: Dashboard refresh (lightweight, no agent SDK)
+REM ========================================
+call npx tsx src/update-dashboard.ts 2>nul
+node scripts\build-dashboard.cjs 2>nul
+
+exit /b 0

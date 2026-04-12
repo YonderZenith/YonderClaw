@@ -1,0 +1,41 @@
+@echo off
+setlocal enabledelayedexpansion
+REM Detect the Claude Code session ID for this agent's project directory
+REM Writes session ID to data\session-id.txt for reliable --resume launches
+
+set "PROJECT_DIR=__PROJECT_DIR__"
+set "SESSION_FILE=%PROJECT_DIR%\data\session-id.txt"
+
+REM Encode the project path the way Claude does (replace \ and : with -)
+set "ENCODED=%PROJECT_DIR:\=-%"
+set "ENCODED=!ENCODED::=-!"
+set "ENCODED=!ENCODED:~1!"
+
+set "SESSION_DIR=%USERPROFILE%\.claude\projects\!ENCODED!"
+
+REM Check if session directory exists
+if not exist "!SESSION_DIR!" (
+    echo No Claude session found for this project yet.
+    echo Run Claude Code in this directory first, then run this script.
+    exit /b 1
+)
+
+REM Find the most recent .jsonl file (that's the session)
+set "LATEST_SESSION="
+set "LATEST_TIME=0"
+for %%F in ("!SESSION_DIR!\*.jsonl") do (
+    set "FNAME=%%~nF"
+    set "LATEST_SESSION=!FNAME!"
+)
+
+if "!LATEST_SESSION!"=="" (
+    echo No session files found.
+    exit /b 1
+)
+
+REM Write session ID to file
+echo !LATEST_SESSION!> "!SESSION_FILE!"
+echo Session ID detected: !LATEST_SESSION!
+echo Saved to: !SESSION_FILE!
+echo.
+echo Future launches will use: claude --resume !LATEST_SESSION!

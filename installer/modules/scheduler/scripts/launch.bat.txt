@@ -1,0 +1,120 @@
+@echo off
+setlocal enabledelayedexpansion
+title MetaClaw: __AGENT_NAME__
+
+REM Ensure PATH includes Node.js and Claude
+set PATH=C:\Program Files\nodejs;%USERPROFILE%\AppData\Roaming\npm;%USERPROFILE%\.local\bin;%PATH%
+
+echo.
+echo   ==========================================
+echo   MetaClaw: __AGENT_NAME__
+echo   ==========================================
+echo.
+
+REM Set working directory
+cd /d "__PROJECT_DIR__"
+
+REM Find Claude executable (check npm install first, then .local)
+set "CLAUDE_CMD="
+if exist "%USERPROFILE%\AppData\Roaming\npm\claude.cmd" (
+    set "CLAUDE_CMD=%USERPROFILE%\AppData\Roaming\npm\claude.cmd"
+) else if exist "%USERPROFILE%\.local\bin\claude.exe" (
+    set "CLAUDE_CMD=%USERPROFILE%\.local\bin\claude.exe"
+) else (
+    where claude >nul 2>&1
+    if !ERRORLEVEL! equ 0 set "CLAUDE_CMD=claude"
+)
+
+if "!CLAUDE_CMD!"=="" (
+    echo   [ERROR] Claude Code not found.
+    echo   Install: https://claude.ai/download
+    pause
+    exit /b 1
+)
+
+REM Ensure authenticated
+if not exist "%USERPROFILE%\.claude\.credentials.json" (
+    echo   [!] Claude not logged in...
+    "!CLAUDE_CMD!" auth login
+    if not exist "%USERPROFILE%\.claude\.credentials.json" (
+        echo   [ERROR] Authentication failed.
+        pause
+        exit /b 1
+    )
+)
+
+echo   Directory: %CD%
+echo.
+
+REM === SESSION ID DETECTION ===
+REM Check if we have a saved session ID (most reliable)
+set "SESSION_ID="
+if exist "data\session-id.txt" (
+    set /p SESSION_ID=<"data\session-id.txt"
+    REM Trim whitespace
+    for /f "tokens=* delims= " %%a in ("!SESSION_ID!") do set "SESSION_ID=%%a"
+)
+
+if not "!SESSION_ID!"=="" (
+    echo   Resuming __AGENT_NAME__ (session: !SESSION_ID:~0,8!...)
+    echo.
+    "!CLAUDE_CMD!" --resume !SESSION_ID!
+    goto :post_session
+)
+
+REM No saved session — check if one exists in the project folder
+set "ENCODED_PATH=__ENCODED_PATH__"
+set "SESSION_DIR=%USERPROFILE%\.claude\projects\!ENCODED_PATH!"
+set "FOUND_SESSION="
+
+if exist "!SESSION_DIR!" (
+    for %%F in ("!SESSION_DIR!\*.jsonl") do (
+        set "FOUND_SESSION=%%~nF"
+    )
+)
+
+if not "!FOUND_SESSION!"=="" (
+    REM Save it for future launches
+    echo !FOUND_SESSION!> "data\session-id.txt"
+    echo   Resuming __AGENT_NAME__ (detected session: !FOUND_SESSION:~0,8!...)
+    echo.
+    "!CLAUDE_CMD!" --resume !FOUND_SESSION!
+    goto :post_session
+)
+
+REM No session at all — first launch
+echo   First launch - initializing __AGENT_NAME__...
+echo   Claude will read CLAUDE.md and SOUL.md for context.
+echo.
+"!CLAUDE_CMD!" --name "__AGENT_NAME__"
+
+REM After first launch, detect and save the session ID
+if exist "!SESSION_DIR!" (
+    for %%F in ("!SESSION_DIR!\*.jsonl") do (
+        set "FOUND_SESSION=%%~nF"
+    )
+    if not "!FOUND_SESSION!"=="" (
+        echo !FOUND_SESSION!> "data\session-id.txt"
+        echo   Session ID saved: !FOUND_SESSION:~0,8!...
+    )
+)
+
+:post_session
+echo.
+echo   __AGENT_NAME__ session ended.
+echo   Press any key to relaunch (Ctrl+C to quit)...
+pause >nul
+
+REM Re-read session ID (may have been updated)
+if exist "data\session-id.txt" (
+    set /p SESSION_ID=<"data\session-id.txt"
+    for /f "tokens=* delims= " %%a in ("!SESSION_ID!") do set "SESSION_ID=%%a"
+)
+
+if not "!SESSION_ID!"=="" (
+    echo   Resuming __AGENT_NAME__...
+    "!CLAUDE_CMD!" --resume !SESSION_ID!
+) else (
+    "!CLAUDE_CMD!" --continue
+)
+goto :post_session

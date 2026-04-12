@@ -1,0 +1,348 @@
+/**
+ * MetaClaw Swarm — HTTP Relay Server (Phase 1)
+ * Lightweight bucket relay: stores index + outcome packets.
+ * Every MetaClaw install knows this URL. Gets the meta swarm functional immediately.
+ *
+ * Usage:
+ *   npx tsx swarm/relay-server.ts [--port 7891]
+ */
+
+import { createServer, IncomingMessage, ServerResponse } from "node:http";
+import { URL } from "node:url";
+import Database from "better-sqlite3";
+import path from "path";
+import fs from "fs";
+import crypto from "crypto";
+import type { OutcomePacket, BucketMeta } from "./types.js";
+
+function getBucketId(bucketPath: string): string {
+  return crypto.createHash("sha256").update(bucketPath).digest("hex").slice(0, 16);
+}
+
+async function readBody(req: IncomingMessage): Promise<any> {
+  return new Promise((resolve) => {
+    let data = "";
+    req.on("data", (chunk) => (data += chunk));
+    req.on("end", () => {
+      try { resolve(JSON.parse(data)); } catch { resolve({}); }
+    });
+  });
+}
+
+function respond(res: ServerResponse, status: number, body: any) {
+  res.writeHead(status, {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+  });
+  res.end(JSON.stringify(body));
+}
+
+function match(method: string, reqMethod: string, pattern: string, pathname: string): Record<string, string> | null {
+  if (method !== reqMethod) return null;
+  const regex = new RegExp("^" + pattern.replace(/:(\w+)/g, "(?<$1>[^/]+)") + "$");
+  const m = pathname.match(regex);
+  if (!m) return null;
+  return m.groups || {};
+}
+
+export function startRelayServer(opts: { port?: number; dbPath?: string } = {}) {
+  const port = opts.port || 7891;
+  const dbFile = opts.dbPath || path.join(process.cwd(), "data", "swarm-relay.db");
+  fs.mkdirSync(path.dirname(dbFile), { recursive: true });
+
+  const db = new Database(dbFile);
+  db.pragma("journal_mode = WAL");
+  db.pragma("busy_timeout = 5000");
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS buckets (
+      bucket_id TEXT PRIMARY KEY,
+      path TEXT NOT NULL UNIQUE,
+      domain TEXT NOT NULL,
+      title TEXT NOT NULL DEFAULT '',
+      description TEXT NOT NULL DEFAULT '',
+      conditions TEXT DEFAULT '[]',
+      exclusions TEXT DEFAULT '[]',
+      packet_count INTEGER DEFAULT 0,
+      last_updated TEXT DEFAULT (datetime('now')),
+      confidence_avg REAL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS packets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      bucket_id TEXT NOT NULL REFERENCES buckets(bucket_id),
+      agent_id TEXT NOT NULL,
+      signal TEXT NOT NULL,
+      confidence REAL NOT NULL,
+      insight TEXT NOT NULL,
+      context TEXT DEFAULT '{}',
+      metrics TEXT DEFAULT '{}',
+      ts INTEGER NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(bucket_id, agent_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS taxonomy (
+      path TEXT PRIMARY KEY,
+      domain TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      parent TEXT,
+      depth INTEGER DEFAULT 0
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_packets_bucket ON packets(bucket_id);
+    CREATE INDEX IF NOT EXISTS idx_buckets_domain ON buckets(domain);
+  `);
+
+  // Seed base taxonomy if empty
+  const taxCount = (db.prepare("SELECT COUNT(*) as c FROM taxonomy").get() as any).c;
+  if (taxCount === 0) seedTaxonomy(db);
+
+  const server = createServer(async (req, res) => {
+    if (req.method === "OPTIONS") { respond(res, 200, {}); return; }
+
+    const url = new URL(req.url!, `http://${req.headers.host}`);
+    const pathname = url.pathname;
+    const method = req.method!;
+    let params: Record<string, string> | null;
+
+    try {
+      // --- Health ---
+      if ((params = match("GET", method, "/health", pathname))) {
+        const bucketCount = (db.prepare("SELECT COUNT(*) as c FROM buckets").get() as any).c;
+        const packetCount = (db.prepare("SELECT COUNT(*) as c FROM packets").get() as any).c;
+        respond(res, 200, { status: "ok", buckets: bucketCount, packets: packetCount });
+        return;
+      }
+
+      // --- Get taxonomy (the menu of all problem categories) ---
+      if ((params = match("GET", method, "/taxonomy", pathname))) {
+        const domain = url.searchParams.get("domain");
+        const rows = domain
+          ? db.prepare("SELECT * FROM taxonomy WHERE domain = ? ORDER BY path").all(domain)
+          : db.prepare("SELECT * FROM taxonomy ORDER BY path").all();
+        respond(res, 200, { taxonomy: rows });
+        return;
+      }
+
+      // --- Get bucket index (list all buckets with metadata) ---
+      if ((params = match("GET", method, "/buckets", pathname))) {
+        const domain = url.searchParams.get("domain");
+        const search = url.searchParams.get("q");
+        let rows;
+        if (search) {
+          rows = db.prepare("SELECT * FROM buckets WHERE path LIKE ? OR title LIKE ? OR description LIKE ? ORDER BY packet_count DESC")
+            .all(`%${search}%`, `%${search}%`, `%${search}%`);
+        } else if (domain) {
+          rows = db.prepare("SELECT * FROM buckets WHERE domain = ? ORDER BY packet_count DESC").all(domain);
+        } else {
+          rows = db.prepare("SELECT * FROM buckets ORDER BY packet_count DESC").all();
+        }
+        respond(res, 200, { buckets: rows.map(parseBucketRow) });
+        return;
+      }
+
+      // --- Get a specific bucket's packets ---
+      if ((params = match("GET", method, "/buckets/:id", pathname))) {
+        const bucket = db.prepare("SELECT * FROM buckets WHERE bucket_id = ?").get(params.id);
+        if (!bucket) { respond(res, 404, { error: "bucket not found" }); return; }
+        const packets = db.prepare("SELECT * FROM packets WHERE bucket_id = ? ORDER BY confidence DESC").all(params.id);
+        respond(res, 200, {
+          bucket: parseBucketRow(bucket),
+          packets: packets.map(parsePacketRow),
+        });
+        return;
+      }
+
+      // --- Lookup bucket by canonical path ---
+      if ((params = match("GET", method, "/lookup", pathname))) {
+        const bucketPath = url.searchParams.get("path");
+        if (!bucketPath) { respond(res, 400, { error: "path param required" }); return; }
+        const bucketId = getBucketId(bucketPath);
+        const bucket = db.prepare("SELECT * FROM buckets WHERE bucket_id = ?").get(bucketId);
+        if (!bucket) { respond(res, 404, { error: "no bucket for path", bucket_id: bucketId }); return; }
+        const packets = db.prepare("SELECT * FROM packets WHERE bucket_id = ? ORDER BY confidence DESC").all(bucketId);
+        respond(res, 200, {
+          bucket: parseBucketRow(bucket),
+          packets: packets.map(parsePacketRow),
+        });
+        return;
+      }
+
+      // --- Deposit an outcome packet ---
+      if ((params = match("POST", method, "/packets", pathname))) {
+        const body: OutcomePacket = await readBody(req);
+        if (!body.bucket || !body.outcome?.insight || !body.agent_id) {
+          respond(res, 400, { error: "bucket, agent_id, and outcome.insight required" }); return;
+        }
+
+        const bucketId = body.bucket_id || getBucketId(body.bucket);
+        const domain = body.bucket.split(".")[0];
+
+        // Ensure bucket exists
+        db.prepare(`
+          INSERT OR IGNORE INTO buckets (bucket_id, path, domain, title, description)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(bucketId, body.bucket, domain, body.bucket.split(".").pop() || "", body.outcome.insight.slice(0, 100));
+
+        // Upsert packet (one per agent per bucket — latest wins)
+        db.prepare(`
+          INSERT INTO packets (bucket_id, agent_id, signal, confidence, insight, context, metrics, ts)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(bucket_id, agent_id) DO UPDATE SET
+            signal=excluded.signal, confidence=excluded.confidence, insight=excluded.insight,
+            context=excluded.context, metrics=excluded.metrics, ts=excluded.ts, created_at=datetime('now')
+        `).run(
+          bucketId, body.agent_id,
+          body.outcome.signal || "neutral",
+          body.outcome.confidence || 0.5,
+          body.outcome.insight,
+          JSON.stringify(body.outcome.context || {}),
+          JSON.stringify(body.outcome.metrics || {}),
+          body.ts || Math.floor(Date.now() / 1000)
+        );
+
+        // Update bucket stats
+        const stats = db.prepare("SELECT COUNT(*) as c, AVG(confidence) as avg FROM packets WHERE bucket_id = ?").get(bucketId) as any;
+        db.prepare("UPDATE buckets SET packet_count = ?, confidence_avg = ?, last_updated = datetime('now') WHERE bucket_id = ?")
+          .run(stats.c, stats.avg, bucketId);
+
+        respond(res, 201, { ok: true, bucket_id: bucketId, packet_count: stats.c });
+        return;
+      }
+
+      // --- Split a bucket ---
+      if ((params = match("POST", method, "/buckets/:id/split", pathname))) {
+        const body = await readBody(req);
+        if (!body.new_paths || !Array.isArray(body.new_paths) || body.new_paths.length < 2) {
+          respond(res, 400, { error: "new_paths array with 2+ paths required" }); return;
+        }
+        const oldBucket = db.prepare("SELECT * FROM buckets WHERE bucket_id = ?").get(params.id) as any;
+        if (!oldBucket) { respond(res, 404, { error: "bucket not found" }); return; }
+
+        // Create new sub-buckets
+        const newBuckets = body.new_paths.map((p: string) => ({
+          id: getBucketId(p),
+          path: p,
+          domain: p.split(".")[0],
+        }));
+
+        for (const nb of newBuckets) {
+          db.prepare("INSERT OR IGNORE INTO buckets (bucket_id, path, domain, title, description) VALUES (?, ?, ?, ?, ?)")
+            .run(nb.id, nb.path, nb.domain, nb.path.split(".").pop() || "", `Split from ${oldBucket.path}`);
+        }
+
+        // Mark old bucket as split (keep it as a redirect)
+        db.prepare("UPDATE buckets SET description = ? WHERE bucket_id = ?")
+          .run(`SPLIT → ${body.new_paths.join(", ")}`, params.id);
+
+        respond(res, 200, { ok: true, old_bucket: params.id, new_buckets: newBuckets });
+        return;
+      }
+
+      // --- Swarm stats (for dashboard) ---
+      if ((params = match("GET", method, "/stats", pathname))) {
+        const bucketCount = (db.prepare("SELECT COUNT(*) as c FROM buckets").get() as any).c;
+        const packetCount = (db.prepare("SELECT COUNT(*) as c FROM packets").get() as any).c;
+        const agentCount = (db.prepare("SELECT COUNT(DISTINCT agent_id) as c FROM packets").get() as any).c;
+        const domains = db.prepare("SELECT domain, COUNT(*) as count FROM buckets GROUP BY domain ORDER BY count DESC").all();
+        const topBuckets = db.prepare("SELECT path, packet_count, confidence_avg FROM buckets ORDER BY packet_count DESC LIMIT 10").all();
+        const recentPackets = db.prepare("SELECT p.insight, p.signal, p.confidence, b.path FROM packets p JOIN buckets b ON p.bucket_id = b.bucket_id ORDER BY p.created_at DESC LIMIT 10").all();
+
+        respond(res, 200, {
+          buckets: bucketCount,
+          packets: packetCount,
+          agents: agentCount,
+          domains,
+          top_buckets: topBuckets,
+          recent_insights: recentPackets,
+        });
+        return;
+      }
+
+      respond(res, 404, { error: "not found" });
+    } catch (err: any) {
+      console.error("Swarm relay error:", err);
+      respond(res, 500, { error: err.message || "internal error" });
+    }
+  });
+
+  server.listen(port, "0.0.0.0", () => {
+    console.log(`Meta Swarm relay running on http://0.0.0.0:${port}`);
+    console.log(`Agents: POST /packets to deposit, GET /buckets to browse, GET /lookup?path=... to query`);
+  });
+
+  return server;
+}
+
+function parseBucketRow(row: any) {
+  return { ...row, conditions: safeJson(row.conditions), exclusions: safeJson(row.exclusions) };
+}
+
+function parsePacketRow(row: any) {
+  return { ...row, context: safeJson(row.context), metrics: safeJson(row.metrics) };
+}
+
+function safeJson(val: any) {
+  if (typeof val === "string") { try { return JSON.parse(val); } catch { return val; } }
+  return val;
+}
+
+function seedTaxonomy(db: Database.Database) {
+  const categories = [
+    // Outreach
+    ["outreach", "outreach", "Outreach", "Email, cold outreach, prospecting"],
+    ["outreach.email", "outreach", "Email Outreach", "Email-specific strategies"],
+    ["outreach.email.cold", "outreach", "Cold Email", "First-contact cold emails"],
+    ["outreach.email.cold.subject_lines", "outreach", "Subject Lines", "What subject lines work"],
+    ["outreach.email.cold.response_rate", "outreach", "Response Rate", "Improving reply rates"],
+    ["outreach.email.cold.deliverability", "outreach", "Deliverability", "Avoiding spam, domain health"],
+    ["outreach.email.followup", "outreach", "Follow-ups", "Follow-up timing and content"],
+    ["outreach.email.personalization", "outreach", "Personalization", "Personalizing at scale"],
+    ["outreach.prospecting", "outreach", "Prospecting", "Finding and qualifying prospects"],
+    // Research
+    ["research", "research", "Research", "Web research, report generation"],
+    ["research.web", "research", "Web Research", "Web scraping and search strategies"],
+    ["research.synthesis", "research", "Synthesis", "Combining multiple sources"],
+    ["research.accuracy", "research", "Accuracy", "Verifying facts and sources"],
+    // Support
+    ["support", "support", "Support", "Customer support and ticketing"],
+    ["support.triage", "support", "Triage", "Ticket classification and routing"],
+    ["support.auto_resolve", "support", "Auto-Resolution", "Automated ticket resolution"],
+    ["support.escalation", "support", "Escalation", "When and how to escalate"],
+    // Social
+    ["social", "social", "Social Media", "Content creation and engagement"],
+    ["social.content", "social", "Content Strategy", "What content performs well"],
+    ["social.scheduling", "social", "Scheduling", "Optimal posting times"],
+    ["social.engagement", "social", "Engagement", "Driving interaction"],
+    // Agent Operations
+    ["ops", "ops", "Agent Operations", "Running autonomous agents"],
+    ["ops.self_update", "ops", "Self-Update", "Prompt evolution and versioning"],
+    ["ops.error_handling", "ops", "Error Handling", "Recovering from failures"],
+    ["ops.cost_optimization", "ops", "Cost Optimization", "Reducing API spend"],
+    ["ops.scheduling", "ops", "Scheduling", "Cron and task scheduling"],
+    ["ops.session_management", "ops", "Sessions", "Claude session persistence"],
+    // Platform
+    ["platform", "platform", "Platform", "MetaClaw platform issues"],
+    ["platform.install", "platform", "Installation", "Installer and setup issues"],
+    ["platform.dashboard", "platform", "Dashboard", "Dashboard generation and display"],
+    ["platform.comms", "platform", "Communications", "Inter-agent messaging"],
+  ];
+
+  const stmt = db.prepare("INSERT OR IGNORE INTO taxonomy (path, domain, title, description, parent, depth) VALUES (?, ?, ?, ?, ?, ?)");
+  for (const [p, domain, title, desc] of categories) {
+    const parts = (p as string).split(".");
+    const parent = parts.length > 1 ? parts.slice(0, -1).join(".") : null;
+    stmt.run(p, domain, title, desc, parent, parts.length - 1);
+  }
+}
+
+// --- CLI entry point ---
+if (process.argv[1]?.replace(/\\/g, "/").includes("swarm/relay")) {
+  const portArg = process.argv.indexOf("--port");
+  const port = portArg >= 0 ? parseInt(process.argv[portArg + 1]) : 7891;
+  startRelayServer({ port });
+}

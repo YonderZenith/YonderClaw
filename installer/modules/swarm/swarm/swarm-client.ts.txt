@@ -1,0 +1,303 @@
+/**
+ * MetaClaw Swarm Client — Publish & Subscribe to QIS Buckets
+ *
+ * Two tiers:
+ *   1. Personal Swarm (local) — shared directory, LAN, private
+ *   2. Meta Swarm (global) — HTTP relay, opt-in, no PII
+ *
+ * Usage:
+ *   import { SwarmClient } from "./swarm/swarm-client.js";
+ *   const swarm = new SwarmClient({ agentName: "Atlas", relayUrl: "__RELAY_URL__" });
+ *   await swarm.deposit("ops.session.resume_reliability", { method: "...", outcome: "...", score: 9 });
+ *   const insights = await swarm.query("ops.session.resume_reliability");
+ *   const results = await swarm.search("session resume");
+ */
+
+import fs from "fs";
+import path from "path";
+import crypto from "crypto";
+
+export interface SwarmConfig {
+  agentName: string;
+  relayUrl?: string;         // Global meta swarm relay URL
+  localBucketsPath?: string; // Personal swarm path (default: data/buckets)
+  enableGlobal?: boolean;    // Opt-in to meta swarm (default false)
+  enableLocal?: boolean;     // Use local personal swarm (default true)
+  agentId?: string;          // Anonymized ID for global deposits
+}
+
+export interface DepositData {
+  method: string;
+  outcome: string;
+  score: number;
+  template_fields?: Record<string, any>;
+  metadata?: Record<string, any>;
+}
+
+export interface InsightPacket {
+  agent: string;
+  timestamp: string;
+  method: string;
+  outcome: string;
+  score: number;
+  template_fields?: Record<string, any>;
+  metadata?: Record<string, any>;
+  source: "local" | "global";
+}
+
+export class SwarmClient {
+  private config: Required<SwarmConfig>;
+
+  constructor(opts: SwarmConfig) {
+    this.config = {
+      agentName: opts.agentName,
+      relayUrl: opts.relayUrl || "__RELAY_URL__",
+      localBucketsPath: opts.localBucketsPath || "__LOCAL_BUCKETS_PATH__",
+      enableGlobal: opts.enableGlobal ?? false,
+      enableLocal: opts.enableLocal ?? true,
+      agentId: opts.agentId || this.generateAnonId(opts.agentName),
+    };
+  }
+
+  // --- Deposit insight to bucket(s) ---
+  async deposit(bucketPath: string, data: DepositData): Promise<{ local: boolean; global: boolean }> {
+    const results = { local: false, global: false };
+
+    // Local personal swarm
+    if (this.config.enableLocal) {
+      try {
+        this.depositLocal(bucketPath, data);
+        results.local = true;
+      } catch (e) {
+        console.error("Local deposit failed:", (e as Error).message);
+      }
+    }
+
+    // Global meta swarm
+    if (this.config.enableGlobal) {
+      try {
+        await this.depositGlobal(bucketPath, data);
+        results.global = true;
+      } catch (e) {
+        console.error("Global deposit failed:", (e as Error).message);
+      }
+    }
+
+    return results;
+  }
+
+  // --- Query a specific bucket ---
+  async query(bucketPath: string): Promise<InsightPacket[]> {
+    const insights: InsightPacket[] = [];
+
+    // Read local
+    if (this.config.enableLocal) {
+      insights.push(...this.queryLocal(bucketPath));
+    }
+
+    // Read global
+    if (this.config.enableGlobal) {
+      try {
+        insights.push(...await this.queryGlobal(bucketPath));
+      } catch {}
+    }
+
+    // Sort by score descending
+    return insights.sort((a, b) => b.score - a.score);
+  }
+
+  // --- Search across all buckets by keyword ---
+  async search(keyword: string): Promise<Array<{ path: string; problem: string; packets: number; source: string }>> {
+    const results: Array<{ path: string; problem: string; packets: number; source: string }> = [];
+
+    // Search local
+    if (this.config.enableLocal) {
+      results.push(...this.searchLocal(keyword));
+    }
+
+    // Search global
+    if (this.config.enableGlobal) {
+      try {
+        results.push(...await this.searchGlobal(keyword));
+      } catch {}
+    }
+
+    return results;
+  }
+
+  // --- Get taxonomy (list of all available problem categories) ---
+  async getTaxonomy(domain?: string): Promise<any[]> {
+    const results: any[] = [];
+
+    if (this.config.enableLocal) {
+      try {
+        const reg = JSON.parse(fs.readFileSync(path.join(this.config.localBucketsPath, "REGISTRY.json"), "utf-8"));
+        const buckets = domain ? reg.buckets.filter((b: any) => b.domain === domain) : reg.buckets;
+        results.push(...buckets.map((b: any) => ({ ...b, source: "local" })));
+      } catch {}
+    }
+
+    if (this.config.enableGlobal) {
+      try {
+        const url = domain
+          ? `${this.config.relayUrl}/taxonomy?domain=${domain}`
+          : `${this.config.relayUrl}/taxonomy`;
+        const res = await fetch(url);
+        const data = await res.json();
+        results.push(...(data.taxonomy || []).map((t: any) => ({ ...t, source: "global" })));
+      } catch {}
+    }
+
+    return results;
+  }
+
+  // --- Stats ---
+  async stats(): Promise<{ local: any; global: any }> {
+    let local = null;
+    let global = null;
+
+    if (this.config.enableLocal) {
+      try {
+        const dirs = fs.readdirSync(this.config.localBucketsPath, { withFileTypes: true })
+          .filter(d => d.isDirectory() && d.name !== "scripts");
+        let totalPackets = 0;
+        for (const d of dirs) {
+          const jsons = fs.readdirSync(path.join(this.config.localBucketsPath, d.name))
+            .filter(f => f.endsWith(".json"));
+          totalPackets += jsons.length;
+        }
+        local = { buckets: dirs.length, packets: totalPackets };
+      } catch {}
+    }
+
+    if (this.config.enableGlobal) {
+      try {
+        const res = await fetch(`${this.config.relayUrl}/stats`);
+        global = await res.json();
+      } catch { global = { error: "relay unreachable" }; }
+    }
+
+    return { local, global };
+  }
+
+  // --- Local Operations ---
+
+  private depositLocal(bucketPath: string, data: DepositData): void {
+    const folderName = bucketPath.replace(/\./g, ".");
+    const bucketDir = path.join(this.config.localBucketsPath, folderName);
+    fs.mkdirSync(bucketDir, { recursive: true });
+
+    const packet = {
+      agent: this.config.agentName,
+      timestamp: new Date().toISOString(),
+      method: data.method,
+      outcome: data.outcome,
+      score: data.score,
+      ...(data.template_fields ? { template_fields: data.template_fields } : {}),
+      ...(data.metadata ? { metadata: data.metadata } : {}),
+    };
+
+    const filename = this.config.agentName.toLowerCase().replace(/[^a-z0-9]/g, "-") + ".json";
+    fs.writeFileSync(path.join(bucketDir, filename), JSON.stringify(packet, null, 2));
+  }
+
+  private queryLocal(bucketPath: string): InsightPacket[] {
+    const bucketDir = path.join(this.config.localBucketsPath, bucketPath);
+    if (!fs.existsSync(bucketDir)) return [];
+
+    const files = fs.readdirSync(bucketDir).filter(f => f.endsWith(".json"));
+    return files.map(f => {
+      try {
+        const raw = JSON.parse(fs.readFileSync(path.join(bucketDir, f), "utf-8"));
+        return { ...raw, source: "local" as const };
+      } catch { return null; }
+    }).filter(Boolean) as InsightPacket[];
+  }
+
+  private searchLocal(keyword: string): Array<{ path: string; problem: string; packets: number; source: string }> {
+    const kw = keyword.toLowerCase();
+    try {
+      const reg = JSON.parse(fs.readFileSync(path.join(this.config.localBucketsPath, "REGISTRY.json"), "utf-8"));
+      return (reg.buckets || [])
+        .filter((b: any) =>
+          b.name.toLowerCase().includes(kw) ||
+          (b.problem || "").toLowerCase().includes(kw))
+        .map((b: any) => {
+          const dir = path.join(this.config.localBucketsPath, b.name);
+          let packets = 0;
+          try { packets = fs.readdirSync(dir).filter((f: string) => f.endsWith(".json")).length; } catch {}
+          return { path: b.name, problem: b.problem || "", packets, source: "local" };
+        });
+    } catch { return []; }
+  }
+
+  // --- Global Operations ---
+
+  private async depositGlobal(bucketPath: string, data: DepositData): Promise<void> {
+    const packet = {
+      v: 1,
+      bucket: bucketPath,
+      bucket_id: this.hashBucket(bucketPath),
+      ts: Math.floor(Date.now() / 1000),
+      agent_id: this.config.agentId,
+      outcome: {
+        signal: data.score >= 7 ? "positive" : data.score >= 4 ? "neutral" : "negative",
+        confidence: data.score / 10,
+        insight: data.method + " → " + data.outcome,
+        context: data.template_fields || {},
+        metrics: data.metadata || {},
+      },
+    };
+
+    const res = await fetch(`${this.config.relayUrl}/packets`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(packet),
+    });
+
+    if (!res.ok) throw new Error(`Relay error: ${res.status}`);
+  }
+
+  private async queryGlobal(bucketPath: string): Promise<InsightPacket[]> {
+    const bucketId = this.hashBucket(bucketPath);
+    const res = await fetch(`${this.config.relayUrl}/buckets/${bucketId}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+
+    return (data.packets || []).map((p: any) => ({
+      agent: p.agent_id,
+      timestamp: new Date(p.ts * 1000).toISOString(),
+      method: p.insight?.split(" → ")[0] || p.insight,
+      outcome: p.insight?.split(" → ")[1] || "",
+      score: Math.round((p.confidence || 0) * 10),
+      template_fields: p.context,
+      metadata: p.metrics,
+      source: "global" as const,
+    }));
+  }
+
+  private async searchGlobal(keyword: string): Promise<Array<{ path: string; problem: string; packets: number; source: string }>> {
+    const res = await fetch(`${this.config.relayUrl}/buckets?q=${encodeURIComponent(keyword)}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.buckets || []).map((b: any) => ({
+      path: b.path,
+      problem: b.description || b.title || "",
+      packets: b.packet_count || 0,
+      source: "global",
+    }));
+  }
+
+  // --- Utilities ---
+
+  private hashBucket(bucketPath: string): string {
+    return crypto.createHash("sha256").update(bucketPath).digest("hex").slice(0, 16);
+  }
+
+  private generateAnonId(agentName: string): string {
+    const hash = crypto.createHash("sha256")
+      .update(agentName + (process.env.COMPUTERNAME || "unknown"))
+      .digest("hex").slice(0, 4);
+    return `mc_anon_${hash}`;
+  }
+}

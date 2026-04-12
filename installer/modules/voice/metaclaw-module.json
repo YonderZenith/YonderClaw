@@ -1,0 +1,16 @@
+{
+  "name": "voice",
+  "displayName": "Voice — Push-to-Talk & TTS",
+  "version": "1.0.0",
+  "description": "Browser-based voice I/O: push-to-talk, always-on listening, Microsoft Jenny neural TTS",
+  "category": "ui",
+  "alwaysInstall": true,
+  "engines": { "metaclaw": ">=3.3.0" },
+  "requires": { "modules": ["dashboard"] },
+  "contributes": {
+    "dashboard": {
+      "inject": "voice"
+    },
+    "claudeMd": ["voice"]
+  }
+}

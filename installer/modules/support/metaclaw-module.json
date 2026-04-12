@@ -1,0 +1,15 @@
+{
+  "name": "support",
+  "displayName": "Support Agent",
+  "version": "1.0.0",
+  "description": "Inbox monitoring, ticket triage, auto-resolution, escalation",
+  "category": "agent-type",
+  "engines": { "metaclaw": ">=3.3.0" },
+  "requires": { "modules": ["core", "scheduler"] },
+  "contributes": {
+    "src": { "agent-support.ts.txt": "src/agent.ts" },
+    "npmScripts": { "start": "tsx src/agent.ts", "dry-run": "tsx src/agent.ts --dry-run" },
+    "claudeMd": ["support-commands"]
+  },
+  "placeholders": ["__AGENT_NAME__", "__SESSION_NAME__", "__SYSTEM_PROMPT__"]
+}
