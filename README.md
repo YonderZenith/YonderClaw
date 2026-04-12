@@ -55,7 +55,13 @@ Your agents don't just run. They **learn, adapt, and improve themselves** throug
 ## Quick Start
 
 ```bash
-# Clone and run — that's it
+# One command — that's it
+npx create-metaclaw
+```
+
+Or clone the repo:
+
+```bash
 git clone https://github.com/YonderZenith/MetaClaw.git
 cd MetaClaw
 npm install

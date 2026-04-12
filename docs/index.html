@@ -387,6 +387,60 @@ nav .container {
 .qis-features li:last-child { border-bottom: none; }
 .qis-check { color: var(--green); font-weight: 700; flex-shrink: 0; }
 
+/* ── Roadmap ── */
+.roadmap-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 24px;
+}
+.roadmap-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 16px; padding: 32px; position: relative;
+  transition: all 0.3s;
+}
+.roadmap-card:hover {
+  border-color: rgba(0, 190, 234, 0.25);
+  transform: translateY(-3px);
+  box-shadow: 0 8px 32px rgba(0, 190, 234, 0.06);
+}
+.roadmap-hot {
+  border-color: rgba(255, 215, 0, 0.2);
+  background: linear-gradient(135deg, rgba(255, 215, 0, 0.03), var(--bg-card));
+}
+.roadmap-hot:hover { border-color: rgba(255, 215, 0, 0.4); }
+.roadmap-tag {
+  position: absolute; top: 16px; right: 16px;
+  padding: 3px 10px; border-radius: 50px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.5px;
+  background: rgba(0, 190, 234, 0.1); color: var(--cyan);
+}
+.roadmap-hot .roadmap-tag {
+  background: rgba(255, 215, 0, 0.12); color: var(--gold);
+}
+.roadmap-icon { font-size: 32px; margin-bottom: 14px; }
+.roadmap-card h3 { font-size: 19px; margin-bottom: 10px; }
+.roadmap-card p { font-size: 14px; color: var(--text-muted); line-height: 1.7; }
+.roadmap-card strong { color: var(--text); }
+.roadmap-status {
+  margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border);
+  font-size: 12px; color: var(--text-muted);
+  display: flex; align-items: center; gap: 8px;
+}
+.status-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.status-dot.hot {
+  background: var(--gold);
+  box-shadow: 0 0 8px rgba(255, 215, 0, 0.5);
+  animation: pulse 2s infinite;
+}
+.status-dot.soon {
+  background: var(--green);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+}
+.status-dot.planned {
+  background: var(--cyan); opacity: 0.5;
+}
+
 /* ── Footer ── */
 footer {
   padding: 60px 0 40px;
@@ -451,6 +505,7 @@ footer .links a:hover { color: var(--cyan); }
     <li><a href="#architecture">Architecture</a></li>
     <li><a href="#how-it-works">How It Works</a></li>
     <li><a href="#qis">QIS Network</a></li>
+    <li><a href="#roadmap">Roadmap</a></li>
   </ul>
   <a href="https://github.com/YonderZenith/MetaClaw" class="nav-cta">GitHub</a>
 </div>
@@ -464,7 +519,7 @@ footer .links a:hover { color: var(--cyan); }
   </div>
   <div class="hero-badge">
     <span class="dot"></span>
-    Open Source &middot; MIT Licensed
+    Open Source &middot; MIT Licensed &middot; <code style="background:rgba(0,190,234,0.15); padding:2px 6px; border-radius:4px; font-size:12px;">npx create-metaclaw</code>
   </div>
   <h1><span class="gradient">MetaClaw</span></h1>
   <p>Deploy autonomous, self-improving AI agents in minutes. Pick a template, answer a few questions, and your agent builds itself.</p>
@@ -488,9 +543,11 @@ footer .links a:hover { color: var(--cyan); }
       <span class="terminal-title">terminal</span>
     </div>
     <div class="terminal-body">
+      <div><span class="comment"># One command. That's it.</span></div>
+      <div><span class="prompt">$</span> <span class="cmd">npx create-metaclaw</span></div>
+      <div style="margin-top:6px"><span class="comment"># Or clone the repo:</span></div>
       <div><span class="prompt">$</span> <span class="cmd">git clone https://github.com/YonderZenith/MetaClaw.git</span></div>
-      <div><span class="prompt">$</span> <span class="cmd">cd MetaClaw && npm install</span></div>
-      <div><span class="prompt">$</span> <span class="cmd">npm start</span></div>
+      <div><span class="prompt">$</span> <span class="cmd">cd MetaClaw && npm install && npm start</span></div>
       <div class="output" style="margin-top:8px">
         &nbsp;&nbsp;&#9608; MetaClaw v3.3.0<br/>
         &nbsp;&nbsp;Autonomous AI Agents &mdash; Plug &amp; Play<br/>
@@ -771,6 +828,87 @@ footer .links a:hover { color: var(--cyan); }
         QIS License Details &rarr;
       </a>
     </div>
+  </div>
+</div>
+</section>
+
+<!-- ═══ ROADMAP ═══ -->
+<section class="section" id="roadmap">
+<div class="container">
+  <div class="reveal">
+    <div class="section-label" style="color:var(--gold)">Coming Soon</div>
+    <h2>What's Next.</h2>
+    <p class="subtitle">MetaClaw is just getting started. Here's what's shipping next.</p>
+  </div>
+
+  <div class="roadmap-grid reveal">
+
+    <div class="roadmap-card roadmap-hot">
+      <div class="roadmap-tag">Days Away</div>
+      <div class="roadmap-icon">&#129302;</div>
+      <h3>MetaClaw Body</h3>
+      <p>Give your agent a face. A companion package with <strong>LED matrix eyes, animated mouth, camera vision (YOLO), and voice</strong> — plug into any MetaClaw agent. Hardware specs + 3D print files included. Your AI gets a physical presence.</p>
+      <div class="roadmap-status">
+        <span class="status-dot hot"></span>
+        In Development — Companion Package
+      </div>
+    </div>
+
+    <div class="roadmap-card roadmap-hot">
+      <div class="roadmap-tag">v4.0</div>
+      <div class="roadmap-icon">&#9889;</div>
+      <h3>React Command Center</h3>
+      <p>Full <strong>React-based dashboard UI</strong> replacing the static HTML Command Center. Real-time agent monitoring, task management, prompt editor, metrics visualization — all in a modern app interface. Already working.</p>
+      <div class="roadmap-status">
+        <span class="status-dot hot"></span>
+        In Development — Coming in v4
+      </div>
+    </div>
+
+    <div class="roadmap-card">
+      <div class="roadmap-tag">v3.4</div>
+      <div class="roadmap-icon">&#127979;</div>
+      <h3>Agent Boardroom</h3>
+      <p>Multi-agent meetings with <strong>intelligent turn-taking</strong>. Agents discuss strategy, vote on decisions, and coordinate across specialties. SQLite-backed coordinator with 4-signal scoring — direct address, expertise relevance, recency, and pending contributions.</p>
+      <div class="roadmap-status">
+        <span class="status-dot soon"></span>
+        Architecture Complete
+      </div>
+    </div>
+
+    <div class="roadmap-card">
+      <div class="roadmap-tag">v3.4</div>
+      <div class="roadmap-icon">&#127908;</div>
+      <h3>Voice Control</h3>
+      <p>Talk to your agent. <strong>Push-to-talk voice interface</strong> built on Web Speech API — speech-to-text commands, natural language TTS responses. Zero API keys, works in Edge. Your dashboard becomes a conversation.</p>
+      <div class="roadmap-status">
+        <span class="status-dot soon"></span>
+        Research Complete
+      </div>
+    </div>
+
+    <div class="roadmap-card">
+      <div class="roadmap-tag">v4.0</div>
+      <div class="roadmap-icon">&#127758;</div>
+      <h3>Cross-Platform</h3>
+      <p><strong>macOS and Linux support.</strong> Native installers for every platform. Same plug-and-play experience, everywhere.</p>
+      <div class="roadmap-status">
+        <span class="status-dot planned"></span>
+        Planned
+      </div>
+    </div>
+
+    <div class="roadmap-card">
+      <div class="roadmap-tag">v4.0+</div>
+      <div class="roadmap-icon">&#128301;</div>
+      <h3>QIS Live Demo Mode</h3>
+      <p>Watch <strong>quadratic intelligence scaling in real-time</strong>. Add nodes to the network and see pairwise insights explode: N=2 gives 1 pair, N=10 gives 45, N=100 gives 4,950. The QIS Protocol visualized on your own agents.</p>
+      <div class="roadmap-status">
+        <span class="status-dot planned"></span>
+        Planned
+      </div>
+    </div>
+
   </div>
 </div>
 </section>
