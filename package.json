@@ -1,6 +1,6 @@
 {
   "name": "create-metaclaw",
-  "version": "3.3.1",
+  "version": "3.3.2",
   "description": "MetaClaw — Autonomous AI Agent Platform by Yonder Zenith LLC",
   "type": "module",
   "bin": {
