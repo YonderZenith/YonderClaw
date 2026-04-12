@@ -232,6 +232,28 @@ nav .container {
   margin-bottom: 56px;
 }
 
+/* ── Stats Bar ── */
+.stats-bar {
+  padding: 48px 0;
+  background: linear-gradient(180deg, rgba(0, 190, 234, 0.03), transparent);
+  border-bottom: 1px solid var(--border);
+  position: relative; z-index: 1;
+}
+.stats-grid {
+  display: flex; justify-content: center; gap: 48px; flex-wrap: wrap;
+}
+.stat { text-align: center; }
+.stat-value {
+  font-size: 40px; font-weight: 800; letter-spacing: -1px;
+  background: linear-gradient(135deg, var(--cyan), var(--gold));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.stat-label {
+  font-size: 13px; color: var(--text-muted); margin-top: 4px;
+  text-transform: uppercase; letter-spacing: 1px;
+}
+
 /* ── Why MetaClaw ── */
 .why-grid {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -322,6 +344,30 @@ nav .container {
 .feature-card h3 { font-size: 17px; margin-bottom: 8px; }
 .feature-card p { font-size: 14px; color: var(--text-muted); line-height: 1.6; }
 
+/* Steps — enhanced */
+.step {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 16px; position: relative;
+  transition: all 0.3s;
+}
+.step:hover {
+  border-color: rgba(0, 190, 234, 0.3);
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(0, 190, 234, 0.08);
+}
+.step::before {
+  background: linear-gradient(135deg, rgba(0, 190, 234, 0.15), rgba(0, 190, 234, 0.05));
+  border: 2px solid var(--cyan);
+  box-shadow: 0 0 16px rgba(0, 190, 234, 0.2);
+}
+.step h3 { color: var(--cyan); }
+.step::after {
+  content: '→'; position: absolute; right: -14px; top: 50%;
+  transform: translateY(-50%); color: var(--cyan); opacity: 0.3;
+  font-size: 20px; font-weight: 700;
+}
+.step:last-child::after { display: none; }
+
 /* ── Architecture ── */
 .arch-visual {
   background: var(--bg-card);
@@ -374,8 +420,8 @@ nav .container {
   text-align: center;
 }
 .qis-logo-img {
-  height: 100px; margin-bottom: 24px;
-  filter: drop-shadow(0 0 20px rgba(0, 190, 234, 0.3));
+  height: 180px; margin-bottom: 28px;
+  filter: drop-shadow(0 0 30px rgba(0, 190, 234, 0.4));
 }
 .qis-visual svg { max-width: 100%; }
 .qis-features { list-style: none; }
@@ -389,8 +435,8 @@ nav .container {
 
 /* ── Roadmap ── */
 .roadmap-grid {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 24px;
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 24px; max-width: 1100px; margin: 0 auto;
 }
 .roadmap-card {
   background: var(--bg-card); border: 1px solid var(--border);
@@ -497,6 +543,10 @@ footer .links a:hover { color: var(--cyan); }
   .hero h1 { letter-spacing: -1px; }
   .section { padding: 80px 0; }
   .arch-visual { font-size: 11px; padding: 24px 16px; }
+  .roadmap-grid { grid-template-columns: 1fr; }
+  .stats-grid { gap: 24px; }
+  .stat-value { font-size: 30px; }
+  .step::after { display: none; }
 }
 </style>
 </head>
@@ -564,6 +614,34 @@ footer .links a:hover { color: var(--cyan); }
         &nbsp;&nbsp;<span style="color:var(--green)">&#10003;</span> Claude Code CLI found<br/>
         &nbsp;&nbsp;<span style="color:var(--cyan)">&#9656;</span> Select your agent type...
       </div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ═══ STATS BAR ═══ -->
+<section class="stats-bar">
+<div class="container">
+  <div class="stats-grid">
+    <div class="stat">
+      <div class="stat-value">5</div>
+      <div class="stat-label">Agent Types</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">13</div>
+      <div class="stat-label">Step Autonomous Loop</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">11</div>
+      <div class="stat-label">Module System</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">$0</div>
+      <div class="stat-label">API Costs</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">v5</div>
+      <div class="stat-label">CognitionCore Brain</div>
     </div>
   </div>
 </div>
@@ -715,8 +793,8 @@ footer .links a:hover { color: var(--cyan); }
 <div class="container">
   <div class="reveal">
     <div class="section-label">Architecture</div>
-    <h2>File-Based Agent Brain.</h2>
-    <p class="subtitle">No persistent memory process. The agent's entire cognition lives in files — rebuilt every cycle, always consistent.</p>
+    <h2>CognitionCore v5 — File-Based Agent Brain.</h2>
+    <p class="subtitle">No persistent memory process. The agent's entire cognition lives in files — rebuilt every cycle, always consistent. Five generations of field-tested architecture.</p>
   </div>
   <div class="arch-visual reveal">
 <pre>
@@ -911,6 +989,22 @@ footer .links a:hover { color: var(--cyan); }
       <div class="roadmap-status">
         <span class="status-dot planned"></span>
         Planned
+      </div>
+    </div>
+
+    <div class="roadmap-card roadmap-hot">
+      <div class="roadmap-tag">v4.0</div>
+      <div class="roadmap-icon">&#128722;</div>
+      <h3>Claw Module Exchange</h3>
+      <p>A <strong>community-driven module marketplace</strong>. Browse, install, and share agent capabilities. Build a custom module — email, Slack, CRM, analytics, anything — publish it, and every MetaClaw agent can use it. Our modules plus yours.</p>
+      <div class="roadmap-body-specs">
+        <span>&#128268; Install in one command</span>
+        <span>&#129309; Community contributions</span>
+        <span>&#128230; Publish your own</span>
+      </div>
+      <div class="roadmap-status">
+        <span class="status-dot soon"></span>
+        Architecture Planned
       </div>
     </div>
 
