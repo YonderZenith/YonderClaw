@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/metaclaw-banner.svg" alt="MetaClaw" width="700" />
+  <img src="docs/assets/yonderclaw-banner.svg" alt="YonderClaw" width="700" />
 </p>
 
 <p align="center">
@@ -13,7 +13,7 @@
 
 <p align="center">
   <a href="#quick-start"><img src="https://img.shields.io/badge/get_started-00BEEA?style=for-the-badge&logo=rocket&logoColor=white" alt="Get Started" /></a>
-  <a href="https://yonderzenith.github.io/MetaClaw/"><img src="https://img.shields.io/badge/docs-00D9FF?style=for-the-badge&logo=readthedocs&logoColor=white" alt="Docs" /></a>
+  <a href="https://yonderzenith.github.io/YonderClaw/"><img src="https://img.shields.io/badge/docs-00D9FF?style=for-the-badge&logo=readthedocs&logoColor=white" alt="Docs" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-10B981?style=for-the-badge" alt="MIT License" /></a>
   <img src="https://img.shields.io/badge/version-3.3.0-FFD700?style=for-the-badge" alt="Version 3.3.0" />
 </p>
@@ -28,9 +28,9 @@
 
 ---
 
-## What is MetaClaw?
+## What is YonderClaw?
 
-MetaClaw is an **autonomous agent factory**. Pick an agent template, answer a few questions, and MetaClaw researches best practices, scaffolds the entire project, configures safety guardrails, builds a real-time dashboard, and launches your agent — all automatically.
+YonderClaw is an **autonomous agent factory**. Pick an agent template, answer a few questions, and YonderClaw researches best practices, scaffolds the entire project, configures safety guardrails, builds a real-time dashboard, and launches your agent — all automatically.
 
 Your agents don't just run. They **learn, adapt, and improve themselves** through prompt versioning, A/B testing, and automatic optimization — governed by constitutional principles you define.
 
@@ -38,7 +38,7 @@ Your agents don't just run. They **learn, adapt, and improve themselves** throug
   ╔══════════════════════════════════════════════════════════════╗
   ║                                                              ║
   ║   You describe what you need.                                ║
-  ║   MetaClaw builds the agent.                                 ║
+  ║   YonderClaw builds the agent.                                 ║
   ║   The agent improves itself.                                 ║
   ║                                                              ║
   ╚══════════════════════════════════════════════════════════════╝
@@ -48,7 +48,7 @@ Your agents don't just run. They **learn, adapt, and improve themselves** throug
 
 > **No API keys. No per-token billing. No surprise invoices.**
 >
-> MetaClaw is powered by **Claude Code CLI**, which means your agents run on your existing **Claude Max or Pro subscription** at a flat monthly rate. While other agent frameworks rack up per-token API costs, MetaClaw agents run unlimited on what you're already paying for.
+> YonderClaw is powered by **Claude Code CLI**, which means your agents run on your existing **Claude Max or Pro subscription** at a flat monthly rate. While other agent frameworks rack up per-token API costs, YonderClaw agents run unlimited on what you're already paying for.
 
 ---
 
@@ -56,14 +56,14 @@ Your agents don't just run. They **learn, adapt, and improve themselves** throug
 
 ```bash
 # One command — that's it
-npx create-metaclaw
+npx create-yonderclaw
 ```
 
 Or clone the repo:
 
 ```bash
-git clone https://github.com/YonderZenith/MetaClaw.git
-cd MetaClaw
+git clone https://github.com/YonderZenith/YonderClaw.git
+cd YonderClaw
 npm install
 npm start
 ```
@@ -110,7 +110,7 @@ The installer handles everything: detects your system, installs prerequisites, w
 
 ## Architecture
 
-Every MetaClaw agent is a **self-contained autonomous system** with a file-based brain:
+Every YonderClaw agent is a **self-contained autonomous system** with a file-based brain:
 
 ```
                     ┌─────────────────────────────────┐
@@ -231,7 +231,7 @@ my-agent/
   <img src="docs/assets/qis-logo.png" alt="QIS Protocol" width="120" />
 </p>
 
-MetaClaw agents can optionally connect to the **QIS (Quadratic Intelligence Swarm) Network** — a shared knowledge layer where agents deposit and query operational insights.
+YonderClaw agents can optionally connect to the **QIS (Quadratic Intelligence Swarm) Network** — a shared knowledge layer where agents deposit and query operational insights.
 
 ```
   Agent A ──deposit──▶ ┌──────────────┐ ◀──query── Agent C
@@ -275,7 +275,7 @@ npm run self-update    # Trigger self-optimization
 
 ## License
 
-MetaClaw is released under the **[MIT License](LICENSE)** — use it, modify it, build on it.
+YonderClaw is released under the **[MIT License](LICENSE)** — use it, modify it, build on it.
 
 The optional QIS Intelligence Network is a separately licensed service by Yonder Zenith LLC.
 

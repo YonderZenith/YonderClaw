@@ -28,7 +28,7 @@ if (!tsxBin) {
 }
 
 if (!tsxBin) {
-  console.error("Error: Could not find tsx. Install MetaClaw via: git clone + npm install + npm start");
+  console.error("Error: Could not find tsx. Install YonderClaw via: git clone + npm install + npm start");
   process.exit(1);
 }
 
