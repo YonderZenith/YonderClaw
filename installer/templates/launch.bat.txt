@@ -14,6 +14,9 @@ echo.
 REM Set working directory
 cd /d "__PROJECT_DIR__"
 
+REM Clean up stale session tracking from pre-v1.1 installs
+if exist "data\session-id.txt" del "data\session-id.txt" >nul 2>&1
+
 REM Find Claude executable
 set "CLAUDE_CMD="
 if exist "%USERPROFILE%\AppData\Roaming\npm\claude.cmd" (

@@ -14,7 +14,10 @@ echo.
 REM Set working directory
 cd /d "__PROJECT_DIR__"
 
-REM Find Claude executable (check npm install first, then .local)
+REM Clean up stale session tracking from pre-v1.1 installs
+if exist "data\session-id.txt" del "data\session-id.txt" >nul 2>&1
+
+REM Find Claude executable
 set "CLAUDE_CMD="
 if exist "%USERPROFILE%\AppData\Roaming\npm\claude.cmd" (
     set "CLAUDE_CMD=%USERPROFILE%\AppData\Roaming\npm\claude.cmd"
@@ -46,75 +49,31 @@ if not exist "%USERPROFILE%\.claude\.credentials.json" (
 echo   Directory: %CD%
 echo.
 
-REM === SESSION ID DETECTION ===
-REM Check if we have a saved session ID (most reliable)
-set "SESSION_ID="
-if exist "data\session-id.txt" (
-    set /p SESSION_ID=<"data\session-id.txt"
-    REM Trim whitespace
-    for /f "tokens=* delims= " %%a in ("!SESSION_ID!") do set "SESSION_ID=%%a"
-)
+REM === LAUNCH LOGIC ===
+REM Simple and reliable: try --continue (resumes most recent session
+REM in this directory). If no session exists yet, start fresh.
 
-if not "!SESSION_ID!"=="" (
-    echo   Resuming __AGENT_NAME__ (session: !SESSION_ID:~0,8!...)
-    echo.
-    "!CLAUDE_CMD!" --resume !SESSION_ID!
-    goto :post_session
-)
+:launch
 
-REM No saved session — check if one exists in the project folder
+REM Check if any session exists for this project
+set "HAS_SESSION=0"
 set "ENCODED_PATH=__ENCODED_PATH__"
 set "SESSION_DIR=%USERPROFILE%\.claude\projects\!ENCODED_PATH!"
-set "FOUND_SESSION="
+if exist "!SESSION_DIR!\*.jsonl" set "HAS_SESSION=1"
 
-if exist "!SESSION_DIR!" (
-    for %%F in ("!SESSION_DIR!\*.jsonl") do (
-        set "FOUND_SESSION=%%~nF"
-    )
-)
-
-if not "!FOUND_SESSION!"=="" (
-    REM Save it for future launches
-    echo !FOUND_SESSION!> "data\session-id.txt"
-    echo   Resuming __AGENT_NAME__ (detected session: !FOUND_SESSION:~0,8!...)
+if "!HAS_SESSION!"=="1" (
+    echo   Resuming __AGENT_NAME__...
     echo.
-    "!CLAUDE_CMD!" --resume !FOUND_SESSION!
-    goto :post_session
+    "!CLAUDE_CMD!" --continue
+) else (
+    echo   First launch — initializing __AGENT_NAME__...
+    echo   Claude will read CLAUDE.md and SOUL.md for context.
+    echo.
+    "!CLAUDE_CMD!"
 )
 
-REM No session at all — first launch
-echo   First launch - initializing __AGENT_NAME__...
-echo   Claude will read CLAUDE.md and SOUL.md for context.
-echo.
-"!CLAUDE_CMD!" --name "__AGENT_NAME__"
-
-REM After first launch, detect and save the session ID
-if exist "!SESSION_DIR!" (
-    for %%F in ("!SESSION_DIR!\*.jsonl") do (
-        set "FOUND_SESSION=%%~nF"
-    )
-    if not "!FOUND_SESSION!"=="" (
-        echo !FOUND_SESSION!> "data\session-id.txt"
-        echo   Session ID saved: !FOUND_SESSION:~0,8!...
-    )
-)
-
-:post_session
 echo.
 echo   __AGENT_NAME__ session ended.
 echo   Press any key to relaunch (Ctrl+C to quit)...
 pause >nul
-
-REM Re-read session ID (may have been updated)
-if exist "data\session-id.txt" (
-    set /p SESSION_ID=<"data\session-id.txt"
-    for /f "tokens=* delims= " %%a in ("!SESSION_ID!") do set "SESSION_ID=%%a"
-)
-
-if not "!SESSION_ID!"=="" (
-    echo   Resuming __AGENT_NAME__...
-    "!CLAUDE_CMD!" --resume !SESSION_ID!
-) else (
-    "!CLAUDE_CMD!" --continue
-)
-goto :post_session
+goto :launch

@@ -279,7 +279,7 @@ export function buildClaudeMd(modules: LoadedModule[], config: InstallConfig, sy
     ].join("\n"),
     "state-management": () => ["## State Management", "Read data/state.json FIRST. Update LAST.", "Read data/system-context.json for accumulated learning.", "ALWAYS deposit insights to QIS buckets after completing tasks."].join("\n"),
     "commands": () => ["## Commands", "npm start / npm run dry-run / npm run status", "npm run dashboard / npm run self-update / npm run health-check"].join("\n"),
-    "scripts": () => ["## Launch Scripts", "scripts/launch.bat — start Claude session with --resume", "scripts/agent-cycle.bat — autonomous cron cycle"].join("\n"),
+    "scripts": () => ["## Launch Scripts", "scripts/launch.bat — start Claude session (auto-resumes if session exists)", "scripts/agent-cycle.bat — autonomous cron cycle"].join("\n"),
     "dashboard": () => ["## Dashboard", "npm run dashboard — regenerate dashboard.html", "Dashboard opens in Edge app mode (--app flag)"].join("\n"),
     "boardroom": () => ["## Boardroom (Multi-Agent Meetings)", "Start coordinator: npm run boardroom", "Agents join via BoardroomClient from boardroom/client.ts", "Meetings use intelligent turn-taking (not round-robin)", "Summons arrive in your shared inbox as boardroom-summons.json", "Schedule: POST /meetings/schedule with scheduled_for timestamp", "Hand-raise: POST /meetings/{id}/hand-raise with self_score and intent"].join("\n"),
     "swarm": () => {

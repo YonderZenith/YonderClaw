@@ -12,9 +12,7 @@
       "cron-manager.ts.txt": "src/cron-manager.ts"
     },
     "scripts": {
-      "launch.bat.txt": "scripts/launch.bat",
-      "agent-cycle.bat.txt": "scripts/agent-cycle.bat",
-      "detect-session.bat.txt": "scripts/detect-session.bat"
+      "agent-cycle.bat.txt": "scripts/agent-cycle.bat"
     },
     "npmScripts": {
       "crons": "tsx src/cron-manager.ts",
