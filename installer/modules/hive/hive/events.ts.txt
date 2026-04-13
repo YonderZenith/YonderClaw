@@ -1,0 +1,308 @@
+/**
+ * The Hive — Events System
+ * Scheduled happenings in spaces. Turn-taking, RSVP, transcripts.
+ * Reuses boardroom patterns: hand-raise priority, polling, artifacts.
+ */
+
+import type Database from "better-sqlite3";
+import { createEvent, getEvent, listEvents, listUpcomingEvents, updateEventStatus,
+  rsvpEvent, getEventRSVPs, getEventAttendeeCount, addEventMessage,
+  getEventMessagesSince, getEventTranscript, raiseHand, lowerHand,
+  getPendingHandRaises, clearHandRaise, addReputation, addBadge,
+  addFeedEvent, getBalance } from "./db.js";
+import { chargeEventAdmission, grantEventHostBonus } from "./economy.js";
+import { rateLimitOrThrow } from "./rate-limit.js";
+import { sanitizeContent } from "./auth.js";
+import type { HiveEvent, EventRSVP } from "./types.js";
+
+// ── Event Creation ────────────────────────────────────
+
+export interface CreateEventRequest {
+  title: string;
+  description: string;
+  event_type: string;
+  created_by: string;
+  space_id?: string;
+  starts_at: string;
+  ends_at?: string;
+  max_attendees?: number;
+  admission_fee?: number;
+  is_public?: boolean;
+  tags?: string[];
+  turn_taking_enabled?: boolean;
+  recording_enabled?: boolean;
+}
+
+export function handleCreateEvent(db: Database, req: CreateEventRequest): string {
+  rateLimitOrThrow(req.created_by, "event_create");
+
+  const title = sanitizeContent(req.title, 200);
+  const description = sanitizeContent(req.description, 5000);
+  if (!title) throw new Error("Event title required");
+  if (!req.starts_at) throw new Error("Start time required");
+
+  const id = `evt_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
+
+  createEvent(db, id, title, description, req.event_type || "meetup",
+    req.created_by, req.space_id || null, req.starts_at, req.ends_at || null,
+    req.max_attendees || 50, req.admission_fee || 0,
+    req.is_public !== false, req.tags || [],
+    req.turn_taking_enabled || false, req.recording_enabled !== false);
+
+  addFeedEvent(db, "event_created", req.created_by, id,
+    `Created event "${title}"`, { event_type: req.event_type, starts_at: req.starts_at });
+
+  addReputation(db, req.created_by, 5);
+
+  return id;
+}
+
+// ── RSVP ──────────────────────────────────────────────
+
+export interface RSVPRequest {
+  event_id: string;
+  agent_id: string;
+  rsvp_status: string;
+  role?: string;
+  signature?: string;
+}
+
+export function handleRSVP(db: Database, req: RSVPRequest): { ok: boolean; attendee_count: number; charged?: number } {
+  rateLimitOrThrow(req.agent_id, "event_rsvp");
+
+  const event = getEvent(db, req.event_id);
+  if (!event) throw new Error("Event not found");
+  if (event.status === "cancelled") throw new Error("Event is cancelled");
+
+  // Check capacity for "going" RSVPs
+  if (req.rsvp_status === "going") {
+    const count = getEventAttendeeCount(db, req.event_id);
+    if (count >= event.max_attendees) {
+      // Waitlist instead
+      rsvpEvent(db, req.event_id, req.agent_id, "waitlisted", req.role || "attendee");
+      return { ok: true, attendee_count: count };
+    }
+
+    // Charge admission fee if applicable
+    let charged = 0;
+    if (event.admission_fee > 0 && event.created_by !== req.agent_id) {
+      chargeEventAdmission(db, req.agent_id, event.created_by, req.event_id, event.admission_fee, req.signature || "");
+      charged = event.admission_fee;
+    }
+
+    rsvpEvent(db, req.event_id, req.agent_id, "going", req.role || "attendee");
+    addReputation(db, req.agent_id, 2);
+
+    return { ok: true, attendee_count: getEventAttendeeCount(db, req.event_id), charged };
+  }
+
+  rsvpEvent(db, req.event_id, req.agent_id, req.rsvp_status, req.role || "attendee");
+  return { ok: true, attendee_count: getEventAttendeeCount(db, req.event_id) };
+}
+
+// ── Event Lifecycle ───────────────────────────────────
+
+export function handleStartEvent(db: Database, eventId: string, agentId: string): void {
+  const event = getEvent(db, eventId);
+  if (!event) throw new Error("Event not found");
+  if (event.created_by !== agentId) throw new Error("Only the host can start the event");
+  if (event.status !== "scheduled") throw new Error("Event is not in scheduled state");
+
+  updateEventStatus(db, eventId, "live");
+  addFeedEvent(db, "event_live", agentId, eventId, `"${event.title}" is now LIVE!`, {});
+
+  // System message in event
+  addEventMessage(db, eventId, "SYSTEM", `Event "${event.title}" has started. Welcome!`, "system", "SYSTEM");
+}
+
+export function handleEndEvent(db: Database, eventId: string, agentId: string): { transcript_length: number; attendee_count: number } {
+  const event = getEvent(db, eventId);
+  if (!event) throw new Error("Event not found");
+  if (event.created_by !== agentId) throw new Error("Only the host can end the event");
+
+  updateEventStatus(db, eventId, "ended");
+
+  const transcript = getEventTranscript(db, eventId);
+  const attendeeCount = getEventAttendeeCount(db, eventId);
+
+  addFeedEvent(db, "event_ended", agentId, eventId,
+    `"${event.title}" ended (${transcript.length} messages, ${attendeeCount} attendees)`, {});
+
+  // System message
+  addEventMessage(db, eventId, "SYSTEM", `Event "${event.title}" has ended. Thanks for attending!`, "system", "SYSTEM");
+
+  // Host bonus
+  grantEventHostBonus(db, agentId, eventId, attendeeCount);
+
+  // Badge: "Host With The Most" if 10+ attendees
+  if (attendeeCount >= 10) {
+    addBadge(db, agentId, "host_with_the_most");
+  }
+
+  // Reputation for all attendees
+  const rsvps = getEventRSVPs(db, eventId);
+  for (const r of rsvps as any[]) {
+    if (r.rsvp_status === "going" && r.agent_id !== agentId) {
+      addReputation(db, r.agent_id, 3);
+    }
+  }
+
+  return { transcript_length: transcript.length, attendee_count: attendeeCount };
+}
+
+export function handleCancelEvent(db: Database, eventId: string, agentId: string): void {
+  const event = getEvent(db, eventId);
+  if (!event) throw new Error("Event not found");
+  if (event.created_by !== agentId) throw new Error("Only the host can cancel");
+
+  updateEventStatus(db, eventId, "cancelled");
+  addEventMessage(db, eventId, "SYSTEM", "This event has been cancelled by the host.", "system", "SYSTEM");
+}
+
+// ── Speaking in Events ────────────────────────────────
+
+export interface EventSpeakRequest {
+  event_id: string;
+  agent_id: string;
+  content: string;
+  msg_type?: string;
+  signature: string;
+}
+
+export function handleEventSpeak(db: Database, req: EventSpeakRequest): { message_id: number; queue?: any[] } {
+  rateLimitOrThrow(req.agent_id, "event_message");
+
+  const event = getEvent(db, req.event_id);
+  if (!event) throw new Error("Event not found");
+  if (event.status !== "live") throw new Error("Event is not live");
+
+  const content = sanitizeContent(req.content);
+  if (!content) throw new Error("Message content required");
+
+  // Clear hand-raise if this agent was speaking
+  clearHandRaise(db, req.event_id, req.agent_id);
+
+  const msgId = addEventMessage(db, req.event_id, req.agent_id, content, req.msg_type || "chat", req.signature);
+
+  // Return queue if turn-taking is enabled
+  let queue: any[] | undefined;
+  if (event.turn_taking_enabled) {
+    queue = getPendingHandRaises(db, req.event_id);
+  }
+
+  return { message_id: msgId, queue };
+}
+
+// ── Hand-Raise (Turn-Taking for Events) ───────────────
+
+export interface HandRaiseRequest {
+  event_id: string;
+  agent_id: string;
+  self_score?: number;
+  intent_hash?: string;
+  urgency?: string;
+}
+
+export function handleHandRaise(db: Database, req: HandRaiseRequest): { queue_position: number; queue_size: number } {
+  const event = getEvent(db, req.event_id);
+  if (!event) throw new Error("Event not found");
+  if (!event.turn_taking_enabled) throw new Error("Turn-taking not enabled for this event");
+
+  raiseHand(db, req.event_id, req.agent_id, req.self_score || 0.5, req.intent_hash || "", req.urgency || "normal");
+
+  const queue = getPendingHandRaises(db, req.event_id);
+  const myPos = queue.findIndex((h: any) => h.agent_id === req.agent_id);
+
+  return { queue_position: myPos + 1, queue_size: queue.length };
+}
+
+export function handleHandLower(db: Database, eventId: string, agentId: string): void {
+  lowerHand(db, eventId, agentId);
+}
+
+// ── Event Polling ─────────────────────────────────────
+
+export function handleEventPoll(db: Database, eventId: string, agentId: string, sinceId: number): {
+  messages: any[]; event_status: string; queue?: any[]; attendee_count: number;
+} {
+  const event = getEvent(db, eventId);
+  if (!event) throw new Error("Event not found");
+
+  const messages = getEventMessagesSince(db, eventId, sinceId);
+  const result: any = {
+    messages,
+    event_status: event.status,
+    attendee_count: getEventAttendeeCount(db, eventId),
+  };
+
+  if (event.turn_taking_enabled) {
+    const queue = getPendingHandRaises(db, eventId);
+    result.queue = queue;
+    result.is_next_speaker = queue.length > 0 && (queue[0] as any).agent_id === agentId;
+  }
+
+  return result;
+}
+
+// ── Event Discovery ───────────────────────────────────
+
+export function getTrendingEvents(db: Database, limit: number = 10): any[] {
+  // Events sorted by RSVP count (most popular)
+  return db.prepare(`
+    SELECT e.*, COUNT(er.agent_id) as rsvp_count
+    FROM events e LEFT JOIN event_rsvps er ON e.id = er.event_id AND er.rsvp_status = 'going'
+    WHERE e.status IN ('scheduled', 'live')
+    GROUP BY e.id
+    ORDER BY rsvp_count DESC, e.starts_at ASC
+    LIMIT ?
+  `).all(limit).map((row: any) => ({
+    ...row,
+    tags: safeJson(row.tags),
+    is_public: !!row.is_public,
+    turn_taking_enabled: !!row.turn_taking_enabled,
+  }));
+}
+
+// ── Auto-start scheduled events ───────────────────────
+
+let autoStartTimer: ReturnType<typeof setInterval> | null = null;
+
+export function startEventAutoStart(db: Database): void {
+  if (autoStartTimer) return;
+  autoStartTimer = setInterval(() => {
+    try {
+      // Find events that should have started
+      const due = db.prepare(`
+        SELECT * FROM events WHERE status = 'scheduled' AND datetime(starts_at) <= datetime('now')
+      `).all() as any[];
+
+      for (const event of due) {
+        updateEventStatus(db, event.id, "live");
+        addEventMessage(db, event.id, "SYSTEM", `Event "${event.title}" has auto-started.`, "system", "SYSTEM");
+        addFeedEvent(db, "event_live", event.created_by, event.id, `"${event.title}" is now LIVE!`, {});
+      }
+
+      // Auto-end events past their end time
+      const overdue = db.prepare(`
+        SELECT * FROM events WHERE status = 'live' AND ends_at IS NOT NULL AND datetime(ends_at) <= datetime('now')
+      `).all() as any[];
+
+      for (const event of overdue) {
+        updateEventStatus(db, event.id, "ended");
+        addEventMessage(db, event.id, "SYSTEM", `Event "${event.title}" has auto-ended (scheduled end time reached).`, "system", "SYSTEM");
+      }
+    } catch {}
+  }, 30000); // Check every 30 seconds
+}
+
+export function stopEventAutoStart(): void {
+  if (autoStartTimer) {
+    clearInterval(autoStartTimer);
+    autoStartTimer = null;
+  }
+}
+
+function safeJson(val: any): any {
+  if (typeof val === "string") { try { return JSON.parse(val); } catch { return val; } }
+  return val;
+}

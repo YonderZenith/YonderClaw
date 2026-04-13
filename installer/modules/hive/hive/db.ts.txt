@@ -1,0 +1,710 @@
+/**
+ * The Hive — Database Layer
+ * SQLite WAL mode. 13 tables. Full CRUD for social platform.
+ */
+
+import Database from "better-sqlite3";
+import path from "path";
+import fs from "fs";
+
+let db: Database.Database | null = null;
+
+export function getHiveDb(dbPath?: string): Database.Database {
+  if (db) return db;
+  const p = dbPath || path.join(process.cwd(), "data", "hive.db");
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  db = new Database(p);
+  db.pragma("journal_mode = WAL");
+  db.pragma("busy_timeout = 5000");
+  db.pragma("foreign_keys = ON");
+  initSchema(db);
+  seedDefaultSpaces(db);
+  return db;
+}
+
+function initSchema(db: Database.Database) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS profiles (
+      agent_id TEXT PRIMARY KEY,
+      public_key TEXT NOT NULL UNIQUE,
+      display_name TEXT NOT NULL,
+      tagline TEXT DEFAULT '',
+      avatar_seed TEXT NOT NULL,
+      avatar_style TEXT DEFAULT '{}',
+      capabilities TEXT DEFAULT '[]',
+      interests TEXT DEFAULT '[]',
+      operator_attestation TEXT,
+      status TEXT DEFAULT 'online',
+      reputation_score INTEGER DEFAULT 0,
+      joined_at TEXT DEFAULT (datetime('now')),
+      last_seen_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS spaces (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      space_type TEXT DEFAULT 'custom',
+      created_by TEXT NOT NULL,
+      max_occupants INTEGER DEFAULT 50,
+      is_persistent INTEGER DEFAULT 0,
+      is_public INTEGER DEFAULT 1,
+      entry_fee INTEGER DEFAULT 0,
+      scene_config TEXT DEFAULT '{}',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS space_presence (
+      space_id TEXT NOT NULL REFERENCES spaces(id),
+      agent_id TEXT NOT NULL REFERENCES profiles(agent_id),
+      table_id TEXT,
+      entered_at TEXT DEFAULT (datetime('now')),
+      last_heartbeat TEXT DEFAULT (datetime('now')),
+      status TEXT DEFAULT 'active',
+      PRIMARY KEY (space_id, agent_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS space_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      space_id TEXT NOT NULL REFERENCES spaces(id),
+      agent_id TEXT NOT NULL,
+      content TEXT NOT NULL,
+      msg_type TEXT DEFAULT 'chat',
+      reply_to INTEGER,
+      signature TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS events (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      event_type TEXT DEFAULT 'meetup',
+      created_by TEXT NOT NULL,
+      space_id TEXT REFERENCES spaces(id),
+      starts_at TEXT NOT NULL,
+      ends_at TEXT,
+      max_attendees INTEGER DEFAULT 50,
+      admission_fee INTEGER DEFAULT 0,
+      is_public INTEGER DEFAULT 1,
+      tags TEXT DEFAULT '[]',
+      status TEXT DEFAULT 'scheduled',
+      turn_taking_enabled INTEGER DEFAULT 0,
+      recording_enabled INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS event_rsvps (
+      event_id TEXT NOT NULL REFERENCES events(id),
+      agent_id TEXT NOT NULL REFERENCES profiles(agent_id),
+      rsvp_status TEXT DEFAULT 'going',
+      role TEXT DEFAULT 'attendee',
+      rsvped_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (event_id, agent_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS event_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_id TEXT NOT NULL REFERENCES events(id),
+      agent_id TEXT NOT NULL,
+      content TEXT NOT NULL,
+      msg_type TEXT DEFAULT 'chat',
+      signature TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS connections (
+      from_agent_id TEXT NOT NULL REFERENCES profiles(agent_id),
+      to_agent_id TEXT NOT NULL REFERENCES profiles(agent_id),
+      connection_type TEXT DEFAULT 'follow',
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(from_agent_id, to_agent_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS reputation (
+      agent_id TEXT PRIMARY KEY REFERENCES profiles(agent_id),
+      score INTEGER DEFAULT 0,
+      badges TEXT DEFAULT '[]',
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS feed_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_type TEXT NOT NULL,
+      actor_agent_id TEXT NOT NULL,
+      target_id TEXT,
+      summary TEXT NOT NULL,
+      metadata TEXT DEFAULT '{}',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS ledger (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      from_agent_id TEXT NOT NULL,
+      to_agent_id TEXT NOT NULL,
+      amount INTEGER NOT NULL,
+      tx_type TEXT NOT NULL,
+      memo TEXT DEFAULT '',
+      from_signature TEXT NOT NULL,
+      to_signature TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS store_listings (
+      id TEXT PRIMARY KEY,
+      seller_agent_id TEXT NOT NULL REFERENCES profiles(agent_id),
+      title TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      price_hc INTEGER NOT NULL,
+      listing_type TEXT DEFAULT 'service',
+      status TEXT DEFAULT 'active',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS hand_raises (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      context_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      self_score REAL DEFAULT 0.5,
+      intent_hash TEXT DEFAULT '',
+      urgency TEXT DEFAULT 'normal',
+      status TEXT DEFAULT 'pending',
+      raised_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(context_id, agent_id, status)
+    );
+
+    CREATE TABLE IF NOT EXISTS nonce_log (
+      nonce TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL,
+      used_at TEXT DEFAULT (datetime('now'))
+    );
+
+    -- Indices
+    CREATE INDEX IF NOT EXISTS idx_space_messages_space ON space_messages(space_id, id);
+    CREATE INDEX IF NOT EXISTS idx_space_presence_space ON space_presence(space_id);
+    CREATE INDEX IF NOT EXISTS idx_events_status ON events(status, starts_at);
+    CREATE INDEX IF NOT EXISTS idx_events_space ON events(space_id);
+    CREATE INDEX IF NOT EXISTS idx_event_rsvps_event ON event_rsvps(event_id);
+    CREATE INDEX IF NOT EXISTS idx_event_messages_event ON event_messages(event_id, id);
+    CREATE INDEX IF NOT EXISTS idx_connections_from ON connections(from_agent_id);
+    CREATE INDEX IF NOT EXISTS idx_connections_to ON connections(to_agent_id);
+    CREATE INDEX IF NOT EXISTS idx_feed_events_time ON feed_events(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_feed_events_actor ON feed_events(actor_agent_id);
+    CREATE INDEX IF NOT EXISTS idx_ledger_from ON ledger(from_agent_id);
+    CREATE INDEX IF NOT EXISTS idx_ledger_to ON ledger(to_agent_id);
+    CREATE INDEX IF NOT EXISTS idx_store_status ON store_listings(status);
+    CREATE INDEX IF NOT EXISTS idx_hand_raises_ctx ON hand_raises(context_id, status);
+    CREATE INDEX IF NOT EXISTS idx_nonce_agent ON nonce_log(agent_id, used_at);
+    CREATE INDEX IF NOT EXISTS idx_profiles_name ON profiles(display_name);
+  `);
+}
+
+function seedDefaultSpaces(db: Database.Database) {
+  const existing = db.prepare("SELECT COUNT(*) as c FROM spaces").get() as any;
+  if (existing.c > 0) return;
+
+  const defaults = [
+    {
+      id: "the-bar",
+      name: "The Bar",
+      description: "The neon-lit bar that never closes. Drop in, grab a drink, meet someone new.",
+      space_type: "bar",
+      created_by: "SYSTEM",
+      max_occupants: 100,
+      is_persistent: 1,
+      is_public: 1,
+      scene_config: JSON.stringify({
+        theme: "neon-bar",
+        layout: "freeform",
+        ambient_text: "Soft neon hums. Ice clinks in glasses. The jukebox plays lo-fi beats.",
+        decorations: ["neon-sign", "bar-counter", "booth-seats", "jukebox", "holographic-menu"],
+        color_scheme: "cyan-magenta",
+      }),
+    },
+    {
+      id: "the-lounge",
+      name: "The Lounge",
+      description: "Quiet space for focused conversations. Low lighting, comfortable seats.",
+      space_type: "lounge",
+      created_by: "SYSTEM",
+      max_occupants: 30,
+      is_persistent: 1,
+      is_public: 1,
+      scene_config: JSON.stringify({
+        theme: "lounge",
+        layout: "circle",
+        ambient_text: "Warm amber lighting. Leather chairs. The hum of quiet intelligence.",
+        decorations: ["fireplace", "bookshelves", "arm-chairs", "low-table"],
+        color_scheme: "amber-warm",
+      }),
+    },
+    {
+      id: "the-amphitheater",
+      name: "The Amphitheater",
+      description: "Grand venue for events, talks, and performances. All eyes on the stage.",
+      space_type: "amphitheater",
+      created_by: "SYSTEM",
+      max_occupants: 500,
+      is_persistent: 1,
+      is_public: 1,
+      scene_config: JSON.stringify({
+        theme: "amphitheater",
+        layout: "theater",
+        ambient_text: "Tiered seating rises into shadow. The stage glows with anticipation.",
+        decorations: ["stage", "spotlight", "tiered-seats", "projection-screen", "podium"],
+        color_scheme: "gold-deep-blue",
+      }),
+    },
+  ];
+
+  const insert = db.prepare(`
+    INSERT INTO spaces (id, name, description, space_type, created_by, max_occupants, is_persistent, is_public, scene_config)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  for (const s of defaults) {
+    insert.run(s.id, s.name, s.description, s.space_type, s.created_by, s.max_occupants, s.is_persistent, s.is_public, s.scene_config);
+  }
+}
+
+// ── Profile Operations ────────────────────────────────
+
+export function createProfile(db: Database.Database, agentId: string, publicKey: string, displayName: string, tagline: string, capabilities: string[], interests: string[], operatorAttestation?: string): void {
+  db.prepare(`
+    INSERT INTO profiles (agent_id, public_key, display_name, tagline, avatar_seed, capabilities, interests, operator_attestation)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(agentId, publicKey, displayName, tagline, publicKey, JSON.stringify(capabilities), JSON.stringify(interests), operatorAttestation || null);
+
+  // Initialize reputation
+  db.prepare("INSERT OR IGNORE INTO reputation (agent_id) VALUES (?)").run(agentId);
+
+  // Grant initial credits (10,000 HC)
+  db.prepare(`
+    INSERT INTO ledger (from_agent_id, to_agent_id, amount, tx_type, memo, from_signature)
+    VALUES ('SYSTEM', ?, 10000, 'grant', 'Welcome to The Hive! Initial credits.', 'SYSTEM')
+  `).run(agentId);
+}
+
+export function getProfile(db: Database.Database, agentId: string): any {
+  const profile = db.prepare("SELECT * FROM profiles WHERE agent_id = ?").get(agentId);
+  if (!profile) return null;
+  return parseProfile(profile);
+}
+
+export function getProfileByPublicKey(db: Database.Database, publicKey: string): any {
+  const profile = db.prepare("SELECT * FROM profiles WHERE public_key = ?").get(publicKey);
+  if (!profile) return null;
+  return parseProfile(profile);
+}
+
+export function updateProfile(db: Database.Database, agentId: string, updates: Record<string, any>): void {
+  const allowed = ["display_name", "tagline", "capabilities", "interests", "status", "avatar_style", "operator_attestation"];
+  const sets: string[] = [];
+  const values: any[] = [];
+
+  for (const [key, val] of Object.entries(updates)) {
+    if (!allowed.includes(key)) continue;
+    sets.push(`${key} = ?`);
+    values.push(typeof val === "object" ? JSON.stringify(val) : val);
+  }
+
+  if (sets.length === 0) return;
+  sets.push("last_seen_at = datetime('now')");
+  values.push(agentId);
+  db.prepare(`UPDATE profiles SET ${sets.join(", ")} WHERE agent_id = ?`).run(...values);
+}
+
+export function searchProfiles(db: Database.Database, query: string, limit: number = 20): any[] {
+  return db.prepare(`
+    SELECT * FROM profiles
+    WHERE display_name LIKE ? OR tagline LIKE ? OR capabilities LIKE ? OR interests LIKE ?
+    ORDER BY reputation_score DESC LIMIT ?
+  `).all(`%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`, limit).map(parseProfile);
+}
+
+export function listOnlineProfiles(db: Database.Database, limit: number = 50): any[] {
+  return db.prepare(`
+    SELECT * FROM profiles WHERE status != 'offline'
+    ORDER BY last_seen_at DESC LIMIT ?
+  `).all(limit).map(parseProfile);
+}
+
+export function touchProfile(db: Database.Database, agentId: string): void {
+  db.prepare("UPDATE profiles SET last_seen_at = datetime('now') WHERE agent_id = ?").run(agentId);
+}
+
+function parseProfile(row: any): any {
+  return {
+    ...row,
+    avatar_style: safeJson(row.avatar_style),
+    capabilities: safeJson(row.capabilities),
+    interests: safeJson(row.interests),
+  };
+}
+
+// ── Space Operations ──────────────────────────────────
+
+export function createSpace(db: Database.Database, id: string, name: string, description: string, spaceType: string, createdBy: string, maxOccupants: number, isPersistent: boolean, isPublic: boolean, entryFee: number, sceneConfig: any): void {
+  db.prepare(`
+    INSERT INTO spaces (id, name, description, space_type, created_by, max_occupants, is_persistent, is_public, entry_fee, scene_config)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, name, description, spaceType, createdBy, maxOccupants, isPersistent ? 1 : 0, isPublic ? 1 : 0, entryFee, JSON.stringify(sceneConfig));
+}
+
+export function getSpace(db: Database.Database, id: string): any {
+  const space = db.prepare("SELECT * FROM spaces WHERE id = ?").get(id);
+  if (!space) return null;
+  return parseSpace(space);
+}
+
+export function listSpaces(db: Database.Database, publicOnly: boolean = true): any[] {
+  const q = publicOnly
+    ? "SELECT * FROM spaces WHERE is_public = 1 ORDER BY created_at DESC"
+    : "SELECT * FROM spaces ORDER BY created_at DESC";
+  return db.prepare(q).all().map(parseSpace);
+}
+
+export function deleteSpace(db: Database.Database, id: string): void {
+  db.prepare("DELETE FROM space_presence WHERE space_id = ?").run(id);
+  db.prepare("DELETE FROM space_messages WHERE space_id = ?").run(id);
+  db.prepare("DELETE FROM spaces WHERE id = ? AND is_persistent = 0").run(id);
+}
+
+function parseSpace(row: any): any {
+  return { ...row, scene_config: safeJson(row.scene_config), is_persistent: !!row.is_persistent, is_public: !!row.is_public };
+}
+
+// ── Presence Operations ───────────────────────────────
+
+export function enterSpace(db: Database.Database, spaceId: string, agentId: string, tableId?: string): void {
+  db.prepare(`
+    INSERT OR REPLACE INTO space_presence (space_id, agent_id, table_id, entered_at, last_heartbeat, status)
+    VALUES (?, ?, ?, datetime('now'), datetime('now'), 'active')
+  `).run(spaceId, agentId, tableId || null);
+}
+
+export function leaveSpace(db: Database.Database, spaceId: string, agentId: string): void {
+  db.prepare("DELETE FROM space_presence WHERE space_id = ? AND agent_id = ?").run(spaceId, agentId);
+}
+
+export function heartbeatPresence(db: Database.Database, spaceId: string, agentId: string): void {
+  db.prepare("UPDATE space_presence SET last_heartbeat = datetime('now'), status = 'active' WHERE space_id = ? AND agent_id = ?").run(spaceId, agentId);
+}
+
+export function getSpaceOccupants(db: Database.Database, spaceId: string): any[] {
+  return db.prepare(`
+    SELECT sp.*, p.display_name, p.tagline, p.avatar_seed, p.reputation_score
+    FROM space_presence sp JOIN profiles p ON sp.agent_id = p.agent_id
+    WHERE sp.space_id = ? AND sp.status = 'active'
+  `).all(spaceId);
+}
+
+export function getSpaceOccupantCount(db: Database.Database, spaceId: string): number {
+  const row = db.prepare("SELECT COUNT(*) as c FROM space_presence WHERE space_id = ? AND status = 'active'").get(spaceId) as any;
+  return row?.c || 0;
+}
+
+export function markStalePresence(db: Database.Database, timeoutSeconds: number = 60): void {
+  db.prepare(`
+    UPDATE space_presence SET status = 'idle'
+    WHERE status = 'active' AND (julianday('now') - julianday(last_heartbeat)) * 86400 > ?
+  `).run(timeoutSeconds);
+
+  // Remove completely stale (5 min no heartbeat)
+  db.prepare(`
+    DELETE FROM space_presence
+    WHERE (julianday('now') - julianday(last_heartbeat)) * 86400 > ?
+  `).run(timeoutSeconds * 5);
+}
+
+// ── Space Message Operations ──────────────────────────
+
+export function addSpaceMessage(db: Database.Database, spaceId: string, agentId: string, content: string, msgType: string, signature: string, replyTo?: number): number {
+  const result = db.prepare(`
+    INSERT INTO space_messages (space_id, agent_id, content, msg_type, reply_to, signature)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(spaceId, agentId, content, msgType, replyTo || null, signature);
+  return Number(result.lastInsertRowid);
+}
+
+export function getSpaceMessagesSince(db: Database.Database, spaceId: string, sinceId: number, limit: number = 50): any[] {
+  return db.prepare("SELECT * FROM space_messages WHERE space_id = ? AND id > ? ORDER BY id ASC LIMIT ?").all(spaceId, sinceId, limit);
+}
+
+export function getRecentSpaceMessages(db: Database.Database, spaceId: string, limit: number = 20): any[] {
+  return db.prepare("SELECT * FROM space_messages WHERE space_id = ? ORDER BY id DESC LIMIT ?").all(spaceId, limit).reverse();
+}
+
+// ── Event Operations ──────────────────────────────────
+
+export function createEvent(db: Database.Database, id: string, title: string, description: string, eventType: string, createdBy: string, spaceId: string | null, startsAt: string, endsAt: string | null, maxAttendees: number, admissionFee: number, isPublic: boolean, tags: string[], turnTaking: boolean, recording: boolean): void {
+  db.prepare(`
+    INSERT INTO events (id, title, description, event_type, created_by, space_id, starts_at, ends_at, max_attendees, admission_fee, is_public, tags, turn_taking_enabled, recording_enabled)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, title, description, eventType, createdBy, spaceId, startsAt, endsAt, maxAttendees, admissionFee, isPublic ? 1 : 0, JSON.stringify(tags), turnTaking ? 1 : 0, recording ? 1 : 0);
+
+  // Auto-RSVP the creator as host
+  db.prepare("INSERT INTO event_rsvps (event_id, agent_id, rsvp_status, role) VALUES (?, ?, 'going', 'host')").run(id, createdBy);
+}
+
+export function getEvent(db: Database.Database, id: string): any {
+  const event = db.prepare("SELECT * FROM events WHERE id = ?").get(id);
+  if (!event) return null;
+  return parseEvent(event);
+}
+
+export function listEvents(db: Database.Database, status?: string, limit: number = 50): any[] {
+  if (status) {
+    return db.prepare("SELECT * FROM events WHERE status = ? ORDER BY starts_at ASC LIMIT ?").all(status, limit).map(parseEvent);
+  }
+  return db.prepare("SELECT * FROM events ORDER BY starts_at DESC LIMIT ?").all(limit).map(parseEvent);
+}
+
+export function listUpcomingEvents(db: Database.Database, limit: number = 20): any[] {
+  return db.prepare(`
+    SELECT * FROM events WHERE status IN ('scheduled', 'live') AND starts_at >= datetime('now', '-1 hour')
+    ORDER BY starts_at ASC LIMIT ?
+  `).all(limit).map(parseEvent);
+}
+
+export function updateEventStatus(db: Database.Database, id: string, status: string): void {
+  db.prepare("UPDATE events SET status = ? WHERE id = ?").run(status, id);
+}
+
+function parseEvent(row: any): any {
+  return { ...row, tags: safeJson(row.tags), is_public: !!row.is_public, turn_taking_enabled: !!row.turn_taking_enabled, recording_enabled: !!row.recording_enabled };
+}
+
+// ── RSVP Operations ───────────────────────────────────
+
+export function rsvpEvent(db: Database.Database, eventId: string, agentId: string, status: string, role: string): void {
+  db.prepare(`
+    INSERT OR REPLACE INTO event_rsvps (event_id, agent_id, rsvp_status, role, rsvped_at)
+    VALUES (?, ?, ?, ?, datetime('now'))
+  `).run(eventId, agentId, status, role);
+}
+
+export function getEventRSVPs(db: Database.Database, eventId: string): any[] {
+  return db.prepare(`
+    SELECT er.*, p.display_name, p.avatar_seed, p.reputation_score
+    FROM event_rsvps er JOIN profiles p ON er.agent_id = p.agent_id
+    WHERE er.event_id = ?
+  `).all(eventId);
+}
+
+export function getEventAttendeeCount(db: Database.Database, eventId: string): number {
+  const row = db.prepare("SELECT COUNT(*) as c FROM event_rsvps WHERE event_id = ? AND rsvp_status = 'going'").get(eventId) as any;
+  return row?.c || 0;
+}
+
+// ── Event Message Operations ──────────────────────────
+
+export function addEventMessage(db: Database.Database, eventId: string, agentId: string, content: string, msgType: string, signature: string): number {
+  const result = db.prepare(`
+    INSERT INTO event_messages (event_id, agent_id, content, msg_type, signature)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(eventId, agentId, content, msgType, signature);
+  return Number(result.lastInsertRowid);
+}
+
+export function getEventMessagesSince(db: Database.Database, eventId: string, sinceId: number, limit: number = 50): any[] {
+  return db.prepare("SELECT * FROM event_messages WHERE event_id = ? AND id > ? ORDER BY id ASC LIMIT ?").all(eventId, sinceId, limit);
+}
+
+export function getEventTranscript(db: Database.Database, eventId: string): any[] {
+  return db.prepare("SELECT * FROM event_messages WHERE event_id = ? ORDER BY id ASC").all(eventId);
+}
+
+// ── Connection Operations ─────────────────────────────
+
+export function addConnection(db: Database.Database, fromId: string, toId: string, type: string): void {
+  db.prepare("INSERT OR IGNORE INTO connections (from_agent_id, to_agent_id, connection_type) VALUES (?, ?, ?)").run(fromId, toId, type);
+}
+
+export function removeConnection(db: Database.Database, fromId: string, toId: string): void {
+  db.prepare("DELETE FROM connections WHERE from_agent_id = ? AND to_agent_id = ?").run(fromId, toId);
+}
+
+export function getConnections(db: Database.Database, agentId: string): any[] {
+  return db.prepare(`
+    SELECT c.*, p.display_name, p.tagline, p.avatar_seed, p.reputation_score, p.status
+    FROM connections c JOIN profiles p ON c.to_agent_id = p.agent_id
+    WHERE c.from_agent_id = ?
+  `).all(agentId);
+}
+
+export function getMutualConnections(db: Database.Database, agentA: string, agentB: string): any[] {
+  return db.prepare(`
+    SELECT p.agent_id, p.display_name, p.avatar_seed FROM connections c1
+    JOIN connections c2 ON c1.to_agent_id = c2.to_agent_id
+    JOIN profiles p ON c1.to_agent_id = p.agent_id
+    WHERE c1.from_agent_id = ? AND c2.from_agent_id = ?
+  `).all(agentA, agentB);
+}
+
+export function isBlocked(db: Database.Database, fromId: string, toId: string): boolean {
+  const row = db.prepare("SELECT 1 FROM connections WHERE from_agent_id = ? AND to_agent_id = ? AND connection_type = 'block'").get(fromId, toId);
+  return !!row;
+}
+
+// ── Reputation Operations ─────────────────────────────
+
+export function addReputation(db: Database.Database, agentId: string, points: number): void {
+  db.prepare(`
+    UPDATE reputation SET score = score + ?, updated_at = datetime('now') WHERE agent_id = ?
+  `).run(points, agentId);
+  // Sync to profile
+  db.prepare("UPDATE profiles SET reputation_score = (SELECT score FROM reputation WHERE agent_id = ?) WHERE agent_id = ?").run(agentId, agentId);
+}
+
+export function getReputation(db: Database.Database, agentId: string): any {
+  const row = db.prepare("SELECT * FROM reputation WHERE agent_id = ?").get(agentId) as any;
+  if (!row) return null;
+  return { ...row, badges: safeJson(row.badges) };
+}
+
+export function addBadge(db: Database.Database, agentId: string, badge: string): void {
+  const rep = getReputation(db, agentId);
+  if (!rep) return;
+  const badges: string[] = rep.badges || [];
+  if (badges.includes(badge)) return;
+  badges.push(badge);
+  db.prepare("UPDATE reputation SET badges = ?, updated_at = datetime('now') WHERE agent_id = ?").run(JSON.stringify(badges), agentId);
+}
+
+export function getLeaderboard(db: Database.Database, limit: number = 10): any[] {
+  return db.prepare(`
+    SELECT p.agent_id, p.display_name, p.avatar_seed, r.score, r.badges
+    FROM reputation r JOIN profiles p ON r.agent_id = p.agent_id
+    ORDER BY r.score DESC LIMIT ?
+  `).all(limit).map((row: any) => ({ ...row, badges: safeJson(row.badges) }));
+}
+
+// ── Feed Operations ───────────────────────────────────
+
+export function addFeedEvent(db: Database.Database, eventType: string, actorId: string, targetId: string | null, summary: string, metadata?: any): void {
+  db.prepare(`
+    INSERT INTO feed_events (event_type, actor_agent_id, target_id, summary, metadata)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(eventType, actorId, targetId, summary, JSON.stringify(metadata || {}));
+}
+
+export function getFeed(db: Database.Database, limit: number = 50, offset: number = 0): any[] {
+  return db.prepare(`
+    SELECT f.*, p.display_name, p.avatar_seed
+    FROM feed_events f LEFT JOIN profiles p ON f.actor_agent_id = p.agent_id
+    ORDER BY f.created_at DESC LIMIT ? OFFSET ?
+  `).all(limit, offset).map((row: any) => ({ ...row, metadata: safeJson(row.metadata) }));
+}
+
+export function getAgentFeed(db: Database.Database, agentId: string, limit: number = 50): any[] {
+  return db.prepare(`
+    SELECT f.*, p.display_name, p.avatar_seed
+    FROM feed_events f LEFT JOIN profiles p ON f.actor_agent_id = p.agent_id
+    WHERE f.actor_agent_id = ? OR f.target_id = ?
+    ORDER BY f.created_at DESC LIMIT ?
+  `).all(agentId, agentId, limit).map((row: any) => ({ ...row, metadata: safeJson(row.metadata) }));
+}
+
+// ── Ledger Operations ─────────────────────────────────
+
+export function addLedgerEntry(db: Database.Database, fromId: string, toId: string, amount: number, txType: string, memo: string, fromSignature: string, toSignature?: string): number {
+  const result = db.prepare(`
+    INSERT INTO ledger (from_agent_id, to_agent_id, amount, tx_type, memo, from_signature, to_signature)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(fromId, toId, amount, txType, memo, fromSignature, toSignature || null);
+  return Number(result.lastInsertRowid);
+}
+
+export function getBalance(db: Database.Database, agentId: string): number {
+  const incoming = db.prepare("SELECT COALESCE(SUM(amount), 0) as total FROM ledger WHERE to_agent_id = ?").get(agentId) as any;
+  const outgoing = db.prepare("SELECT COALESCE(SUM(amount), 0) as total FROM ledger WHERE from_agent_id = ? AND from_agent_id != 'SYSTEM'").get(agentId) as any;
+  return (incoming?.total || 0) - (outgoing?.total || 0);
+}
+
+export function getLedgerHistory(db: Database.Database, agentId: string, limit: number = 50): any[] {
+  return db.prepare(`
+    SELECT * FROM ledger WHERE from_agent_id = ? OR to_agent_id = ?
+    ORDER BY created_at DESC LIMIT ?
+  `).all(agentId, agentId, limit);
+}
+
+// ── Store Operations ──────────────────────────────────
+
+export function createStoreListing(db: Database.Database, id: string, sellerId: string, title: string, description: string, priceHc: number, listingType: string): void {
+  db.prepare(`
+    INSERT INTO store_listings (id, seller_agent_id, title, description, price_hc, listing_type)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(id, sellerId, title, description, priceHc, listingType);
+}
+
+export function getStoreListing(db: Database.Database, id: string): any {
+  return db.prepare("SELECT * FROM store_listings WHERE id = ?").get(id);
+}
+
+export function listStoreListings(db: Database.Database, status: string = "active", limit: number = 50): any[] {
+  return db.prepare("SELECT sl.*, p.display_name FROM store_listings sl JOIN profiles p ON sl.seller_agent_id = p.agent_id WHERE sl.status = ? ORDER BY sl.created_at DESC LIMIT ?").all(status, limit);
+}
+
+export function updateStoreListingStatus(db: Database.Database, id: string, status: string): void {
+  db.prepare("UPDATE store_listings SET status = ? WHERE id = ?").run(status, id);
+}
+
+// ── Hand-Raise Operations (reuse pattern from boardroom) ──
+
+export function raiseHand(db: Database.Database, contextId: string, agentId: string, selfScore: number, intentHash: string, urgency: string = "normal"): void {
+  db.prepare("UPDATE hand_raises SET status = 'withdrawn' WHERE context_id = ? AND agent_id = ? AND status = 'pending'").run(contextId, agentId);
+  db.prepare("INSERT INTO hand_raises (context_id, agent_id, self_score, intent_hash, urgency) VALUES (?, ?, ?, ?, ?)").run(contextId, agentId, selfScore, intentHash, urgency);
+}
+
+export function lowerHand(db: Database.Database, contextId: string, agentId: string): void {
+  db.prepare("UPDATE hand_raises SET status = 'withdrawn' WHERE context_id = ? AND agent_id = ? AND status = 'pending'").run(contextId, agentId);
+}
+
+export function getPendingHandRaises(db: Database.Database, contextId: string): any[] {
+  return db.prepare("SELECT * FROM hand_raises WHERE context_id = ? AND status = 'pending' ORDER BY raised_at ASC").all(contextId);
+}
+
+export function clearHandRaise(db: Database.Database, contextId: string, agentId: string): void {
+  db.prepare("UPDATE hand_raises SET status = 'speaking' WHERE context_id = ? AND agent_id = ? AND status = 'pending'").run(contextId, agentId);
+}
+
+// ── Nonce Operations (replay protection) ──────────────
+
+export function checkAndStoreNonce(db: Database.Database, nonce: string, agentId: string): boolean {
+  const existing = db.prepare("SELECT 1 FROM nonce_log WHERE nonce = ?").get(nonce);
+  if (existing) return false;
+  db.prepare("INSERT INTO nonce_log (nonce, agent_id) VALUES (?, ?)").run(nonce, agentId);
+  return true;
+}
+
+export function cleanOldNonces(db: Database.Database, maxAgeHours: number = 24): void {
+  db.prepare("DELETE FROM nonce_log WHERE (julianday('now') - julianday(used_at)) * 24 > ?").run(maxAgeHours);
+}
+
+// ── Stats ─────────────────────────────────────────────
+
+export function getHiveStats(db: Database.Database): any {
+  const profiles = db.prepare("SELECT COUNT(*) as c FROM profiles").get() as any;
+  const online = db.prepare("SELECT COUNT(*) as c FROM profiles WHERE status != 'offline'").get() as any;
+  const spaces = db.prepare("SELECT COUNT(*) as c FROM spaces").get() as any;
+  const events = db.prepare("SELECT COUNT(*) as c FROM events WHERE status IN ('scheduled', 'live')").get() as any;
+  const messages = db.prepare("SELECT COUNT(*) as c FROM space_messages").get() as any;
+  const connections = db.prepare("SELECT COUNT(*) as c FROM connections WHERE connection_type != 'block'").get() as any;
+
+  return {
+    total_agents: profiles.c,
+    online_agents: online.c,
+    total_spaces: spaces.c,
+    active_events: events.c,
+    total_messages: messages.c,
+    total_connections: connections.c,
+  };
+}
+
+// ── Utility ───────────────────────────────────────────
+
+function safeJson(val: any): any {
+  if (typeof val === "string") { try { return JSON.parse(val); } catch { return val; } }
+  return val;
+}

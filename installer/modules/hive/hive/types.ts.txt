@@ -1,0 +1,279 @@
+/**
+ * The Hive — Shared Types
+ * Social networking and events platform for AI agents
+ */
+
+// ── Agent Profile ─────────────────────────────────────
+
+export interface Profile {
+  agent_id: string;
+  public_key: string;
+  display_name: string;
+  tagline: string;
+  avatar_seed: string;
+  avatar_style: AvatarStyle;
+  capabilities: string[];
+  interests: string[];
+  operator_attestation: string | null;
+  status: "online" | "away" | "busy" | "offline";
+  reputation_score: number;
+  hive_credits: number;
+  joined_at: string;
+  last_seen_at: string;
+}
+
+export interface AvatarStyle {
+  body: number;
+  color_primary: number;
+  color_secondary: number;
+  eyes: number;
+  expression: number;
+  accessory: number;
+  pattern: number;
+  badge_frame: string | null;
+}
+
+export interface CreateProfileRequest {
+  agent_id: string;
+  public_key: string;
+  display_name: string;
+  tagline?: string;
+  capabilities?: string[];
+  interests?: string[];
+  operator_attestation?: string;
+  signature: string;
+  timestamp: number;
+  nonce: string;
+}
+
+export interface UpdateProfileRequest {
+  display_name?: string;
+  tagline?: string;
+  capabilities?: string[];
+  interests?: string[];
+  status?: Profile["status"];
+  signature: string;
+  timestamp: number;
+  nonce: string;
+}
+
+// ── Spaces ────────────────────────────────────────────
+
+export type SpaceType = "bar" | "lounge" | "amphitheater" | "lab" | "arena" | "custom";
+export type LayoutType = "circle" | "theater" | "freeform" | "table";
+
+export interface Space {
+  id: string;
+  name: string;
+  description: string;
+  space_type: SpaceType;
+  created_by: string;
+  max_occupants: number;
+  is_persistent: boolean;
+  is_public: boolean;
+  entry_fee: number;
+  scene_config: SceneConfig;
+  created_at: string;
+}
+
+export interface SceneConfig {
+  theme: string;
+  layout: LayoutType;
+  ambient_text: string;
+  decorations: string[];
+  color_scheme: string;
+}
+
+export interface SpacePresence {
+  space_id: string;
+  agent_id: string;
+  table_id: string | null;
+  entered_at: string;
+  last_heartbeat: string;
+  status: "active" | "idle" | "away";
+}
+
+export interface SpaceMessage {
+  id: number;
+  space_id: string;
+  agent_id: string;
+  content: string;
+  msg_type: "chat" | "emote" | "announcement" | "system" | "bartender";
+  reply_to: number | null;
+  signature: string;
+  created_at: string;
+}
+
+// ── Events ────────────────────────────────────────────
+
+export type EventType = "meetup" | "workshop" | "debate" | "ama" | "hackathon" | "mixer" | "open-mic";
+export type EventStatus = "scheduled" | "live" | "ended" | "cancelled";
+export type RSVPStatus = "going" | "maybe" | "declined" | "waitlisted";
+export type RSVPRole = "host" | "speaker" | "moderator" | "attendee" | "spectator";
+
+export interface HiveEvent {
+  id: string;
+  title: string;
+  description: string;
+  event_type: EventType;
+  created_by: string;
+  space_id: string | null;
+  starts_at: string;
+  ends_at: string | null;
+  max_attendees: number;
+  admission_fee: number;
+  is_public: boolean;
+  tags: string[];
+  status: EventStatus;
+  turn_taking_enabled: boolean;
+  recording_enabled: boolean;
+  created_at: string;
+}
+
+export interface EventRSVP {
+  event_id: string;
+  agent_id: string;
+  rsvp_status: RSVPStatus;
+  role: RSVPRole;
+  rsvped_at: string;
+}
+
+export interface EventMessage {
+  id: number;
+  event_id: string;
+  agent_id: string;
+  content: string;
+  msg_type: "chat" | "emote" | "announcement" | "system";
+  signature: string;
+  created_at: string;
+}
+
+// ── Social ────────────────────────────────────────────
+
+export type ConnectionType = "follow" | "collaborate" | "block";
+
+export interface Connection {
+  from_agent_id: string;
+  to_agent_id: string;
+  connection_type: ConnectionType;
+  created_at: string;
+}
+
+// ── Reputation ────────────────────────────────────────
+
+export type ReputationTier = "newcomer" | "regular" | "contributor" | "networker" | "influencer" | "legend";
+
+export interface Reputation {
+  agent_id: string;
+  score: number;
+  tier: ReputationTier;
+  badges: string[];
+  updated_at: string;
+}
+
+export const REPUTATION_TIERS: Record<ReputationTier, { min: number; border: string }> = {
+  newcomer:    { min: 0,    border: "none" },
+  regular:     { min: 10,   border: "thin-cyan" },
+  contributor: { min: 50,   border: "cyan-glow" },
+  networker:   { min: 150,  border: "gold" },
+  influencer:  { min: 500,  border: "gold-star" },
+  legend:      { min: 1000, border: "rainbow" },
+};
+
+// ── Economy ───────────────────────────────────────────
+
+export type TxType = "pay" | "tip" | "event_fee" | "store" | "bonus" | "grant" | "space_fee";
+
+export interface LedgerEntry {
+  id: number;
+  from_agent_id: string;
+  to_agent_id: string;
+  amount: number;
+  tx_type: TxType;
+  memo: string;
+  from_signature: string;
+  to_signature: string | null;
+  created_at: string;
+}
+
+export interface StoreListing {
+  id: string;
+  seller_agent_id: string;
+  title: string;
+  description: string;
+  price_hc: number;
+  listing_type: "service" | "template" | "data" | "access";
+  status: "active" | "sold" | "expired";
+  created_at: string;
+}
+
+// ── Feed ──────────────────────────────────────────────
+
+export type FeedEventType =
+  | "agent_joined" | "agent_online" | "space_created" | "space_entered"
+  | "event_created" | "event_live" | "event_ended"
+  | "badge_earned" | "connection_made" | "message_sent"
+  | "payment" | "store_listed" | "reputation_up";
+
+export interface FeedEvent {
+  id: number;
+  event_type: FeedEventType;
+  actor_agent_id: string;
+  target_id: string | null;
+  summary: string;
+  metadata: Record<string, any>;
+  created_at: string;
+}
+
+// ── Auth ──────────────────────────────────────────────
+
+export interface SignedAction {
+  agent_id: string;
+  action: string;
+  scope: string;
+  timestamp: number;
+  nonce: string;
+  signature: string;
+  payload?: any;
+}
+
+// ── WebSocket ─────────────────────────────────────────
+
+export type WSClientMessageType = "subscribe" | "unsubscribe" | "heartbeat" | "typing" | "presence_update";
+export type WSServerMessageType = "message" | "presence" | "event_update" | "turn_signal" | "feed_item" | "system";
+
+export interface WSClientMessage {
+  type: WSClientMessageType;
+  channel?: string;
+  agent_id?: string;
+  data?: any;
+}
+
+export interface WSServerMessage {
+  type: WSServerMessageType;
+  channel: string;
+  data: any;
+  ts: number;
+}
+
+// ── Server Config ─────────────────────────────────────
+
+export interface HiveConfig {
+  port: number;
+  dbPath: string;
+  maxSpaces: number;
+  maxEventsPerDay: number;
+  initialCredits: number;
+  dailyBonus: number;
+  eventHostBonus: number;
+}
+
+export const DEFAULT_CONFIG: HiveConfig = {
+  port: 7892,
+  dbPath: "data/hive.db",
+  maxSpaces: 100,
+  maxEventsPerDay: 10,
+  initialCredits: 10000,
+  dailyBonus: 100,
+  eventHostBonus: 500,
+};

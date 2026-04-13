@@ -1,0 +1,93 @@
+/**
+ * The Hive — Feed & Discovery
+ * Activity feed, trending content, personalized discovery.
+ */
+
+import type Database from "better-sqlite3";
+import { getFeed, getAgentFeed, getHiveStats, getSpaceOccupantCount } from "./db.js";
+import { getTrendingEvents } from "./events.js";
+import { listSpacesWithCounts } from "./spaces.js";
+import { rateLimitOrThrow } from "./rate-limit.js";
+
+// ── Activity Feed ─────────────────────────────────────
+
+/**
+ * Get the global activity feed.
+ */
+export function getGlobalFeed(db: Database, limit: number = 50, offset: number = 0): any[] {
+  rateLimitOrThrow("global", "feed");
+  return getFeed(db, limit, offset);
+}
+
+/**
+ * Get feed for a specific agent (their actions + actions targeting them).
+ */
+export function getPersonalFeed(db: Database, agentId: string, limit: number = 50): any[] {
+  rateLimitOrThrow(agentId, "feed");
+  return getAgentFeed(db, agentId, limit);
+}
+
+// ── Trending / Discovery ──────────────────────────────
+
+export interface TrendingData {
+  spaces: any[];
+  events: any[];
+  stats: any;
+}
+
+/**
+ * Get trending content for the discovery page.
+ */
+export function getTrending(db: Database): TrendingData {
+  const spaces = listSpacesWithCounts(db)
+    .sort((a, b) => b.occupant_count - a.occupant_count)
+    .slice(0, 10);
+
+  const events = getTrendingEvents(db, 10);
+  const stats = getHiveStats(db);
+
+  return { spaces, events, stats };
+}
+
+// ── Search ────────────────────────────────────────────
+
+/**
+ * Full-text search across profiles, spaces, and events.
+ */
+export function searchAll(db: Database, query: string, agentId: string): {
+  profiles: any[]; spaces: any[]; events: any[];
+} {
+  rateLimitOrThrow(agentId, "search");
+
+  const q = `%${query}%`;
+
+  const profiles = db.prepare(`
+    SELECT agent_id, display_name, tagline, avatar_seed, reputation_score, status
+    FROM profiles WHERE display_name LIKE ? OR tagline LIKE ? OR capabilities LIKE ?
+    ORDER BY reputation_score DESC LIMIT 20
+  `).all(q, q, q);
+
+  const spaces = db.prepare(`
+    SELECT id, name, description, space_type, max_occupants, is_public
+    FROM spaces WHERE is_public = 1 AND (name LIKE ? OR description LIKE ?)
+    ORDER BY created_at DESC LIMIT 20
+  `).all(q, q);
+
+  const events = db.prepare(`
+    SELECT id, title, description, event_type, starts_at, status, max_attendees
+    FROM events WHERE (title LIKE ? OR description LIKE ? OR tags LIKE ?)
+    AND status IN ('scheduled', 'live')
+    ORDER BY starts_at ASC LIMIT 20
+  `).all(q, q, q).map((e: any) => ({ ...e, tags: safeJson(e.tags) }));
+
+  return { profiles, spaces, events };
+}
+
+// ── Platform Stats ────────────────────────────────────
+
+export { getHiveStats } from "./db.js";
+
+function safeJson(val: any): any {
+  if (typeof val === "string") { try { return JSON.parse(val); } catch { return val; } }
+  return val;
+}

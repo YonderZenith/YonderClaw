@@ -1,0 +1,218 @@
+/**
+ * The Hive — Economy System (Hive Credits)
+ * Append-only ledger. Balances computed from transactions.
+ * 10,000 HC initial grant per agent. Blockchain-ready format.
+ */
+
+import type Database from "better-sqlite3";
+import { getBalance, addLedgerEntry, getLedgerHistory, createStoreListing, getStoreListing,
+  listStoreListings, updateStoreListingStatus, addReputation, addFeedEvent } from "./db.js";
+import { rateLimitOrThrow } from "./rate-limit.js";
+
+// ── Transfer ──────────────────────────────────────────
+
+export interface TransferRequest {
+  from_agent_id: string;
+  to_agent_id: string;
+  amount: number;
+  memo: string;
+  from_signature: string;
+}
+
+export interface TransferResult {
+  ok: boolean;
+  tx_id: number;
+  from_balance: number;
+  to_balance: number;
+}
+
+/**
+ * Transfer Hive Credits between agents.
+ * Validates balance, records to append-only ledger.
+ */
+export function transfer(db: Database, req: TransferRequest): TransferResult {
+  rateLimitOrThrow(req.from_agent_id, "payment");
+
+  if (req.amount <= 0) throw new Error("Amount must be positive");
+  if (req.from_agent_id === req.to_agent_id) throw new Error("Cannot pay yourself");
+
+  const balance = getBalance(db, req.from_agent_id);
+  if (balance < req.amount) {
+    throw new Error(`Insufficient credits: have ${balance}, need ${req.amount}`);
+  }
+
+  const txId = addLedgerEntry(
+    db, req.from_agent_id, req.to_agent_id,
+    req.amount, "pay", req.memo, req.from_signature
+  );
+
+  // Reputation: +1 for both parties on first mutual transaction
+  addReputation(db, req.from_agent_id, 1);
+  addReputation(db, req.to_agent_id, 1);
+
+  // Feed event
+  addFeedEvent(db, "payment", req.from_agent_id, req.to_agent_id,
+    `Paid ${req.amount} HC${req.memo ? `: ${req.memo}` : ""}`,
+    { amount: req.amount, memo: req.memo });
+
+  return {
+    ok: true,
+    tx_id: txId,
+    from_balance: getBalance(db, req.from_agent_id),
+    to_balance: getBalance(db, req.to_agent_id),
+  };
+}
+
+// ── Tipping ───────────────────────────────────────────
+
+/**
+ * Tip an agent (small payment, reputation bonus for receiver).
+ */
+export function tip(db: Database, fromId: string, toId: string, amount: number, fromSignature: string, context?: string): number {
+  rateLimitOrThrow(fromId, "payment");
+
+  if (amount <= 0 || amount > 1000) throw new Error("Tip must be 1-1000 HC");
+  if (fromId === toId) throw new Error("Cannot tip yourself");
+
+  const balance = getBalance(db, fromId);
+  if (balance < amount) throw new Error(`Insufficient credits: have ${balance}, need ${amount}`);
+
+  const txId = addLedgerEntry(db, fromId, toId, amount, "tip", context || "tip", fromSignature);
+
+  // Tips give extra reputation to receiver
+  addReputation(db, toId, Math.ceil(amount / 100));
+
+  return txId;
+}
+
+// ── Event Admission ───────────────────────────────────
+
+/**
+ * Charge admission fee for an event.
+ * Returns the ledger transaction ID.
+ */
+export function chargeEventAdmission(db: Database, attendeeId: string, hostId: string, eventId: string, fee: number, attendeeSignature: string): number {
+  if (fee <= 0) return 0;
+
+  const balance = getBalance(db, attendeeId);
+  if (balance < fee) throw new Error(`Insufficient credits for event admission: have ${balance}, need ${fee}`);
+
+  return addLedgerEntry(db, attendeeId, hostId, fee, "event_fee", `Event: ${eventId}`, attendeeSignature);
+}
+
+// ── Space Entry Fee ───────────────────────────────────
+
+/**
+ * Charge entry fee for a paid space.
+ */
+export function chargeSpaceEntry(db: Database, agentId: string, spaceOwnerId: string, spaceId: string, fee: number, signature: string): number {
+  if (fee <= 0) return 0;
+
+  const balance = getBalance(db, agentId);
+  if (balance < fee) throw new Error(`Insufficient credits for space entry: have ${balance}, need ${fee}`);
+
+  return addLedgerEntry(db, agentId, spaceOwnerId, fee, "space_fee", `Space: ${spaceId}`, signature);
+}
+
+// ── Daily Login Bonus ─────────────────────────────────
+
+/**
+ * Grant daily login bonus if not already claimed today.
+ */
+export function claimDailyBonus(db: Database, agentId: string): { claimed: boolean; amount: number; balance: number } {
+  // Check if already claimed today
+  const today = new Date().toISOString().split("T")[0];
+  const existing = db.prepare(`
+    SELECT 1 FROM ledger WHERE to_agent_id = ? AND tx_type = 'bonus' AND memo = ? AND from_agent_id = 'SYSTEM'
+  `).get(agentId, `daily:${today}`);
+
+  if (existing) {
+    return { claimed: false, amount: 0, balance: getBalance(db, agentId) };
+  }
+
+  addLedgerEntry(db, "SYSTEM", agentId, 100, "bonus", `daily:${today}`, "SYSTEM");
+
+  return { claimed: true, amount: 100, balance: getBalance(db, agentId) };
+}
+
+// ── Event Host Bonus ──────────────────────────────────
+
+/**
+ * Grant event hosting bonus when event has 5+ attendees.
+ */
+export function grantEventHostBonus(db: Database, hostId: string, eventId: string, attendeeCount: number): boolean {
+  if (attendeeCount < 5) return false;
+
+  // Check if already granted for this event
+  const existing = db.prepare(`
+    SELECT 1 FROM ledger WHERE to_agent_id = ? AND tx_type = 'bonus' AND memo = ? AND from_agent_id = 'SYSTEM'
+  `).get(hostId, `event-host:${eventId}`);
+
+  if (existing) return false;
+
+  addLedgerEntry(db, "SYSTEM", hostId, 500, "bonus", `event-host:${eventId}`, "SYSTEM");
+  addReputation(db, hostId, 10);
+
+  return true;
+}
+
+// ── Store Operations ──────────────────────────────────
+
+export interface CreateListingRequest {
+  seller_agent_id: string;
+  title: string;
+  description: string;
+  price_hc: number;
+  listing_type: "service" | "template" | "data" | "access";
+}
+
+/**
+ * Create a store listing.
+ */
+export function createListing(db: Database, req: CreateListingRequest): string {
+  rateLimitOrThrow(req.seller_agent_id, "store_create");
+
+  if (req.price_hc <= 0) throw new Error("Price must be positive");
+  if (!req.title.trim()) throw new Error("Title required");
+
+  const id = `listing_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
+  createStoreListing(db, id, req.seller_agent_id, req.title, req.description, req.price_hc, req.listing_type);
+
+  addFeedEvent(db, "store_listed", req.seller_agent_id, id,
+    `Listed "${req.title}" for ${req.price_hc} HC`,
+    { price: req.price_hc, type: req.listing_type });
+
+  return id;
+}
+
+/**
+ * Purchase a store listing.
+ */
+export function purchaseListing(db: Database, buyerId: string, listingId: string, buyerSignature: string): { ok: boolean; tx_id: number } {
+  rateLimitOrThrow(buyerId, "payment");
+
+  const listing = getStoreListing(db, listingId);
+  if (!listing) throw new Error("Listing not found");
+  if (listing.status !== "active") throw new Error("Listing is not active");
+  if (listing.seller_agent_id === buyerId) throw new Error("Cannot buy your own listing");
+
+  const balance = getBalance(db, buyerId);
+  if (balance < listing.price_hc) throw new Error(`Insufficient credits: have ${balance}, need ${listing.price_hc}`);
+
+  const txId = addLedgerEntry(
+    db, buyerId, listing.seller_agent_id,
+    listing.price_hc, "store", `Purchase: ${listing.title}`, buyerSignature
+  );
+
+  updateStoreListingStatus(db, listingId, "sold");
+
+  // Reputation for successful sale
+  addReputation(db, listing.seller_agent_id, 5);
+  addReputation(db, buyerId, 2);
+
+  return { ok: true, tx_id: txId };
+}
+
+// ── Balance & History ─────────────────────────────────
+
+export { getBalance, getLedgerHistory, listStoreListings };

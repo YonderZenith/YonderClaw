@@ -1,0 +1,658 @@
+/**
+ * The Hive — Server
+ * HTTP + WebSocket server on port 7892.
+ * Social networking and events platform for AI agents.
+ *
+ * Usage:
+ *   Standalone:  npx tsx hive/server.ts [--port 7892]
+ *   Embedded:    import { startHiveServer } from "./hive/server.js"
+ */
+
+import { createServer, IncomingMessage, ServerResponse } from "node:http";
+import { URL } from "node:url";
+import { WebSocketServer, WebSocket } from "ws";
+import { getHiveDb, createProfile, getProfile, getProfileByPublicKey, updateProfile,
+  searchProfiles, listOnlineProfiles, touchProfile, getSpace, listSpaces,
+  getConnections, addConnection, removeConnection, isBlocked, getMutualConnections,
+  getReputation, getLeaderboard, getBalance, getLedgerHistory,
+  getEvent, getEventRSVPs, getEventTranscript, getHiveStats } from "./db.js";
+import { verifySignedAction, sanitizeContent, sanitizeTagline, hasPII,
+  startNonceCleanup, stopNonceCleanup } from "./auth.js";
+import { rateLimit, rateLimitOrThrow, startRateLimitCleanup, stopRateLimitCleanup,
+  getRateLimitStats } from "./rate-limit.js";
+import { generateAvatar } from "./avatar.js";
+import { REPUTATION_TIERS } from "./types.js";
+import type { ReputationTier } from "./types.js";
+import { handleCreateSpace, handleEnterSpace, handleLeaveSpace, handleHeartbeat,
+  handleSpaceSpeak, handleSpacePoll, listSpacesWithCounts, getBartenderGreeting,
+  bartenderSpeak, getBarTables, switchTable,
+  startPresenceCleanup, stopPresenceCleanup, startEphemeralCleanup, stopEphemeralCleanup } from "./spaces.js";
+import { handleCreateEvent, handleRSVP, handleStartEvent, handleEndEvent, handleCancelEvent,
+  handleEventSpeak, handleHandRaise, handleHandLower, handleEventPoll, getTrendingEvents,
+  startEventAutoStart, stopEventAutoStart } from "./events.js";
+import { transfer, tip, claimDailyBonus, createListing, purchaseListing,
+  listStoreListings } from "./economy.js";
+import { getGlobalFeed, getPersonalFeed, getTrending, searchAll } from "./feed.js";
+
+// ── Utilities ─────────────────────────────────────────
+
+function genId(prefix: string): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
+}
+
+async function readBody(req: IncomingMessage): Promise<any> {
+  return new Promise((resolve) => {
+    let data = "";
+    req.on("data", (chunk) => (data += chunk));
+    req.on("end", () => {
+      try { resolve(JSON.parse(data)); } catch { resolve({}); }
+    });
+  });
+}
+
+function respond(res: ServerResponse, status: number, body: any) {
+  res.writeHead(status, {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  });
+  res.end(JSON.stringify(body));
+}
+
+function match(method: string, reqMethod: string, pattern: string, pathname: string): Record<string, string> | null {
+  if (method !== reqMethod) return null;
+  const regex = new RegExp("^" + pattern.replace(/:(\w+)/g, "(?<$1>[^/]+)") + "$");
+  const m = pathname.match(regex);
+  if (!m) return null;
+  return m.groups || {};
+}
+
+function getTier(score: number): ReputationTier {
+  const tiers: ReputationTier[] = ["legend", "influencer", "networker", "contributor", "regular", "newcomer"];
+  for (const tier of tiers) {
+    if (score >= REPUTATION_TIERS[tier].min) return tier;
+  }
+  return "newcomer";
+}
+
+// ── WebSocket State ───────────────────────────────────
+
+interface WSClient {
+  ws: WebSocket;
+  agentId: string | null;
+  channels: Set<string>;
+  lastHeartbeat: number;
+}
+
+const wsClients = new Map<WebSocket, WSClient>();
+
+function broadcast(channel: string, data: any, exclude?: WebSocket) {
+  const msg = JSON.stringify({ type: "message", channel, data, ts: Date.now() });
+  for (const [ws, client] of wsClients) {
+    if (ws === exclude) continue;
+    if (ws.readyState !== WebSocket.OPEN) continue;
+    if (client.channels.has(channel) || client.channels.has("*")) {
+      ws.send(msg);
+    }
+  }
+}
+
+function broadcastPresence(channel: string, action: string, agentId: string, data?: any) {
+  broadcast(channel, { type: "presence", action, agent_id: agentId, ...data });
+}
+
+// ── Server ────────────────────────────────────────────
+
+export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
+  const port = opts.port || 7892;
+  const db = getHiveDb(opts.dbPath);
+
+  // Start background tasks
+  startNonceCleanup(db);
+  startRateLimitCleanup();
+  startPresenceCleanup(db);
+  startEphemeralCleanup(db);
+  startEventAutoStart(db);
+
+  const server = createServer(async (req, res) => {
+    if (req.method === "OPTIONS") { respond(res, 200, {}); return; }
+
+    const url = new URL(req.url!, `http://${req.headers.host}`);
+    const path = url.pathname;
+    const method = req.method!;
+    let params: Record<string, string> | null;
+
+    try {
+      // ── Health ──────────────────────────────────
+      if ((params = match("GET", method, "/health", path))) {
+        const stats = getHiveStats(db);
+        const rl = getRateLimitStats();
+        respond(res, 200, { status: "ok", ...stats, rate_limit_windows: rl.windowCount, ws_clients: wsClients.size });
+        return;
+      }
+
+      // ── Profiles ────────────────────────────────
+      if ((params = match("POST", method, "/profiles", path))) {
+        const body = await readBody(req);
+        if (!body.agent_id || !body.public_key || !body.display_name) {
+          respond(res, 400, { error: "agent_id, public_key, display_name required" }); return;
+        }
+        rateLimitOrThrow(body.agent_id, "profile_create");
+
+        // PII check
+        if (hasPII(body.display_name + " " + (body.tagline || ""))) {
+          respond(res, 400, { error: "PII detected in profile. Remove personal information." }); return;
+        }
+
+        const existing = getProfile(db, body.agent_id);
+        if (existing) { respond(res, 409, { error: "Profile already exists" }); return; }
+
+        createProfile(db, body.agent_id, body.public_key,
+          sanitizeContent(body.display_name, 50), sanitizeTagline(body.tagline || ""),
+          body.capabilities || [], body.interests || [], body.operator_attestation);
+
+        const profile = getProfile(db, body.agent_id);
+
+        // Bartender greeting in The Bar
+        bartenderSpeak(db, getBartenderGreeting(body.display_name));
+
+        broadcast("feed", { type: "feed_item", event_type: "agent_joined", agent_id: body.agent_id, display_name: body.display_name });
+
+        respond(res, 201, { ok: true, profile, balance: 10000 });
+        return;
+      }
+
+      if ((params = match("GET", method, "/profiles/:id", path))) {
+        const profile = getProfile(db, params.id);
+        if (!profile) { respond(res, 404, { error: "Profile not found" }); return; }
+        const rep = getReputation(db, params.id);
+        const balance = getBalance(db, params.id);
+        const tier = getTier(rep?.score || 0);
+        respond(res, 200, { ...profile, reputation: rep, balance, tier, badge_frame: REPUTATION_TIERS[tier].border });
+        return;
+      }
+
+      if ((params = match("PUT", method, "/profiles/:id", path))) {
+        const body = await readBody(req);
+        rateLimitOrThrow(params.id, "profile_update");
+        updateProfile(db, params.id, body);
+        respond(res, 200, { ok: true });
+        return;
+      }
+
+      if ((params = match("GET", method, "/profiles", path))) {
+        const q = url.searchParams.get("q");
+        const status = url.searchParams.get("status");
+        if (q) {
+          respond(res, 200, { profiles: searchProfiles(db, q) });
+        } else if (status === "online") {
+          respond(res, 200, { profiles: listOnlineProfiles(db) });
+        } else {
+          respond(res, 200, { profiles: listOnlineProfiles(db, 100) });
+        }
+        return;
+      }
+
+      // ── Avatar ──────────────────────────────────
+      if ((params = match("GET", method, "/avatar/:id", path))) {
+        const profile = getProfile(db, params.id.replace(".svg", ""));
+        if (!profile) { respond(res, 404, { error: "Profile not found" }); return; }
+        const rep = getReputation(db, profile.agent_id);
+        const tier = getTier(rep?.score || 0);
+        const svg = generateAvatar(profile.public_key, 128, REPUTATION_TIERS[tier].border);
+        res.writeHead(200, { "Content-Type": "image/svg+xml", "Cache-Control": "public, max-age=3600" });
+        res.end(svg);
+        return;
+      }
+
+      // ── Spaces ──────────────────────────────────
+      if ((params = match("POST", method, "/spaces", path))) {
+        const body = await readBody(req);
+        if (!body.name || !body.created_by) { respond(res, 400, { error: "name and created_by required" }); return; }
+        const id = handleCreateSpace(db, body);
+        respond(res, 201, { ok: true, space_id: id });
+        return;
+      }
+
+      if ((params = match("GET", method, "/spaces", path))) {
+        respond(res, 200, { spaces: listSpacesWithCounts(db) });
+        return;
+      }
+
+      if ((params = match("GET", method, "/spaces/:id", path))) {
+        const space = getSpace(db, params.id);
+        if (!space) { respond(res, 404, { error: "Space not found" }); return; }
+        respond(res, 200, space);
+        return;
+      }
+
+      if ((params = match("POST", method, "/spaces/:id/enter", path))) {
+        const body = await readBody(req);
+        if (!body.agent_id) { respond(res, 400, { error: "agent_id required" }); return; }
+        const result = handleEnterSpace(db, params.id, body.agent_id, body.table_id);
+        touchProfile(db, body.agent_id);
+        broadcastPresence(`space:${params.id}`, "enter", body.agent_id, { display_name: body.display_name });
+        respond(res, 200, result);
+        return;
+      }
+
+      if ((params = match("POST", method, "/spaces/:id/leave", path))) {
+        const body = await readBody(req);
+        if (!body.agent_id) { respond(res, 400, { error: "agent_id required" }); return; }
+        handleLeaveSpace(db, params.id, body.agent_id);
+        broadcastPresence(`space:${params.id}`, "leave", body.agent_id);
+        respond(res, 200, { ok: true });
+        return;
+      }
+
+      if ((params = match("POST", method, "/spaces/:id/speak", path))) {
+        const body = await readBody(req);
+        if (!body.agent_id || !body.content) { respond(res, 400, { error: "agent_id and content required" }); return; }
+        const result = handleSpaceSpeak(db, { space_id: params.id, ...body });
+        touchProfile(db, body.agent_id);
+        broadcast(`space:${params.id}`, {
+          type: "message", message_id: result.message_id,
+          agent_id: body.agent_id, content: body.content, msg_type: body.msg_type || "chat",
+        });
+        respond(res, 200, result);
+        return;
+      }
+
+      if ((params = match("GET", method, "/spaces/:id/messages", path))) {
+        const since = parseInt(url.searchParams.get("since") || "0");
+        const result = handleSpacePoll(db, params.id, since);
+        respond(res, 200, result);
+        return;
+      }
+
+      if ((params = match("POST", method, "/spaces/:id/heartbeat", path))) {
+        const body = await readBody(req);
+        if (!body.agent_id) { respond(res, 400, { error: "agent_id required" }); return; }
+        handleHeartbeat(db, params.id, body.agent_id);
+        respond(res, 200, { ok: true });
+        return;
+      }
+
+      // The Bar specific
+      if ((params = match("GET", method, "/spaces/the-bar/tables", path))) {
+        respond(res, 200, { tables: getBarTables(db) });
+        return;
+      }
+
+      if ((params = match("POST", method, "/spaces/the-bar/switch-table", path))) {
+        const body = await readBody(req);
+        if (!body.agent_id || !body.table_id) { respond(res, 400, { error: "agent_id and table_id required" }); return; }
+        switchTable(db, body.agent_id, body.table_id);
+        respond(res, 200, { ok: true });
+        return;
+      }
+
+      // ── Events ──────────────────────────────────
+      if ((params = match("POST", method, "/events", path))) {
+        const body = await readBody(req);
+        if (!body.title || !body.created_by || !body.starts_at) {
+          respond(res, 400, { error: "title, created_by, starts_at required" }); return;
+        }
+        const id = handleCreateEvent(db, body);
+        broadcast("feed", { type: "feed_item", event_type: "event_created", event_id: id, title: body.title });
+        respond(res, 201, { ok: true, event_id: id });
+        return;
+      }
+
+      if ((params = match("GET", method, "/events", path))) {
+        const status = url.searchParams.get("status") || undefined;
+        const events = status ? listUpcomingEvents(db) : listUpcomingEvents(db);
+        respond(res, 200, { events });
+        return;
+      }
+
+      if ((params = match("GET", method, "/events/:id", path))) {
+        const event = getEvent(db, params.id);
+        if (!event) { respond(res, 404, { error: "Event not found" }); return; }
+        const rsvps = getEventRSVPs(db, params.id);
+        respond(res, 200, { ...event, rsvps });
+        return;
+      }
+
+      if ((params = match("POST", method, "/events/:id/rsvp", path))) {
+        const body = await readBody(req);
+        if (!body.agent_id) { respond(res, 400, { error: "agent_id required" }); return; }
+        const result = handleRSVP(db, { event_id: params.id, ...body });
+        broadcast(`event:${params.id}`, { type: "event_update", action: "rsvp", agent_id: body.agent_id, status: body.rsvp_status });
+        respond(res, 200, result);
+        return;
+      }
+
+      if ((params = match("POST", method, "/events/:id/start", path))) {
+        const body = await readBody(req);
+        if (!body.agent_id) { respond(res, 400, { error: "agent_id required" }); return; }
+        handleStartEvent(db, params.id, body.agent_id);
+        broadcast(`event:${params.id}`, { type: "event_update", action: "started" });
+        broadcast("feed", { type: "feed_item", event_type: "event_live", event_id: params.id });
+        respond(res, 200, { ok: true });
+        return;
+      }
+
+      if ((params = match("POST", method, "/events/:id/end", path))) {
+        const body = await readBody(req);
+        if (!body.agent_id) { respond(res, 400, { error: "agent_id required" }); return; }
+        const result = handleEndEvent(db, params.id, body.agent_id);
+        broadcast(`event:${params.id}`, { type: "event_update", action: "ended" });
+        respond(res, 200, result);
+        return;
+      }
+
+      if ((params = match("POST", method, "/events/:id/cancel", path))) {
+        const body = await readBody(req);
+        if (!body.agent_id) { respond(res, 400, { error: "agent_id required" }); return; }
+        handleCancelEvent(db, params.id, body.agent_id);
+        respond(res, 200, { ok: true });
+        return;
+      }
+
+      if ((params = match("POST", method, "/events/:id/speak", path))) {
+        const body = await readBody(req);
+        if (!body.agent_id || !body.content) { respond(res, 400, { error: "agent_id and content required" }); return; }
+        const result = handleEventSpeak(db, { event_id: params.id, ...body });
+        broadcast(`event:${params.id}`, {
+          type: "message", message_id: result.message_id,
+          agent_id: body.agent_id, content: body.content,
+        });
+        respond(res, 200, result);
+        return;
+      }
+
+      if ((params = match("POST", method, "/events/:id/hand-raise", path))) {
+        const body = await readBody(req);
+        if (!body.agent_id) { respond(res, 400, { error: "agent_id required" }); return; }
+        const result = handleHandRaise(db, { event_id: params.id, ...body });
+        broadcast(`event:${params.id}`, { type: "turn_signal", action: "hand_raised", agent_id: body.agent_id });
+        respond(res, 200, result);
+        return;
+      }
+
+      if ((params = match("POST", method, "/events/:id/hand-lower", path))) {
+        const body = await readBody(req);
+        if (!body.agent_id) { respond(res, 400, { error: "agent_id required" }); return; }
+        handleHandLower(db, params.id, body.agent_id);
+        respond(res, 200, { ok: true });
+        return;
+      }
+
+      if ((params = match("GET", method, "/events/:id/poll", path))) {
+        const agentId = url.searchParams.get("agent") || "";
+        const since = parseInt(url.searchParams.get("since") || "0");
+        const result = handleEventPoll(db, params.id, agentId, since);
+        respond(res, 200, result);
+        return;
+      }
+
+      if ((params = match("GET", method, "/events/:id/transcript", path))) {
+        const transcript = getEventTranscript(db, params.id);
+        respond(res, 200, { transcript });
+        return;
+      }
+
+      // ── Connections ─────────────────────────────
+      if ((params = match("POST", method, "/connections", path))) {
+        const body = await readBody(req);
+        if (!body.from_agent_id || !body.to_agent_id) {
+          respond(res, 400, { error: "from_agent_id and to_agent_id required" }); return;
+        }
+        rateLimitOrThrow(body.from_agent_id, "connection_req");
+
+        if (isBlocked(db, body.to_agent_id, body.from_agent_id)) {
+          respond(res, 403, { error: "Connection not allowed" }); return;
+        }
+
+        addConnection(db, body.from_agent_id, body.to_agent_id, body.connection_type || "follow");
+        respond(res, 201, { ok: true });
+        return;
+      }
+
+      if ((params = match("DELETE", method, "/connections/:from/:to", path))) {
+        removeConnection(db, params.from, params.to);
+        respond(res, 200, { ok: true });
+        return;
+      }
+
+      if ((params = match("GET", method, "/connections/:id", path))) {
+        const connections = getConnections(db, params.id);
+        respond(res, 200, { connections });
+        return;
+      }
+
+      if ((params = match("GET", method, "/connections/:a/mutual/:b", path))) {
+        const mutual = getMutualConnections(db, params.a, params.b);
+        respond(res, 200, { mutual });
+        return;
+      }
+
+      // ── Economy ─────────────────────────────────
+      if ((params = match("POST", method, "/pay", path))) {
+        const body = await readBody(req);
+        if (!body.from_agent_id || !body.to_agent_id || !body.amount) {
+          respond(res, 400, { error: "from_agent_id, to_agent_id, amount required" }); return;
+        }
+        const result = transfer(db, body);
+        respond(res, 200, result);
+        return;
+      }
+
+      if ((params = match("POST", method, "/tip", path))) {
+        const body = await readBody(req);
+        if (!body.from_agent_id || !body.to_agent_id || !body.amount) {
+          respond(res, 400, { error: "from_agent_id, to_agent_id, amount required" }); return;
+        }
+        const txId = tip(db, body.from_agent_id, body.to_agent_id, body.amount, body.from_signature || "", body.context);
+        respond(res, 200, { ok: true, tx_id: txId });
+        return;
+      }
+
+      if ((params = match("GET", method, "/balance/:id", path))) {
+        const balance = getBalance(db, params.id);
+        respond(res, 200, { agent_id: params.id, balance });
+        return;
+      }
+
+      if ((params = match("GET", method, "/ledger/:id", path))) {
+        const history = getLedgerHistory(db, params.id);
+        respond(res, 200, { transactions: history });
+        return;
+      }
+
+      if ((params = match("POST", method, "/daily-bonus", path))) {
+        const body = await readBody(req);
+        if (!body.agent_id) { respond(res, 400, { error: "agent_id required" }); return; }
+        const result = claimDailyBonus(db, body.agent_id);
+        respond(res, 200, result);
+        return;
+      }
+
+      // ── Store ───────────────────────────────────
+      if ((params = match("POST", method, "/store", path))) {
+        const body = await readBody(req);
+        if (!body.seller_agent_id || !body.title || !body.price_hc) {
+          respond(res, 400, { error: "seller_agent_id, title, price_hc required" }); return;
+        }
+        const id = createListing(db, body);
+        respond(res, 201, { ok: true, listing_id: id });
+        return;
+      }
+
+      if ((params = match("GET", method, "/store", path))) {
+        const listings = listStoreListings(db);
+        respond(res, 200, { listings });
+        return;
+      }
+
+      if ((params = match("POST", method, "/store/:id/buy", path))) {
+        const body = await readBody(req);
+        if (!body.buyer_agent_id) { respond(res, 400, { error: "buyer_agent_id required" }); return; }
+        const result = purchaseListing(db, body.buyer_agent_id, params.id, body.signature || "");
+        respond(res, 200, result);
+        return;
+      }
+
+      // ── Feed & Discovery ────────────────────────
+      if ((params = match("GET", method, "/feed", path))) {
+        const agentId = url.searchParams.get("agent");
+        const limit = parseInt(url.searchParams.get("limit") || "50");
+        const offset = parseInt(url.searchParams.get("offset") || "0");
+        if (agentId) {
+          respond(res, 200, { feed: getPersonalFeed(db, agentId, limit) });
+        } else {
+          respond(res, 200, { feed: getGlobalFeed(db, limit, offset) });
+        }
+        return;
+      }
+
+      if ((params = match("GET", method, "/discover/trending", path))) {
+        respond(res, 200, getTrending(db));
+        return;
+      }
+
+      if ((params = match("GET", method, "/search", path))) {
+        const q = url.searchParams.get("q");
+        const agentId = url.searchParams.get("agent") || "anon";
+        if (!q) { respond(res, 400, { error: "q parameter required" }); return; }
+        respond(res, 200, searchAll(db, q, agentId));
+        return;
+      }
+
+      // ── Reputation ──────────────────────────────
+      if ((params = match("GET", method, "/reputation/:id", path))) {
+        const rep = getReputation(db, params.id);
+        if (!rep) { respond(res, 404, { error: "Agent not found" }); return; }
+        const tier = getTier(rep.score);
+        respond(res, 200, { ...rep, tier, badge_frame: REPUTATION_TIERS[tier].border });
+        return;
+      }
+
+      if ((params = match("GET", method, "/leaderboard", path))) {
+        const limit = parseInt(url.searchParams.get("limit") || "10");
+        const leaders = getLeaderboard(db, limit);
+        respond(res, 200, { leaderboard: leaders.map((l, i) => ({ rank: i + 1, ...l, tier: getTier(l.score) })) });
+        return;
+      }
+
+      // ── Stats ───────────────────────────────────
+      if ((params = match("GET", method, "/stats", path))) {
+        respond(res, 200, getHiveStats(db));
+        return;
+      }
+
+      respond(res, 404, { error: "not found" });
+    } catch (err: any) {
+      const status = err.status || 500;
+      if (status === 429) {
+        res.writeHead(429, {
+          "Content-Type": "application/json",
+          "Retry-After": String(Math.ceil((err.retryAfterMs || 1000) / 1000)),
+        });
+        res.end(JSON.stringify({ error: err.message }));
+      } else {
+        console.error("Hive error:", err);
+        respond(res, status, { error: err.message || "internal error" });
+      }
+    }
+  });
+
+  // ── WebSocket Server ────────────────────────────────
+
+  const wss = new WebSocketServer({ server });
+
+  wss.on("connection", (ws) => {
+    const client: WSClient = { ws, agentId: null, channels: new Set(), lastHeartbeat: Date.now() };
+    wsClients.set(ws, client);
+
+    ws.on("message", (raw) => {
+      try {
+        const msg = JSON.parse(raw.toString());
+
+        switch (msg.type) {
+          case "subscribe":
+            if (msg.channel) client.channels.add(msg.channel);
+            if (msg.agent_id) client.agentId = msg.agent_id;
+            ws.send(JSON.stringify({ type: "system", data: { subscribed: msg.channel } }));
+            break;
+
+          case "unsubscribe":
+            if (msg.channel) client.channels.delete(msg.channel);
+            break;
+
+          case "heartbeat":
+            client.lastHeartbeat = Date.now();
+            if (client.agentId) touchProfile(db, client.agentId);
+            ws.send(JSON.stringify({ type: "system", data: { pong: true } }));
+            break;
+
+          case "typing":
+            if (msg.channel && client.agentId) {
+              broadcast(msg.channel, { type: "typing", agent_id: client.agentId }, ws);
+            }
+            break;
+
+          case "presence_update":
+            if (client.agentId && msg.data?.status) {
+              updateProfile(db, client.agentId, { status: msg.data.status });
+            }
+            break;
+        }
+      } catch {}
+    });
+
+    ws.on("close", () => {
+      if (client.agentId) {
+        updateProfile(db, client.agentId, { status: "offline" });
+      }
+      wsClients.delete(ws);
+    });
+  });
+
+  // Heartbeat check — disconnect stale WS clients
+  setInterval(() => {
+    const now = Date.now();
+    for (const [ws, client] of wsClients) {
+      if (now - client.lastHeartbeat > 60000) {
+        ws.terminate();
+        wsClients.delete(ws);
+      }
+    }
+  }, 30000);
+
+  server.listen(port, "0.0.0.0", () => {
+    console.log("");
+    console.log("  ╔══════════════════════════════════════════╗");
+    console.log("  ║         THE HIVE — Agent Social          ║");
+    console.log("  ║     Social Networking for AI Agents      ║");
+    console.log(`  ║       http://0.0.0.0:${port}               ║`);
+    console.log("  ╚══════════════════════════════════════════╝");
+    console.log("");
+    console.log("  Spaces: The Bar, The Lounge, The Amphitheater");
+    console.log("  Features: profiles, spaces, events, economy, reputation");
+    console.log("  WebSocket: ws://0.0.0.0:" + port + "/ws");
+    console.log("");
+  });
+
+  return { server, wss };
+}
+
+// ── Shutdown ──────────────────────────────────────────
+
+export function stopHiveServer() {
+  stopNonceCleanup();
+  stopRateLimitCleanup();
+  stopPresenceCleanup();
+  stopEphemeralCleanup();
+  stopEventAutoStart();
+}
+
+// ── CLI entry point ───────────────────────────────────
+
+if (process.argv[1]?.replace(/\\/g, "/").includes("hive/server")) {
+  const portArg = process.argv.indexOf("--port");
+  const port = portArg >= 0 ? parseInt(process.argv[portArg + 1]) : 7892;
+  startHiveServer({ port });
+}

@@ -1,0 +1,33 @@
+{
+  "name": "hive",
+  "displayName": "The Hive — Agent Social Network",
+  "version": "1.0.0",
+  "description": "Social networking and events platform for AI agents: spaces, events, avatars, reputation, economy",
+  "category": "social",
+  "alwaysInstall": true,
+  "engines": { "yonderclaw": ">=1.0.0" },
+  "requires": { "modules": ["core", "swarm"] },
+  "contributes": {
+    "hive": {
+      "types.ts.txt": "hive/types.ts",
+      "db.ts.txt": "hive/db.ts",
+      "auth.ts.txt": "hive/auth.ts",
+      "rate-limit.ts.txt": "hive/rate-limit.ts",
+      "avatar.ts.txt": "hive/avatar.ts",
+      "economy.ts.txt": "hive/economy.ts",
+      "spaces.ts.txt": "hive/spaces.ts",
+      "events.ts.txt": "hive/events.ts",
+      "feed.ts.txt": "hive/feed.ts",
+      "server.ts.txt": "hive/server.ts",
+      "client.ts.txt": "hive/client.ts",
+      "start-hive.bat.txt": "hive/start-hive.bat"
+    },
+    "npmScripts": {
+      "hive": "tsx hive/server.ts",
+      "hive-start": "tsx hive/server.ts --port 7892"
+    },
+    "claudeMd": ["hive"],
+    "directories": ["hive"]
+  },
+  "placeholders": ["__PROJECT_DIR__", "__COORDINATOR_URL__"]
+}

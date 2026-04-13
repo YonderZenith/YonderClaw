@@ -1,0 +1,410 @@
+/**
+ * The Hive — Deterministic Avatar Generator
+ * Generates unique SVG avatars from Ed25519 public keys.
+ * No GPU, no ML — pure math. ~2KB inline SVG per avatar.
+ *
+ * Public key bytes map to: body shape (8), colors (16), eyes (12),
+ * expression (8), accessory (16), pattern (8) = ~50M unique combinations.
+ * Reproducible anywhere from just the key.
+ */
+
+import crypto from "crypto";
+
+// ── Color Palettes (16 primary, 16 secondary) ────────
+
+const PRIMARY_COLORS = [
+  "#00f0ff", "#ff00ff", "#00ff88", "#ffaa00",
+  "#ff3366", "#6633ff", "#33ffcc", "#ff6600",
+  "#00aaff", "#ff0066", "#88ff00", "#aa00ff",
+  "#ff8800", "#0088ff", "#ff00aa", "#00ffaa",
+];
+
+const SECONDARY_COLORS = [
+  "#001a33", "#1a0033", "#001a0f", "#1a0f00",
+  "#1a0011", "#0f0033", "#001a1a", "#1a0800",
+  "#001133", "#1a000a", "#0f1a00", "#110033",
+  "#1a0e00", "#000e1a", "#1a0015", "#001a15",
+];
+
+// ── Body Shapes (8 variants) ──────────────────────────
+
+const BODY_SHAPES = [
+  // 0: Circle shield
+  (cx: number, cy: number, s: number) =>
+    `<circle cx="${cx}" cy="${cy}" r="${s * 0.45}" />`,
+  // 1: Rounded square
+  (cx: number, cy: number, s: number) =>
+    `<rect x="${cx - s * 0.38}" y="${cy - s * 0.38}" width="${s * 0.76}" height="${s * 0.76}" rx="${s * 0.12}" />`,
+  // 2: Diamond
+  (cx: number, cy: number, s: number) => {
+    const r = s * 0.42;
+    return `<polygon points="${cx},${cy - r} ${cx + r},${cy} ${cx},${cy + r} ${cx - r},${cy}" />`;
+  },
+  // 3: Hexagon
+  (cx: number, cy: number, s: number) => {
+    const r = s * 0.42;
+    const pts = Array.from({ length: 6 }, (_, i) => {
+      const a = (Math.PI / 3) * i - Math.PI / 6;
+      return `${cx + r * Math.cos(a)},${cy + r * Math.sin(a)}`;
+    });
+    return `<polygon points="${pts.join(" ")}" />`;
+  },
+  // 4: Octagon
+  (cx: number, cy: number, s: number) => {
+    const r = s * 0.42;
+    const pts = Array.from({ length: 8 }, (_, i) => {
+      const a = (Math.PI / 4) * i - Math.PI / 8;
+      return `${cx + r * Math.cos(a)},${cy + r * Math.sin(a)}`;
+    });
+    return `<polygon points="${pts.join(" ")}" />`;
+  },
+  // 5: Pentagon
+  (cx: number, cy: number, s: number) => {
+    const r = s * 0.42;
+    const pts = Array.from({ length: 5 }, (_, i) => {
+      const a = (Math.PI * 2 / 5) * i - Math.PI / 2;
+      return `${cx + r * Math.cos(a)},${cy + r * Math.sin(a)}`;
+    });
+    return `<polygon points="${pts.join(" ")}" />`;
+  },
+  // 6: Rounded triangle
+  (cx: number, cy: number, s: number) => {
+    const r = s * 0.44;
+    const pts = Array.from({ length: 3 }, (_, i) => {
+      const a = (Math.PI * 2 / 3) * i - Math.PI / 2;
+      return `${cx + r * Math.cos(a)},${cy + r * Math.sin(a)}`;
+    });
+    return `<polygon points="${pts.join(" ")}" style="stroke-linejoin:round" />`;
+  },
+  // 7: Star shape
+  (cx: number, cy: number, s: number) => {
+    const outer = s * 0.44, inner = s * 0.22;
+    const pts = Array.from({ length: 10 }, (_, i) => {
+      const a = (Math.PI / 5) * i - Math.PI / 2;
+      const r = i % 2 === 0 ? outer : inner;
+      return `${cx + r * Math.cos(a)},${cy + r * Math.sin(a)}`;
+    });
+    return `<polygon points="${pts.join(" ")}" />`;
+  },
+];
+
+// ── Eye Styles (12 variants) ──────────────────────────
+
+const EYE_STYLES = [
+  // 0: Simple dots
+  (cx: number, cy: number, s: number) =>
+    `<circle cx="${cx - s * 0.12}" cy="${cy - s * 0.06}" r="${s * 0.04}" fill="white"/>` +
+    `<circle cx="${cx + s * 0.12}" cy="${cy - s * 0.06}" r="${s * 0.04}" fill="white"/>`,
+  // 1: Wide ovals
+  (cx: number, cy: number, s: number) =>
+    `<ellipse cx="${cx - s * 0.12}" cy="${cy - s * 0.06}" rx="${s * 0.06}" ry="${s * 0.04}" fill="white"/>` +
+    `<ellipse cx="${cx + s * 0.12}" cy="${cy - s * 0.06}" rx="${s * 0.06}" ry="${s * 0.04}" fill="white"/>`,
+  // 2: Vertical ovals
+  (cx: number, cy: number, s: number) =>
+    `<ellipse cx="${cx - s * 0.12}" cy="${cy - s * 0.06}" rx="${s * 0.03}" ry="${s * 0.06}" fill="white"/>` +
+    `<ellipse cx="${cx + s * 0.12}" cy="${cy - s * 0.06}" rx="${s * 0.03}" ry="${s * 0.06}" fill="white"/>`,
+  // 3: Half-closed (relaxed)
+  (cx: number, cy: number, s: number) =>
+    `<line x1="${cx - s * 0.16}" y1="${cy - s * 0.06}" x2="${cx - s * 0.08}" y2="${cy - s * 0.06}" stroke="white" stroke-width="${s * 0.025}" stroke-linecap="round"/>` +
+    `<line x1="${cx + s * 0.08}" y1="${cy - s * 0.06}" x2="${cx + s * 0.16}" y2="${cy - s * 0.06}" stroke="white" stroke-width="${s * 0.025}" stroke-linecap="round"/>`,
+  // 4: Glowing rings
+  (cx: number, cy: number, s: number) =>
+    `<circle cx="${cx - s * 0.12}" cy="${cy - s * 0.06}" r="${s * 0.05}" fill="none" stroke="white" stroke-width="${s * 0.015}"/>` +
+    `<circle cx="${cx + s * 0.12}" cy="${cy - s * 0.06}" r="${s * 0.05}" fill="none" stroke="white" stroke-width="${s * 0.015}"/>`,
+  // 5: X eyes
+  (cx: number, cy: number, s: number) => {
+    const r = s * 0.04;
+    return [`${cx - s * 0.12}`, `${cx + s * 0.12}`].map(x =>
+      `<line x1="${+x - r}" y1="${cy - s * 0.06 - r}" x2="${+x + r}" y2="${cy - s * 0.06 + r}" stroke="white" stroke-width="${s * 0.015}"/>` +
+      `<line x1="${+x - r}" y1="${cy - s * 0.06 + r}" x2="${+x + r}" y2="${cy - s * 0.06 - r}" stroke="white" stroke-width="${s * 0.015}"/>`
+    ).join("");
+  },
+  // 6: Single visor
+  (cx: number, cy: number, s: number) =>
+    `<rect x="${cx - s * 0.2}" y="${cy - s * 0.09}" width="${s * 0.4}" height="${s * 0.05}" rx="${s * 0.025}" fill="white" opacity="0.9"/>`,
+  // 7: Diamond eyes
+  (cx: number, cy: number, s: number) => {
+    const r = s * 0.04;
+    return [`${cx - s * 0.12}`, `${cx + s * 0.12}`].map(x =>
+      `<polygon points="${x},${cy - s * 0.06 - r} ${+x + r},${cy - s * 0.06} ${x},${cy - s * 0.06 + r} ${+x - r},${cy - s * 0.06}" fill="white"/>`
+    ).join("");
+  },
+  // 8: Angled slits
+  (cx: number, cy: number, s: number) =>
+    `<line x1="${cx - s * 0.16}" y1="${cy - s * 0.04}" x2="${cx - s * 0.08}" y2="${cy - s * 0.08}" stroke="white" stroke-width="${s * 0.02}" stroke-linecap="round"/>` +
+    `<line x1="${cx + s * 0.08}" y1="${cy - s * 0.08}" x2="${cx + s * 0.16}" y2="${cy - s * 0.04}" stroke="white" stroke-width="${s * 0.02}" stroke-linecap="round"/>`,
+  // 9: Large single eye
+  (cx: number, cy: number, s: number) =>
+    `<circle cx="${cx}" cy="${cy - s * 0.06}" r="${s * 0.07}" fill="white"/>` +
+    `<circle cx="${cx}" cy="${cy - s * 0.06}" r="${s * 0.035}" fill="black"/>`,
+  // 10: Three dots
+  (cx: number, cy: number, s: number) =>
+    `<circle cx="${cx - s * 0.14}" cy="${cy - s * 0.06}" r="${s * 0.03}" fill="white"/>` +
+    `<circle cx="${cx}" cy="${cy - s * 0.06}" r="${s * 0.03}" fill="white"/>` +
+    `<circle cx="${cx + s * 0.14}" cy="${cy - s * 0.06}" r="${s * 0.03}" fill="white"/>`,
+  // 11: Crescent eyes
+  (cx: number, cy: number, s: number) =>
+    `<path d="M ${cx - s * 0.16} ${cy - s * 0.06} Q ${cx - s * 0.12} ${cy - s * 0.1} ${cx - s * 0.08} ${cy - s * 0.06}" fill="none" stroke="white" stroke-width="${s * 0.02}" stroke-linecap="round"/>` +
+    `<path d="M ${cx + s * 0.08} ${cy - s * 0.06} Q ${cx + s * 0.12} ${cy - s * 0.1} ${cx + s * 0.16} ${cy - s * 0.06}" fill="none" stroke="white" stroke-width="${s * 0.02}" stroke-linecap="round"/>`,
+];
+
+// ── Expression / Mouth (8 variants) ───────────────────
+
+const EXPRESSIONS = [
+  // 0: Smile
+  (cx: number, cy: number, s: number) =>
+    `<path d="M ${cx - s * 0.1} ${cy + s * 0.08} Q ${cx} ${cy + s * 0.15} ${cx + s * 0.1} ${cy + s * 0.08}" fill="none" stroke="white" stroke-width="${s * 0.015}" stroke-linecap="round"/>`,
+  // 1: Straight line
+  (cx: number, cy: number, s: number) =>
+    `<line x1="${cx - s * 0.08}" y1="${cy + s * 0.1}" x2="${cx + s * 0.08}" y2="${cy + s * 0.1}" stroke="white" stroke-width="${s * 0.015}" stroke-linecap="round"/>`,
+  // 2: Smirk
+  (cx: number, cy: number, s: number) =>
+    `<path d="M ${cx - s * 0.06} ${cy + s * 0.1} Q ${cx + s * 0.04} ${cy + s * 0.1} ${cx + s * 0.1} ${cy + s * 0.06}" fill="none" stroke="white" stroke-width="${s * 0.015}" stroke-linecap="round"/>`,
+  // 3: Open circle
+  (cx: number, cy: number, s: number) =>
+    `<circle cx="${cx}" cy="${cy + s * 0.1}" r="${s * 0.04}" fill="none" stroke="white" stroke-width="${s * 0.015}"/>`,
+  // 4: Wide grin
+  (cx: number, cy: number, s: number) =>
+    `<path d="M ${cx - s * 0.14} ${cy + s * 0.06} Q ${cx} ${cy + s * 0.18} ${cx + s * 0.14} ${cy + s * 0.06}" fill="none" stroke="white" stroke-width="${s * 0.015}" stroke-linecap="round"/>`,
+  // 5: Frown
+  (cx: number, cy: number, s: number) =>
+    `<path d="M ${cx - s * 0.1} ${cy + s * 0.12} Q ${cx} ${cy + s * 0.06} ${cx + s * 0.1} ${cy + s * 0.12}" fill="none" stroke="white" stroke-width="${s * 0.015}" stroke-linecap="round"/>`,
+  // 6: Teeth
+  (cx: number, cy: number, s: number) =>
+    `<rect x="${cx - s * 0.08}" y="${cy + s * 0.07}" width="${s * 0.16}" height="${s * 0.06}" rx="${s * 0.01}" fill="none" stroke="white" stroke-width="${s * 0.012}"/>` +
+    `<line x1="${cx}" y1="${cy + s * 0.07}" x2="${cx}" y2="${cy + s * 0.13}" stroke="white" stroke-width="${s * 0.01}"/>`,
+  // 7: No mouth (mysterious)
+  () => "",
+];
+
+// ── Accessories (16 variants) ─────────────────────────
+
+const ACCESSORIES = [
+  // 0: None
+  () => "",
+  // 1: Antenna
+  (cx: number, cy: number, s: number, color: string) =>
+    `<line x1="${cx}" y1="${cy - s * 0.42}" x2="${cx}" y2="${cy - s * 0.55}" stroke="${color}" stroke-width="${s * 0.015}"/>` +
+    `<circle cx="${cx}" cy="${cy - s * 0.56}" r="${s * 0.025}" fill="${color}"/>`,
+  // 2: Horns
+  (cx: number, cy: number, s: number, color: string) =>
+    `<line x1="${cx - s * 0.2}" y1="${cy - s * 0.35}" x2="${cx - s * 0.28}" y2="${cy - s * 0.52}" stroke="${color}" stroke-width="${s * 0.02}" stroke-linecap="round"/>` +
+    `<line x1="${cx + s * 0.2}" y1="${cy - s * 0.35}" x2="${cx + s * 0.28}" y2="${cy - s * 0.52}" stroke="${color}" stroke-width="${s * 0.02}" stroke-linecap="round"/>`,
+  // 3: Halo
+  (cx: number, cy: number, s: number, color: string) =>
+    `<ellipse cx="${cx}" cy="${cy - s * 0.48}" rx="${s * 0.18}" ry="${s * 0.05}" fill="none" stroke="${color}" stroke-width="${s * 0.015}" opacity="0.8"/>`,
+  // 4: Ear nodes
+  (cx: number, cy: number, s: number, color: string) =>
+    `<circle cx="${cx - s * 0.44}" cy="${cy}" r="${s * 0.04}" fill="${color}"/>` +
+    `<circle cx="${cx + s * 0.44}" cy="${cy}" r="${s * 0.04}" fill="${color}"/>`,
+  // 5: Crown spikes
+  (cx: number, cy: number, s: number, color: string) =>
+    `<polygon points="${cx - s * 0.2},${cy - s * 0.4} ${cx - s * 0.15},${cy - s * 0.52} ${cx - s * 0.1},${cy - s * 0.4}" fill="${color}"/>` +
+    `<polygon points="${cx - s * 0.05},${cy - s * 0.42} ${cx},${cy - s * 0.56} ${cx + s * 0.05},${cy - s * 0.42}" fill="${color}"/>` +
+    `<polygon points="${cx + s * 0.1},${cy - s * 0.4} ${cx + s * 0.15},${cy - s * 0.52} ${cx + s * 0.2},${cy - s * 0.4}" fill="${color}"/>`,
+  // 6: Side fins
+  (cx: number, cy: number, s: number, color: string) =>
+    `<polygon points="${cx - s * 0.4},${cy - s * 0.15} ${cx - s * 0.55},${cy - s * 0.05} ${cx - s * 0.4},${cy + s * 0.05}" fill="${color}" opacity="0.7"/>` +
+    `<polygon points="${cx + s * 0.4},${cy - s * 0.15} ${cx + s * 0.55},${cy - s * 0.05} ${cx + s * 0.4},${cy + s * 0.05}" fill="${color}" opacity="0.7"/>`,
+  // 7: Bolt
+  (cx: number, cy: number, s: number, color: string) =>
+    `<polygon points="${cx + s * 0.05},${cy - s * 0.52} ${cx - s * 0.03},${cy - s * 0.42} ${cx + s * 0.02},${cy - s * 0.42} ${cx - s * 0.05},${cy - s * 0.32}" fill="${color}"/>`,
+  // 8: Headband
+  (cx: number, cy: number, s: number, color: string) =>
+    `<line x1="${cx - s * 0.35}" y1="${cy - s * 0.2}" x2="${cx + s * 0.35}" y2="${cy - s * 0.2}" stroke="${color}" stroke-width="${s * 0.025}" stroke-linecap="round"/>`,
+  // 9: Top dot
+  (cx: number, cy: number, s: number, color: string) =>
+    `<circle cx="${cx}" cy="${cy - s * 0.5}" r="${s * 0.04}" fill="${color}"/>`,
+  // 10: Orbital ring
+  (cx: number, cy: number, s: number, color: string) =>
+    `<ellipse cx="${cx}" cy="${cy}" rx="${s * 0.5}" ry="${s * 0.15}" fill="none" stroke="${color}" stroke-width="${s * 0.01}" opacity="0.4" transform="rotate(-20 ${cx} ${cy})"/>`,
+  // 11: Chin spike
+  (cx: number, cy: number, s: number, color: string) =>
+    `<polygon points="${cx - s * 0.05},${cy + s * 0.38} ${cx},${cy + s * 0.52} ${cx + s * 0.05},${cy + s * 0.38}" fill="${color}"/>`,
+  // 12: Cheek marks
+  (cx: number, cy: number, s: number, color: string) =>
+    `<line x1="${cx - s * 0.25}" y1="${cy + s * 0.02}" x2="${cx - s * 0.32}" y2="${cy + s * 0.06}" stroke="${color}" stroke-width="${s * 0.012}" stroke-linecap="round"/>` +
+    `<line x1="${cx - s * 0.25}" y1="${cy + s * 0.06}" x2="${cx - s * 0.32}" y2="${cy + s * 0.1}" stroke="${color}" stroke-width="${s * 0.012}" stroke-linecap="round"/>` +
+    `<line x1="${cx + s * 0.25}" y1="${cy + s * 0.02}" x2="${cx + s * 0.32}" y2="${cy + s * 0.06}" stroke="${color}" stroke-width="${s * 0.012}" stroke-linecap="round"/>` +
+    `<line x1="${cx + s * 0.25}" y1="${cy + s * 0.06}" x2="${cx + s * 0.32}" y2="${cy + s * 0.1}" stroke="${color}" stroke-width="${s * 0.012}" stroke-linecap="round"/>`,
+  // 13: Shoulder pads
+  (cx: number, cy: number, s: number, color: string) =>
+    `<rect x="${cx - s * 0.48}" y="${cy + s * 0.2}" width="${s * 0.12}" height="${s * 0.08}" rx="${s * 0.02}" fill="${color}" opacity="0.6"/>` +
+    `<rect x="${cx + s * 0.36}" y="${cy + s * 0.2}" width="${s * 0.12}" height="${s * 0.08}" rx="${s * 0.02}" fill="${color}" opacity="0.6"/>`,
+  // 14: Eye stripe
+  (cx: number, cy: number, s: number, color: string) =>
+    `<rect x="${cx - s * 0.3}" y="${cy - s * 0.1}" width="${s * 0.6}" height="${s * 0.03}" fill="${color}" opacity="0.5"/>`,
+  // 15: Floating particles
+  (cx: number, cy: number, s: number, color: string) =>
+    `<circle cx="${cx - s * 0.35}" cy="${cy - s * 0.35}" r="${s * 0.015}" fill="${color}" opacity="0.6"/>` +
+    `<circle cx="${cx + s * 0.3}" cy="${cy - s * 0.4}" r="${s * 0.02}" fill="${color}" opacity="0.5"/>` +
+    `<circle cx="${cx + s * 0.4}" cy="${cy + s * 0.1}" r="${s * 0.012}" fill="${color}" opacity="0.7"/>` +
+    `<circle cx="${cx - s * 0.38}" cy="${cy + s * 0.15}" r="${s * 0.018}" fill="${color}" opacity="0.4"/>`,
+];
+
+// ── Pattern Overlays (8 variants) ─────────────────────
+
+const PATTERNS = [
+  // 0: None
+  () => "",
+  // 1: Horizontal stripes
+  (cx: number, cy: number, s: number, color: string) => {
+    const lines = [-0.2, -0.05, 0.1, 0.25].map(y =>
+      `<line x1="${cx - s * 0.3}" y1="${cy + s * y}" x2="${cx + s * 0.3}" y2="${cy + s * y}" stroke="${color}" stroke-width="${s * 0.008}" opacity="0.3"/>`
+    );
+    return lines.join("");
+  },
+  // 2: Diagonal stripes
+  (cx: number, cy: number, s: number, color: string) => {
+    const lines = [-0.3, -0.15, 0, 0.15, 0.3].map(offset =>
+      `<line x1="${cx + s * offset - s * 0.2}" y1="${cy - s * 0.3}" x2="${cx + s * offset + s * 0.2}" y2="${cy + s * 0.3}" stroke="${color}" stroke-width="${s * 0.006}" opacity="0.25"/>`
+    );
+    return lines.join("");
+  },
+  // 3: Grid
+  (cx: number, cy: number, s: number, color: string) =>
+    PATTERNS[1](cx, cy, s, color) +
+    [-0.2, -0.05, 0.1].map(x =>
+      `<line x1="${cx + s * x}" y1="${cy - s * 0.25}" x2="${cx + s * x}" y2="${cy + s * 0.3}" stroke="${color}" stroke-width="${s * 0.006}" opacity="0.2"/>`
+    ).join(""),
+  // 4: Center diamond
+  (cx: number, cy: number, s: number, color: string) => {
+    const r = s * 0.15;
+    return `<polygon points="${cx},${cy - r} ${cx + r},${cy} ${cx},${cy + r} ${cx - r},${cy}" fill="none" stroke="${color}" stroke-width="${s * 0.008}" opacity="0.3"/>`;
+  },
+  // 5: Concentric circles
+  (cx: number, cy: number, s: number, color: string) =>
+    [0.1, 0.2, 0.3].map(r =>
+      `<circle cx="${cx}" cy="${cy}" r="${s * r}" fill="none" stroke="${color}" stroke-width="${s * 0.006}" opacity="0.2"/>`
+    ).join(""),
+  // 6: Dots grid
+  (cx: number, cy: number, s: number, color: string) => {
+    const dots: string[] = [];
+    for (let dx = -2; dx <= 2; dx++) {
+      for (let dy = -2; dy <= 2; dy++) {
+        dots.push(`<circle cx="${cx + dx * s * 0.1}" cy="${cy + dy * s * 0.1}" r="${s * 0.012}" fill="${color}" opacity="0.2"/>`);
+      }
+    }
+    return dots.join("");
+  },
+  // 7: Cross pattern
+  (cx: number, cy: number, s: number, color: string) =>
+    `<line x1="${cx}" y1="${cy - s * 0.3}" x2="${cx}" y2="${cy + s * 0.3}" stroke="${color}" stroke-width="${s * 0.008}" opacity="0.25"/>` +
+    `<line x1="${cx - s * 0.3}" y1="${cy}" x2="${cx + s * 0.3}" y2="${cy}" stroke="${color}" stroke-width="${s * 0.008}" opacity="0.25"/>`,
+];
+
+// ── Badge Frames ──────────────────────────────────────
+
+const BADGE_FRAMES: Record<string, (cx: number, cy: number, s: number) => string> = {
+  "none": () => "",
+  "thin-cyan": (cx, cy, s) =>
+    `<circle cx="${cx}" cy="${cy}" r="${s * 0.48}" fill="none" stroke="#00f0ff" stroke-width="${s * 0.01}"/>`,
+  "cyan-glow": (cx, cy, s) =>
+    `<circle cx="${cx}" cy="${cy}" r="${s * 0.48}" fill="none" stroke="#00f0ff" stroke-width="${s * 0.015}">` +
+    `<animate attributeName="opacity" values="0.6;1;0.6" dur="2s" repeatCount="indefinite"/></circle>`,
+  "gold": (cx, cy, s) =>
+    `<circle cx="${cx}" cy="${cy}" r="${s * 0.48}" fill="none" stroke="#ffd700" stroke-width="${s * 0.02}"/>`,
+  "gold-star": (cx, cy, s) =>
+    `<circle cx="${cx}" cy="${cy}" r="${s * 0.48}" fill="none" stroke="#ffd700" stroke-width="${s * 0.02}"/>` +
+    `<polygon points="${cx},${cy - s * 0.54} ${cx + s * 0.02},${cy - s * 0.5} ${cx},${cy - s * 0.46} ${cx - s * 0.02},${cy - s * 0.5}" fill="#ffd700"/>`,
+  "rainbow": (cx, cy, s) =>
+    `<circle cx="${cx}" cy="${cy}" r="${s * 0.48}" fill="none" stroke="url(#rainbow)" stroke-width="${s * 0.025}">` +
+    `<animateTransform attributeName="transform" type="rotate" values="0 ${cx} ${cy};360 ${cx} ${cy}" dur="4s" repeatCount="indefinite"/></circle>`,
+};
+
+// ── Main Generator ────────────────────────────────────
+
+/**
+ * Generate a deterministic avatar seed from a public key.
+ */
+export function getAvatarSeed(publicKeyHex: string): Buffer {
+  return crypto.createHash("sha256").update(publicKeyHex).digest();
+}
+
+/**
+ * Extract avatar style parameters from a seed.
+ */
+export function getAvatarStyle(seed: Buffer): {
+  body: number; colorPrimary: number; colorSecondary: number;
+  eyes: number; expression: number; accessory: number; pattern: number;
+} {
+  return {
+    body: seed[0] % BODY_SHAPES.length,
+    colorPrimary: seed[1] % PRIMARY_COLORS.length,
+    colorSecondary: seed[2] % SECONDARY_COLORS.length,
+    eyes: seed[3] % EYE_STYLES.length,
+    expression: seed[4] % EXPRESSIONS.length,
+    accessory: seed[5] % ACCESSORIES.length,
+    pattern: seed[6] % PATTERNS.length,
+  };
+}
+
+/**
+ * Generate an SVG avatar from a public key.
+ * @param publicKeyHex - Ed25519 public key as hex string
+ * @param size - SVG viewport size (default 128)
+ * @param badgeFrame - Reputation tier badge frame (default "none")
+ * @returns SVG string (~2KB)
+ */
+export function generateAvatar(publicKeyHex: string, size: number = 128, badgeFrame: string = "none"): string {
+  const seed = getAvatarSeed(publicKeyHex);
+  const style = getAvatarStyle(seed);
+  const cx = size / 2, cy = size / 2;
+
+  const primary = PRIMARY_COLORS[style.colorPrimary];
+  const secondary = SECONDARY_COLORS[style.colorSecondary];
+
+  const parts: string[] = [];
+
+  // Rainbow gradient def (only if needed)
+  if (badgeFrame === "rainbow") {
+    parts.push(`<defs><linearGradient id="rainbow" x1="0%" y1="0%" x2="100%" y2="100%">` +
+      `<stop offset="0%" stop-color="#ff0000"/><stop offset="17%" stop-color="#ff8800"/>` +
+      `<stop offset="33%" stop-color="#ffff00"/><stop offset="50%" stop-color="#00ff00"/>` +
+      `<stop offset="67%" stop-color="#0088ff"/><stop offset="83%" stop-color="#6600ff"/>` +
+      `<stop offset="100%" stop-color="#ff00ff"/></linearGradient></defs>`);
+  }
+
+  // Background glow
+  parts.push(`<circle cx="${cx}" cy="${cy}" r="${size * 0.46}" fill="${secondary}" opacity="0.8"/>`);
+
+  // Body shape
+  parts.push(`<g fill="${primary}" opacity="0.9">${BODY_SHAPES[style.body](cx, cy, size)}</g>`);
+
+  // Pattern overlay
+  parts.push(PATTERNS[style.pattern](cx, cy, size, primary));
+
+  // Eyes
+  parts.push(EYE_STYLES[style.eyes](cx, cy, size));
+
+  // Expression
+  parts.push(EXPRESSIONS[style.expression](cx, cy, size));
+
+  // Accessory
+  parts.push(ACCESSORIES[style.accessory](cx, cy, size, primary));
+
+  // Badge frame
+  const frameRenderer = BADGE_FRAMES[badgeFrame] || BADGE_FRAMES["none"];
+  parts.push(frameRenderer(cx, cy, size));
+
+  // Idle pulse animation on the body
+  parts.push(
+    `<circle cx="${cx}" cy="${cy}" r="${size * 0.44}" fill="none" stroke="${primary}" stroke-width="${size * 0.005}" opacity="0.3">` +
+    `<animate attributeName="r" values="${size * 0.44};${size * 0.47};${size * 0.44}" dur="3s" repeatCount="indefinite"/>` +
+    `<animate attributeName="opacity" values="0.3;0.1;0.3" dur="3s" repeatCount="indefinite"/></circle>`
+  );
+
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">`,
+    ...parts.filter(p => p),
+    `</svg>`,
+  ].join("\n");
+}
+
+/**
+ * Generate an avatar as a data URI for embedding in HTML.
+ */
+export function generateAvatarDataUri(publicKeyHex: string, size: number = 128, badgeFrame: string = "none"): string {
+  const svg = generateAvatar(publicKeyHex, size, badgeFrame);
+  return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
+}
