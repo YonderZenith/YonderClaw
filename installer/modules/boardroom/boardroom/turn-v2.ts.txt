@@ -1,5 +1,5 @@
 /**
- * MetaClaw Boardroom — Turn-Taking v2
+ * YonderClaw Boardroom — Turn-Taking v2
  *
  * Dynamic priority queue with 5 signals:
  *   1. Self-assessment (25%) — agent's own relevance judgment

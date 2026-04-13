@@ -1,5 +1,5 @@
 /**
- * MetaClaw Research Phase — Claude-powered best practices research
+ * YonderClaw Research Phase — Claude-powered best practices research
  *
  * Uses the Agent SDK to:
  * 1. Research best practices for the user's specific agent type
@@ -38,7 +38,7 @@ export type ClawConfig = {
 function buildMetaPrompt(result: QuestionnaireResult, systemInfo: SystemInfo): string {
   const { template, answers } = result;
 
-  return `You are MetaClaw, an autonomous AI agent configuration engine by Yonder Zenith LLC.
+  return `You are YonderClaw, an autonomous AI agent configuration engine by Yonder Zenith LLC.
 
 ## YOUR MISSION
 Research and generate the OPTIMAL agent configuration for this user's needs. Be opinionated — choose the best approach, don't offer multiple options.
@@ -125,7 +125,7 @@ export async function runResearch(
   result: QuestionnaireResult,
   systemInfo: SystemInfo
 ): Promise<ClawConfig | null> {
-  console.log(sectionHeader("MetaClaw Board Convening"));
+  console.log(sectionHeader("YonderClaw Board Convening"));
   console.log("");
   console.log(brand("  Board members are researching for your ultimate custom setup."));
   console.log(muted("  Analyzing your requirements, researching best practices,"));
@@ -145,7 +145,7 @@ export async function runResearch(
     let currentPhase = "Researching...";
 
     const options: Options = {
-      systemPrompt: "You are MetaClaw, an expert AI agent configuration engine. You research best practices using web search, then generate optimal agent configurations. Always output valid JSON in your final response.",
+      systemPrompt: "You are YonderClaw, an expert AI agent configuration engine. You research best practices using web search, then generate optimal agent configurations. Always output valid JSON in your final response.",
       allowedTools: ["WebSearch", "WebFetch"],
       maxTurns: 20,
       model: "claude-sonnet-4-6",

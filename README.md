@@ -15,7 +15,7 @@
   <a href="#quick-start"><img src="https://img.shields.io/badge/get_started-00BEEA?style=for-the-badge&logo=rocket&logoColor=white" alt="Get Started" /></a>
   <a href="https://yonderzenith.github.io/YonderClaw/"><img src="https://img.shields.io/badge/docs-00D9FF?style=for-the-badge&logo=readthedocs&logoColor=white" alt="Docs" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-10B981?style=for-the-badge" alt="MIT License" /></a>
-  <img src="https://img.shields.io/badge/version-3.3.0-FFD700?style=for-the-badge" alt="Version 3.3.0" />
+  <img src="https://img.shields.io/badge/version-1.0.0-FFD700?style=for-the-badge" alt="Version 1.0.0" />
 </p>
 
 <p align="center">

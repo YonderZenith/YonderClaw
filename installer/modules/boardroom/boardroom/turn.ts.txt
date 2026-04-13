@@ -1,5 +1,5 @@
 /**
- * MetaClaw Boardroom — Intelligent Turn-Taking Algorithm
+ * YonderClaw Boardroom — Intelligent Turn-Taking Algorithm
  * 4-signal scoring: direct address (40%), expertise (30%), recency (20%), pending (10%)
  */
 

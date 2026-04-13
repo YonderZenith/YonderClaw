@@ -1,5 +1,5 @@
 /**
- * MetaClaw Swarm — DHT Client
+ * YonderClaw Swarm — DHT Client
  *
  * Decentralized bucket routing via Hyperswarm (Kademlia DHT).
  * Every bucket = a DHT topic (SHA-256 of bucket path).

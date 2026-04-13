@@ -1,5 +1,5 @@
 /**
- * MetaClaw — Capability Scanner
+ * YonderClaw — Capability Scanner
  *
  * Deterministic, NON-LLM scan of what this agent can actually do.
  * Runs in cron pre-flight before the agent starts thinking.

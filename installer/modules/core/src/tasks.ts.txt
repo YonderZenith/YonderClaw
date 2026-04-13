@@ -1,5 +1,5 @@
 /**
- * MetaClaw Task System — HT/AT Tracking
+ * YonderClaw Task System — HT/AT Tracking
  *
  * HT = Human Task — things the agent needs FROM its operator
  * AT = AI Task — things the agent handles autonomously

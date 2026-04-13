@@ -1,5 +1,5 @@
 /**
- * MetaClaw Boardroom — Shared Types
+ * YonderClaw Boardroom — Shared Types
  * Multi-agent meeting system with intelligent turn-taking
  */
 

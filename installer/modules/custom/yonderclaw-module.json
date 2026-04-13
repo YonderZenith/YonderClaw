@@ -1,15 +1,15 @@
 {
-  "name": "social",
-  "displayName": "Social Media Agent",
+  "name": "custom",
+  "displayName": "Custom Agent",
   "version": "1.0.0",
-  "description": "Content creation, scheduling, engagement tracking, multi-platform posting",
+  "description": "General-purpose agent — describe what you need, AI configures it",
   "category": "agent-type",
-  "engines": { "metaclaw": ">=3.3.0" },
+  "engines": { "yonderclaw": ">=1.0.0" },
   "requires": { "modules": ["core", "scheduler"] },
   "contributes": {
-    "src": { "agent-social.ts.txt": "src/agent.ts" },
+    "src": { "agent-custom.ts.txt": "src/agent.ts" },
     "npmScripts": { "start": "tsx src/agent.ts", "dry-run": "tsx src/agent.ts --dry-run" },
-    "claudeMd": ["social-commands"]
+    "claudeMd": ["custom-commands"]
   },
   "placeholders": ["__AGENT_NAME__", "__SESSION_NAME__", "__SYSTEM_PROMPT__"]
 }

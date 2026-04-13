@@ -1,5 +1,5 @@
 /**
- * MetaClaw Questionnaire — Claude-powered needs assessment
+ * YonderClaw Questionnaire — Claude-powered needs assessment
  *
  * Asks the user what they need, then uses Claude to research
  * best practices and generate an optimal agent configuration.

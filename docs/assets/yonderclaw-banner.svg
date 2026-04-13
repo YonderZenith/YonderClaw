@@ -62,13 +62,13 @@
 
   <!-- Main title -->
   <text x="185" y="95" font-family="'Segoe UI', system-ui, -apple-system, sans-serif" font-size="56" font-weight="700" fill="url(#cyanGrad)" filter="url(#glow)" letter-spacing="-1">
-    MetaClaw
+    YonderClaw
   </text>
 
   <!-- Version badge -->
-  <rect x="470" y="70" width="70" height="24" rx="12" fill="#FFD700" opacity="0.15"/>
-  <rect x="470" y="70" width="70" height="24" rx="12" fill="none" stroke="#FFD700" stroke-width="1" opacity="0.4"/>
-  <text x="505" y="87" font-family="'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="600" fill="#FFD700" text-anchor="middle">v3.3.0</text>
+  <rect x="520" y="70" width="70" height="24" rx="12" fill="#FFD700" opacity="0.15"/>
+  <rect x="520" y="70" width="70" height="24" rx="12" fill="none" stroke="#FFD700" stroke-width="1" opacity="0.4"/>
+  <text x="555" y="87" font-family="'Segoe UI', system-ui, sans-serif" font-size="12" font-weight="600" fill="#FFD700" text-anchor="middle">v1.0.0</text>
 
   <!-- Tagline -->
   <text x="188" y="125" font-family="'Segoe UI', system-ui, sans-serif" font-size="16" fill="#7F8C8D" letter-spacing="3">

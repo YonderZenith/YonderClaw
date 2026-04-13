@@ -1,13 +1,13 @@
 @echo off
 setlocal enabledelayedexpansion
-title MetaClaw: __AGENT_NAME__
+title YonderClaw: __AGENT_NAME__
 
 REM Ensure PATH includes Node.js and Claude
 set PATH=C:\Program Files\nodejs;%USERPROFILE%\AppData\Roaming\npm;%USERPROFILE%\.local\bin;%PATH%
 
 echo.
 echo   ==========================================
-echo   MetaClaw: __AGENT_NAME__
+echo   YonderClaw: __AGENT_NAME__
 echo   ==========================================
 echo.
 

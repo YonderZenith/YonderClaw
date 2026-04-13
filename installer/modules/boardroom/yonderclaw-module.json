@@ -5,7 +5,7 @@
   "description": "Multi-agent meeting system: scheduling, intelligent turn-taking, persistent attendance, post-meeting artifacts",
   "category": "collaboration",
   "alwaysInstall": true,
-  "engines": { "metaclaw": ">=3.3.0" },
+  "engines": { "yonderclaw": ">=1.0.0" },
   "requires": { "modules": ["core"] },
   "contributes": {
     "boardroom": {

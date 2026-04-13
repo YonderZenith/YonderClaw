@@ -1,11 +1,11 @@
 {
   "name": "core",
   "displayName": "Core — Database, Safety & Self-Improvement",
-  "version": "3.3.0",
+  "version": "1.0.0",
   "description": "Foundation: SQLite database, safety guardrails, observability, self-improvement, health checks, state management, hooks system",
   "category": "foundation",
   "alwaysInstall": true,
-  "engines": { "metaclaw": ">=3.3.0" },
+  "engines": { "yonderclaw": ">=1.0.0" },
   "requires": { "modules": [], "env": [], "bins": ["node"] },
   "contributes": {
     "src": {

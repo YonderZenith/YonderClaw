@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * MetaClaw Installer v3.3.0
+ * YonderClaw Installer v1.0.0
  * by Christopher Trevethan / Yonder Zenith LLC
  *
  * Fully automated: Detect → Configure → Research → Deploy → Launch
@@ -28,6 +28,11 @@ import { execSync, spawn } from "child_process";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function getRestartInstruction(): string {
+  const isNpx = !fs.existsSync(path.join(process.cwd(), "setup.bat"));
+  return isNpx ? "run npx create-yonderclaw again" : "run setup.bat again";
 }
 
 function findClaudePath(systemInfo: SystemInfo): string {
@@ -65,6 +70,46 @@ async function main() {
     process.exit(1);
   }
 
+  // Phase 2.1: Git (required by Claude Code)
+  if (!systemInfo.git.installed) {
+    console.log(sectionHeader("Installing Git"));
+    console.log("");
+    console.log(muted("  Claude Code requires Git. Attempting auto-install via winget..."));
+    console.log("");
+    try {
+      execSync(
+        'winget install Git.Git --source winget --accept-package-agreements --accept-source-agreements',
+        { stdio: "inherit", timeout: 180000 }
+      );
+    } catch {
+      try {
+        execSync(
+          'winget install Git.Git --accept-package-agreements --accept-source-agreements',
+          { stdio: "inherit", timeout: 180000 }
+        );
+      } catch {
+        console.log(accent("  Git installation failed."));
+        console.log(accent("  Install manually from: https://git-scm.com/download/win"));
+        console.log(accent("  Then " + getRestartInstruction() + "."));
+        process.exit(1);
+      }
+    }
+    const gitRecheck = detectSystem();
+    if (!gitRecheck.git.installed) {
+      if (fs.existsSync("C:\\Program Files\\Git\\cmd\\git.exe")) {
+        console.log(accent("  Git installed but needs a terminal restart to be on PATH."));
+        console.log(accent("  Close this window, open a NEW terminal, and " + getRestartInstruction() + "."));
+        process.exit(1);
+      }
+      console.log(accent("  Git installation could not be verified."));
+      console.log(accent("  Install manually from: https://git-scm.com/download/win"));
+      console.log(accent("  Then " + getRestartInstruction() + "."));
+      process.exit(1);
+    }
+    console.log(status.ok("Git installed"));
+    console.log("");
+  }
+
   // Phase 2.5: Claude Authentication (MANDATORY)
   const claudePath = findClaudePath(systemInfo);
 
@@ -75,12 +120,12 @@ async function main() {
       execSync('powershell -Command "irm https://claude.ai/install.ps1 | iex"', { stdio: "inherit", timeout: 120000 });
     } catch {
       console.log(accent("  Install Claude Code manually: https://claude.ai/download"));
-      console.log(accent("  Then run setup.bat again."));
+      console.log(accent("  Then " + getRestartInstruction() + "."));
       process.exit(1);
     }
     const recheck = detectSystem();
     if (!recheck.claude.installed) {
-      console.log(accent("  Close this window, open a NEW terminal, run setup.bat again."));
+      console.log(accent("  Close this window, open a NEW terminal, and " + getRestartInstruction() + "."));
       process.exit(1);
     }
     systemInfo.claude = recheck.claude;
@@ -89,7 +134,7 @@ async function main() {
   if (!systemInfo.claude.authenticated) {
     console.log(sectionHeader("Claude Authentication Required"));
     console.log("");
-    console.log(brand("  MetaClaw requires Claude to power your agent."));
+    console.log(brand("  YonderClaw requires Claude to power your agent."));
     console.log(muted("  You need a Claude Pro or Max subscription."));
     console.log(muted("  A browser window will open — log in with your Claude account."));
     console.log("");
@@ -101,7 +146,7 @@ async function main() {
         execSync(`"${path.join(systemInfo.user.homedir, ".local", "bin", "claude.exe")}" auth login`, { stdio: "inherit", timeout: 300000 });
       } catch {
         console.log(accent("  Run manually: claude auth login"));
-        console.log(accent("  Then run setup.bat again."));
+        console.log(accent("  Then " + getRestartInstruction() + "."));
         process.exit(1);
       }
     }
@@ -140,7 +185,7 @@ async function main() {
   // Phase 4: AI Research
   console.log("");
   let clawConfig: ClawConfig | null = null;
-  console.log(status.route("Assembling the MetaClaw board for your " + result.template.name + "..."));
+  console.log(status.route("Assembling the YonderClaw board for your " + result.template.name + "..."));
   console.log("");
   try {
     clawConfig = await runResearch(result, systemInfo);
@@ -251,7 +296,7 @@ async function main() {
       if (fs.existsSync(startupDir)) {
         const launcherPath = path.join(projectDir, "scripts", "launch.bat");
         fs.writeFileSync(
-          path.join(startupDir, `MetaClaw-${sessionName}.bat`),
+          path.join(startupDir, `YonderClaw-${sessionName}.bat`),
           `@echo off\r\nstart "" "${launcherPath}"\r\n`
         );
         console.log(status.ok("Auto-start on login: added to Startup folder"));

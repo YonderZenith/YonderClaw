@@ -5,7 +5,7 @@
   "description": "HTML Command Center with real-time metrics, KPIs per agent type, Edge app-mode launcher",
   "category": "ui",
   "alwaysInstall": true,
-  "engines": { "metaclaw": ">=3.3.0" },
+  "engines": { "yonderclaw": ">=1.0.0" },
   "requires": { "modules": ["core"] },
   "contributes": {
     "src": {

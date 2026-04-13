@@ -1,5 +1,5 @@
 @echo off
-REM MetaClaw Boardroom — Meeting Check
+REM YonderClaw Boardroom — Meeting Check
 REM Called at the start of every agent cycle.
 REM Checks if this agent has an active meeting to attend.
 REM Returns ERRORLEVEL 0 = meeting found (enter meeting mode)

@@ -1,5 +1,5 @@
 /**
- * MetaClaw Swarm — Shared Types
+ * YonderClaw Swarm — Shared Types
  * QIS-inspired bucket system for intelligence sharing
  */
 

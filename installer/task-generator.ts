@@ -1,5 +1,5 @@
 /**
- * MetaClaw Task Generator
+ * YonderClaw Task Generator
  * Creates starter HT/AT tasks based on questionnaire answers.
  * Called during scaffold to generate data/tasks.json.
  */

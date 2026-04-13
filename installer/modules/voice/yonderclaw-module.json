@@ -5,7 +5,7 @@
   "description": "Browser-based voice I/O: push-to-talk, always-on listening, Microsoft Jenny neural TTS",
   "category": "ui",
   "alwaysInstall": true,
-  "engines": { "metaclaw": ">=3.3.0" },
+  "engines": { "yonderclaw": ">=1.0.0" },
   "requires": { "modules": ["dashboard"] },
   "contributes": {
     "dashboard": {

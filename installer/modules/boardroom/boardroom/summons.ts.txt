@@ -1,5 +1,5 @@
 /**
- * MetaClaw Boardroom — Meeting Summons
+ * YonderClaw Boardroom — Meeting Summons
  * Drops invitation JSON into agent's shared inbox
  */
 

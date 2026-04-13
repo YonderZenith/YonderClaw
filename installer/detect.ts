@@ -1,5 +1,5 @@
 /**
- * MetaClaw System Detection — auto-detect everything about the environment
+ * YonderClaw System Detection — auto-detect everything about the environment
  */
 
 import { execSync } from "child_process";

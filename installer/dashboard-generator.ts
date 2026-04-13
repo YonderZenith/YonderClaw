@@ -1,5 +1,5 @@
 /**
- * MetaClaw Dashboard Generator
+ * YonderClaw Dashboard Generator
  *
  * Builds a CUSTOM dashboard.html tailored to the user's claw type.
  * Each claw gets different KPIs, stats, and sections based on what matters for their use case.
@@ -241,7 +241,7 @@ h1,h2,.label { font-family: 'Orbitron', sans-serif; }
     <img src="favicon.png" alt="YZ" style="height:28px;opacity:0.85">
     <div>
       <h1>${agentName.toUpperCase()}</h1>
-      <div class="mono" style="color:var(--text-muted);font-size:10px">${clawType} agent — MetaClaw v3.3 — Yonder Zenith LLC</div>
+      <div class="mono" style="color:var(--text-muted);font-size:10px">${clawType} agent — YonderClaw v1.0 — Yonder Zenith LLC</div>
     </div>
   </div>
   <div style="text-align:right">
@@ -323,7 +323,7 @@ ${sectionBlocks}
   #mic-btn.speaking #mic-icon { stroke:var(--green); }
 </style>
 
-<div class="footer">${agentName} Command Center — MetaClaw v3.3 — Yonder Zenith LLC</div>
+<div class="footer">${agentName} Command Center — YonderClaw v1.0 — Yonder Zenith LLC</div>
 
 <!-- Inline data placeholders (baked by build-dashboard.cjs for offline mode) -->
 <script id="inline-dashboard" type="application/json">__DASHBOARD_JSON__</script>

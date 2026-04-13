@@ -1,5 +1,5 @@
 /**
- * MetaClaw Branding v3 — clean, premium, no QIS references
+ * YonderClaw Branding v3 — clean, premium, no QIS references
  * by Christopher Trevethan / Yonder Zenith LLC
  */
 
@@ -31,7 +31,7 @@ export const purple = chalk.hex(COLORS.secondary);
 export const gold = chalk.hex(COLORS.gold);
 
 export function getLogo(): string {
-  const raw = figlet.textSync("MetaClaw", {
+  const raw = figlet.textSync("YonderClaw", {
     font: "ANSI Shadow",
     horizontalLayout: "fitted",
   });
@@ -46,7 +46,7 @@ export function getTagline(): string {
 }
 
 export function getVersion(): string {
-  return chalk.bgHex(COLORS.primary).black(" MetaClaw v3.3.0 ");
+  return chalk.bgHex(COLORS.primary).black(" YonderClaw v1.0.0 ");
 }
 
 export function sectionHeader(title: string): string {
@@ -104,7 +104,7 @@ export function completionScreen(agentName: string, projectDir: string, clawType
       `  ${brand("Agent:")}    ${agentName}`,
       `  ${brand("Type:")}     ${clawType}`,
       `  ${brand("Location:")} ${projectDir}`,
-      `  ${brand("Version:")}  MetaClaw v3.3.0`,
+      `  ${brand("Version:")}  YonderClaw v1.0.0`,
       `  ${brand("Status:")}   ${success("● Deployed & Auto-Starting")}`,
     ].join("\n")),
     "",

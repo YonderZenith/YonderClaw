@@ -1,5 +1,5 @@
 /**
- * MetaClaw Boardroom — Client Library
+ * YonderClaw Boardroom — Client Library
  * Import this in any agent to participate in boardroom meetings.
  *
  * Usage:

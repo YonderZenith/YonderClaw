@@ -1,5 +1,5 @@
 /**
- * MetaClaw v3.3 — Module-Driven Scaffold
+ * YonderClaw v1.0 — Module-Driven Scaffold
  *
  * Reads config JSON, discovers modules, resolves dependencies,
  * copies templates with placeholders, assembles CLAUDE.md, generates dashboard.
@@ -45,7 +45,7 @@ const candidates = [
 
 let MODULES_DIR = "";
 for (const c of candidates) {
-  const coreManifest = path.join(c, "core", "metaclaw-module.json");
+  const coreManifest = path.join(c, "core", "yonderclaw-module.json");
   if (fs.existsSync(coreManifest)) { MODULES_DIR = c; break; }
 }
 
@@ -72,7 +72,7 @@ if (!MODULES_DIR) {
   console.error("Module system not found. Tried:");
   for (const c of candidates) {
     const exists = fs.existsSync(c);
-    const coreExists = fs.existsSync(path.join(c, "core", "metaclaw-module.json"));
+    const coreExists = fs.existsSync(path.join(c, "core", "yonderclaw-module.json"));
     console.error(`  ${c} (exists: ${exists}, core: ${coreExists})`);
   }
   console.error("Output dir contents:");
@@ -123,7 +123,7 @@ const packageJson: any = {
   name: config.projectName || sessionName,
   version: "1.0.0",
   type: "module",
-  description: `${clawType} agent — MetaClaw v3.3.0`,
+  description: `${clawType} agent — YonderClaw v1.0.0`,
   scripts: {},
   dependencies: {},
 };

@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "Email prospecting, follow-ups, inbox monitoring, morning reports, reply classification",
   "category": "agent-type",
-  "engines": { "metaclaw": ">=3.3.0" },
+  "engines": { "yonderclaw": ">=1.0.0" },
   "requires": { "modules": ["core", "scheduler"] },
   "contributes": {
     "src": {

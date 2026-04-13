@@ -1,15 +1,15 @@
 {
-  "name": "support",
-  "displayName": "Support Agent",
+  "name": "social",
+  "displayName": "Social Media Agent",
   "version": "1.0.0",
-  "description": "Inbox monitoring, ticket triage, auto-resolution, escalation",
+  "description": "Content creation, scheduling, engagement tracking, multi-platform posting",
   "category": "agent-type",
-  "engines": { "metaclaw": ">=3.3.0" },
+  "engines": { "yonderclaw": ">=1.0.0" },
   "requires": { "modules": ["core", "scheduler"] },
   "contributes": {
-    "src": { "agent-support.ts.txt": "src/agent.ts" },
+    "src": { "agent-social.ts.txt": "src/agent.ts" },
     "npmScripts": { "start": "tsx src/agent.ts", "dry-run": "tsx src/agent.ts --dry-run" },
-    "claudeMd": ["support-commands"]
+    "claudeMd": ["social-commands"]
   },
   "placeholders": ["__AGENT_NAME__", "__SESSION_NAME__", "__SYSTEM_PROMPT__"]
 }

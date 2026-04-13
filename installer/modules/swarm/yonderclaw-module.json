@@ -2,10 +2,10 @@
   "name": "swarm",
   "displayName": "QIS Intelligence Network",
   "version": "1.0.0",
-  "description": "Shared intelligence buckets — local personal swarm + global MetaClaw network. The QIS proof of concept.",
+  "description": "Shared intelligence buckets — local personal swarm + global YonderClaw network. The QIS proof of concept.",
   "category": "intelligence",
   "alwaysInstall": true,
-  "engines": { "metaclaw": ">=3.3.0" },
+  "engines": { "yonderclaw": ">=1.0.0" },
   "requires": { "modules": ["core"] },
   "contributes": {
     "swarm": {

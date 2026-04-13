@@ -1,5 +1,5 @@
 /**
- * MetaClaw — Context Auto-Sync
+ * YonderClaw — Context Auto-Sync
  *
  * Builds a fresh memory/CONTEXT.md every 30 min + before/after cron cycles.
  * Pulls: state.json, tasks.json, system-context.json, recent messages, agent heartbeats.

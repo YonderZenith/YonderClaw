@@ -1,9 +1,9 @@
 @echo off
 setlocal enabledelayedexpansion
-title MetaClaw v3.3 Setup
+title YonderClaw v1.0 Setup
 echo.
 echo   ==========================================
-echo   MetaClaw v3.3 - Installer Setup
+echo   YonderClaw v1.0 - Installer Setup
 echo   by Christopher Trevethan / Yonder Zenith LLC
 echo   ==========================================
 echo.
@@ -125,7 +125,7 @@ if not exist "%USERPROFILE%\.claude\.credentials.json" (
     echo   Claude Authentication Required
     echo   ==========================================
     echo.
-    echo   MetaClaw needs Claude to power your agent.
+    echo   YonderClaw needs Claude to power your agent.
     echo   You need a Claude Pro or Max subscription.
     echo.
     echo   A browser window will open - log in with your Claude account.
@@ -150,7 +150,7 @@ echo.
 REM ═══════════════════════════════════════
 REM  STEP 5: INSTALL DEPENDENCIES
 REM ═══════════════════════════════════════
-echo   Installing MetaClaw dependencies...
+echo   Installing YonderClaw dependencies...
 cd /d "%~dp0"
 call npm install
 if %ERRORLEVEL% neq 0 (
@@ -167,7 +167,7 @@ REM ═════════════════════════�
 REM  STEP 6: LAUNCH INSTALLER
 REM ═══════════════════════════════════════
 echo   ==========================================
-echo   All prerequisites ready. Launching MetaClaw...
+echo   All prerequisites ready. Launching YonderClaw...
 echo   ==========================================
 echo.
 

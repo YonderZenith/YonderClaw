@@ -1,5 +1,5 @@
 /**
- * MetaClaw Boardroom — Coordinator Server
+ * YonderClaw Boardroom — Coordinator Server
  * Thin HTTP server with SQLite backend. Manages meetings, turn-taking, context.
  *
  * Usage:

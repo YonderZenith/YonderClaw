@@ -1,12 +1,12 @@
 @echo off
 setlocal enabledelayedexpansion
-title MetaClaw Boardroom Coordinator
+title YonderClaw Boardroom Coordinator
 
 set PATH=C:\Program Files\nodejs;%USERPROFILE%\AppData\Roaming\npm;%USERPROFILE%\.local\bin;%PATH%
 
 echo.
 echo   ==========================================
-echo   MetaClaw Boardroom Coordinator
+echo   YonderClaw Boardroom Coordinator
 echo   ==========================================
 echo.
 

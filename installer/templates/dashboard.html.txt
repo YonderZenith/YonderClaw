@@ -232,7 +232,7 @@ h1,h2,.label { font-family: 'Orbitron', sans-serif; }
       <img src="favicon.png" alt="YZ" style="height:24px;opacity:0.85">
       <div>
         <h1>__AGENT_NAME__</h1>
-        <div class="mono" style="color:var(--text-muted);font-size:10px">__CLAW_TYPE__ &mdash; MetaClaw v3.0</div>
+        <div class="mono" style="color:var(--text-muted);font-size:10px">__CLAW_TYPE__ &mdash; YonderClaw v1.0</div>
       </div>
     </div>
     <div style="text-align:right">

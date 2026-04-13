@@ -1,7 +1,7 @@
 /**
- * MetaClaw Swarm — HTTP Relay Server (Phase 1)
+ * YonderClaw Swarm — HTTP Relay Server (Phase 1)
  * Lightweight bucket relay: stores index + outcome packets.
- * Every MetaClaw install knows this URL. Gets the meta swarm functional immediately.
+ * Every YonderClaw install knows this URL. Gets the meta swarm functional immediately.
  *
  * Usage:
  *   npx tsx swarm/relay-server.ts [--port 7891]
@@ -326,7 +326,7 @@ function seedTaxonomy(db: Database.Database) {
     ["ops.scheduling", "ops", "Scheduling", "Cron and task scheduling"],
     ["ops.session_management", "ops", "Sessions", "Claude session persistence"],
     // Platform
-    ["platform", "platform", "Platform", "MetaClaw platform issues"],
+    ["platform", "platform", "Platform", "YonderClaw platform issues"],
     ["platform.install", "platform", "Installation", "Installer and setup issues"],
     ["platform.dashboard", "platform", "Dashboard", "Dashboard generation and display"],
     ["platform.comms", "platform", "Communications", "Inter-agent messaging"],

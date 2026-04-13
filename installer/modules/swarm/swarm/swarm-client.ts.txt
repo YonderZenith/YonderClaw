@@ -1,5 +1,5 @@
 /**
- * MetaClaw Swarm Client — Publish & Subscribe to QIS Buckets
+ * YonderClaw Swarm Client — Publish & Subscribe to QIS Buckets
  *
  * Two tiers:
  *   1. Personal Swarm (local) — shared directory, LAN, private

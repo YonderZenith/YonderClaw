@@ -5,7 +5,7 @@
   "description": "Windows Task Scheduler integration, session launch scripts, autonomous cycle automation",
   "category": "automation",
   "alwaysInstall": true,
-  "engines": { "metaclaw": ">=3.3.0" },
+  "engines": { "yonderclaw": ">=1.0.0" },
   "requires": { "modules": ["core"] },
   "contributes": {
     "src": {

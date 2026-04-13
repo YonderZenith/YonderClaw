@@ -1,5 +1,5 @@
 /**
- * MetaClaw Boardroom — Meeting Scheduler
+ * YonderClaw Boardroom — Meeting Scheduler
  *
  * Scans inbox for boardroom summons with scheduled times.
  * Sets timers to auto-join at the EXACT scheduled time.

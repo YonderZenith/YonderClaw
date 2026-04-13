@@ -1,5 +1,5 @@
 /**
- * MetaClaw Boardroom — Meeting Mode Agent Script
+ * YonderClaw Boardroom — Meeting Mode Agent Script
  *
  * When a cron agent detects a meeting, this script runs instead of the normal cycle.
  * It joins the meeting, enters a polling loop, responds when signaled,

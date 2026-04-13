@@ -1,15 +1,15 @@
 {
-  "name": "research",
-  "displayName": "Research Agent",
+  "name": "support",
+  "displayName": "Support Agent",
   "version": "1.0.0",
-  "description": "Deep web research, report generation, source synthesis",
+  "description": "Inbox monitoring, ticket triage, auto-resolution, escalation",
   "category": "agent-type",
-  "engines": { "metaclaw": ">=3.3.0" },
+  "engines": { "yonderclaw": ">=1.0.0" },
   "requires": { "modules": ["core", "scheduler"] },
   "contributes": {
-    "src": { "agent-research.ts.txt": "src/agent.ts" },
+    "src": { "agent-support.ts.txt": "src/agent.ts" },
     "npmScripts": { "start": "tsx src/agent.ts", "dry-run": "tsx src/agent.ts --dry-run" },
-    "claudeMd": ["research-commands"]
+    "claudeMd": ["support-commands"]
   },
   "placeholders": ["__AGENT_NAME__", "__SESSION_NAME__", "__SYSTEM_PROMPT__"]
 }

@@ -1,5 +1,5 @@
 /**
- * MetaClaw Boardroom — Database Layer
+ * YonderClaw Boardroom — Database Layer
  * SQLite WAL mode, local to coordinator machine only (never on network share)
  */
 
