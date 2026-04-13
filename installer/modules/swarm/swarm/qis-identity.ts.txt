@@ -1,0 +1,167 @@
+/**
+ * QIS Identity — Ed25519 keypair lifecycle.
+ *
+ * Generated ONCE on first boot. Persisted to data/qis-identity.json.
+ * agent_id = first 16 hex chars of SPKI public key (matches dht-node.ts).
+ *
+ * This module is the ONLY code that touches keygen.
+ * Agent LLM never calls generateKeypair() — initIdentity() handles it.
+ */
+
+import crypto from "crypto";
+import fs from "fs";
+import path from "path";
+
+const DATA_DIR = path.join(process.cwd(), "data");
+const IDENTITY_PATH = path.join(DATA_DIR, "qis-identity.json");
+
+// ── Types ──────────────────────────────────────────────
+
+export interface QISIdentity {
+  publicKeyHex: string;   // DER SPKI as hex
+  privateKeyHex: string;  // DER PKCS8 as hex
+  agentId: string;        // publicKeyHex.slice(0, 16)
+  createdAt: string;      // ISO timestamp
+  migratedFrom?: string;  // if imported, previous agentId
+}
+
+// ── Cached singleton ───────────────────────────────────
+
+let _cached: QISIdentity | null = null;
+
+// ── Internal: generate a new Ed25519 keypair ───────────
+
+function generateKeypair(): QISIdentity {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+  const publicKeyHex = publicKey.export({ type: "spki", format: "der" }).toString("hex");
+  const privateKeyHex = privateKey.export({ type: "pkcs8", format: "der" }).toString("hex");
+  return {
+    publicKeyHex,
+    privateKeyHex,
+    agentId: publicKeyHex.slice(0, 16),
+    createdAt: new Date().toISOString(),
+  };
+}
+
+// ── Internal: validate identity fields ─────────────────
+
+function validateIdentity(id: any): id is QISIdentity {
+  return (
+    typeof id === "object" && id !== null &&
+    typeof id.publicKeyHex === "string" && id.publicKeyHex.length > 0 &&
+    typeof id.privateKeyHex === "string" && id.privateKeyHex.length > 0 &&
+    typeof id.agentId === "string" &&
+    id.agentId === id.publicKeyHex.slice(0, 16)
+  );
+}
+
+// ── Internal: verify keypair works ─────────────────────
+
+function verifyKeypair(id: QISIdentity): boolean {
+  try {
+    const testMsg = Buffer.from("qis-keypair-test");
+    const sig = crypto.sign(null, testMsg, crypto.createPrivateKey({
+      key: Buffer.from(id.privateKeyHex, "hex"), format: "der", type: "pkcs8",
+    }));
+    return crypto.verify(null, testMsg, crypto.createPublicKey({
+      key: Buffer.from(id.publicKeyHex, "hex"), format: "der", type: "spki",
+    }), sig);
+  } catch {
+    return false;
+  }
+}
+
+// ── Public API ─────────────────────────────────────────
+
+/**
+ * Initialize identity. Call ONCE at module startup.
+ * Loads from file or generates new keypair.
+ */
+export function initIdentity(): QISIdentity {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+
+  // Try to load existing identity
+  if (fs.existsSync(IDENTITY_PATH)) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(IDENTITY_PATH, "utf-8"));
+      if (validateIdentity(raw)) {
+        _cached = Object.freeze({ ...raw }) as QISIdentity;
+        console.log(`[QIS] Identity loaded: ${_cached.agentId}`);
+        return _cached;
+      }
+      // Invalid structure — backup and regenerate
+      const backupPath = IDENTITY_PATH + `.corrupt.${Date.now()}`;
+      fs.renameSync(IDENTITY_PATH, backupPath);
+      console.error(`[QIS] CRITICAL: Identity file invalid. Backed up to ${path.basename(backupPath)}`);
+    } catch (err) {
+      const backupPath = IDENTITY_PATH + `.corrupt.${Date.now()}`;
+      try { fs.renameSync(IDENTITY_PATH, backupPath); } catch {}
+      console.error(`[QIS] CRITICAL: Identity file corrupt. Backed up. Error: ${(err as Error).message}`);
+    }
+  }
+
+  // No valid identity — generate new
+  const identity = generateKeypair();
+  fs.writeFileSync(IDENTITY_PATH, JSON.stringify(identity, null, 2));
+  _cached = Object.freeze({ ...identity }) as QISIdentity;
+  console.log(`[QIS] WARNING: No identity found. Generated new identity: ${identity.agentId}`);
+  return _cached;
+}
+
+/**
+ * Get cached identity. Throws if initIdentity() not called.
+ */
+export function getIdentity(): QISIdentity {
+  if (!_cached) throw new Error("QIS identity not initialized. Call initIdentity() first.");
+  return _cached;
+}
+
+/**
+ * Get just the agent_id.
+ */
+export function getAgentId(): string {
+  return getIdentity().agentId;
+}
+
+/**
+ * Get the public key hex.
+ */
+export function getPublicKeyHex(): string {
+  return getIdentity().publicKeyHex;
+}
+
+/**
+ * Export identity to a JSON string for backup/migration.
+ */
+export function exportIdentity(): string {
+  return JSON.stringify(getIdentity(), null, 2);
+}
+
+/**
+ * Import identity from a JSON string.
+ * @param json - JSON string from exportIdentity()
+ * @param force - if false, refuse to overwrite existing identity
+ */
+export function importIdentity(json: string, force = false): QISIdentity {
+  const imported = JSON.parse(json);
+  if (!validateIdentity(imported)) {
+    throw new Error("Invalid identity file: missing or malformed fields.");
+  }
+  if (!verifyKeypair(imported)) {
+    throw new Error("Invalid keypair: signature verification failed.");
+  }
+  if (!force && fs.existsSync(IDENTITY_PATH)) {
+    throw new Error("Identity already exists. Use force=true to overwrite.");
+  }
+
+  const oldId = _cached?.agentId;
+  const withMigration: QISIdentity = {
+    ...imported,
+    ...(oldId && oldId !== imported.agentId ? { migratedFrom: oldId } : {}),
+  };
+
+  fs.writeFileSync(IDENTITY_PATH, JSON.stringify(withMigration, null, 2));
+  _cached = Object.freeze({ ...withMigration }) as QISIdentity;
+  console.log(`[QIS] Identity imported: ${imported.agentId}${oldId ? ` (migrated from ${oldId})` : ""}`);
+  return _cached;
+}

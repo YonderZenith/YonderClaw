@@ -1,0 +1,303 @@
+/**
+ * QIS Client — unified entry point for the Quadratic Intelligence Swarm.
+ *
+ * Wires together: identity, config, write-control, sync.
+ * Agent code imports ONLY this module.
+ *
+ * Usage:
+ *   import { qis } from "./swarm/qis-client.js";
+ *   await qis.init();
+ *   const packets = await qis.query("outreach.email.cold.subject_lines");
+ *   const t = qis.tally(packets);
+ *   await qis.deposit({ bucket: "...", signal: "positive", confidence: 0.85, insight: "..." });
+ */
+
+import http from "http";
+import https from "https";
+import { initIdentity, getIdentity, getAgentId, getPublicKeyHex, exportIdentity, importIdentity } from "./qis-identity.js";
+import { initConfig, getConfig, updateConfig, isAllowed, getMonitoredDomains, type QISConfig } from "./qis-config.js";
+import { deposit, buildSignedPacket, verifyPacketSignature, checkPII, hasPII, hasDeposited, getDepositHistory, type DepositInput, type DepositResult, type SignedPacket } from "./qis-write-control.js";
+import { tally, runSyncCycle, startSyncScheduler, stopSyncScheduler, getSyncLogs, type TallyResult, type SyncCycleResult } from "./qis-sync.js";
+
+// ── Types ──────────────────────────────────────────────
+
+export interface QISStatus {
+  initialized: boolean;
+  agentId: string;
+  tier: number;
+  domain: string;
+  relayUrl: string;
+  relayReachable: boolean;
+  syncRunning: boolean;
+  depositsCount: number;
+}
+
+export interface QueryOptions {
+  limit?: number;
+  since?: number;       // unix timestamp
+  signal?: "positive" | "negative" | "neutral";
+}
+
+export interface BucketInfo {
+  path: string;
+  bucket_id: string;
+  title?: string;
+  description?: string;
+  packet_count: number;
+  domain?: string;
+}
+
+// ── State ──────────────────────────────────────────────
+
+let _initialized = false;
+
+// ── HTTP helper ────────────────────────────────────────
+
+function fetchJSON(url: string, timeoutMs = 8000): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const transport = parsed.protocol === "https:" ? https : http;
+
+    const req = transport.get(url, { timeout: timeoutMs }, (res) => {
+      let body = "";
+      res.on("data", (c: Buffer) => body += c);
+      res.on("end", () => {
+        try {
+          const json = JSON.parse(body);
+          if (res.statusCode && res.statusCode >= 400) {
+            reject(new Error(json.error || `HTTP ${res.statusCode}`));
+          } else {
+            resolve(json);
+          }
+        } catch { reject(new Error(`Invalid JSON from ${url}`)); }
+      });
+    });
+    req.on("error", (e: Error) => reject(e));
+    req.on("timeout", () => { req.destroy(); reject(new Error("Timeout")); });
+  });
+}
+
+// ── Core API ───────────────────────────────────────────
+
+/**
+ * Initialize the QIS subsystem. Call ONCE at agent startup.
+ * Sets up identity, config, and starts the sync scheduler.
+ */
+async function init(): Promise<QISStatus> {
+  if (_initialized) return status();
+
+  // 1. Identity first — everything depends on it
+  initIdentity();
+
+  // 2. Config
+  initConfig();
+
+  // 3. Start sync scheduler (non-blocking — first cycle after delay)
+  const config = getConfig();
+  if (config.tier >= 1) {
+    startSyncScheduler();
+  }
+
+  _initialized = true;
+  console.log(`[QIS] Initialized: agent=${getAgentId()}, tier=${config.tier}, domain=${config.domain}`);
+  return status();
+}
+
+/**
+ * Get current QIS status.
+ */
+function status(): QISStatus {
+  if (!_initialized) {
+    return { initialized: false, agentId: "", tier: 0, domain: "", relayUrl: "", relayReachable: false, syncRunning: false, depositsCount: 0 };
+  }
+
+  const config = getConfig();
+  return {
+    initialized: true,
+    agentId: getAgentId(),
+    tier: config.tier,
+    domain: config.domain,
+    relayUrl: config.relayUrl,
+    relayReachable: false, // set by healthCheck()
+    syncRunning: false,    // sync module manages its own state
+    depositsCount: getDepositHistory().length,
+  };
+}
+
+/**
+ * Check relay health. Returns true if relay is reachable.
+ */
+async function healthCheck(): Promise<boolean> {
+  try {
+    const config = getConfig();
+    const data = await fetchJSON(`${config.relayUrl}/health`, 5000);
+    return data.status === "ok" || data.ok === true;
+  } catch {
+    return false;
+  }
+}
+
+// ── Query API ──────────────────────────────────────────
+
+/**
+ * Query packets from a bucket.
+ */
+async function query(bucketPath: string, opts?: QueryOptions): Promise<any[]> {
+  if (!isAllowed("query")) {
+    throw new Error(`QIS tier ${getConfig().tier} cannot query. Requires tier 1+.`);
+  }
+
+  const config = getConfig();
+  let url = `${config.relayUrl}/lookup?path=${encodeURIComponent(bucketPath)}`;
+  if (opts?.limit) url += `&limit=${opts.limit}`;
+  if (opts?.since) url += `&since=${opts.since}`;
+
+  const data = await fetchJSON(url);
+  let packets = data.packets || [];
+
+  // Client-side signal filter
+  if (opts?.signal) {
+    packets = packets.filter((p: any) => p.signal === opts.signal || p.outcome?.signal === opts.signal);
+  }
+
+  return packets;
+}
+
+/**
+ * Search buckets by keyword.
+ */
+async function search(keyword: string, domain?: string): Promise<BucketInfo[]> {
+  if (!isAllowed("query")) {
+    throw new Error(`QIS tier ${getConfig().tier} cannot search. Requires tier 1+.`);
+  }
+
+  const config = getConfig();
+  let url = `${config.relayUrl}/buckets?q=${encodeURIComponent(keyword)}`;
+  if (domain) url += `&domain=${encodeURIComponent(domain)}`;
+
+  const data = await fetchJSON(url);
+  return (data.buckets || []).map((b: any) => ({
+    path: b.path,
+    bucket_id: b.bucket_id || b.id,
+    title: b.title,
+    description: b.description,
+    packet_count: b.packet_count || 0,
+    domain: b.domain,
+  }));
+}
+
+/**
+ * Get taxonomy (all domains and their bucket counts).
+ */
+async function taxonomy(domain?: string): Promise<any> {
+  const config = getConfig();
+  let url = `${config.relayUrl}/taxonomy`;
+  if (domain) url += `?domain=${encodeURIComponent(domain)}`;
+  return fetchJSON(url);
+}
+
+/**
+ * Get relay stats.
+ */
+async function stats(): Promise<any> {
+  const config = getConfig();
+  return fetchJSON(`${config.relayUrl}/stats`);
+}
+
+// ── Deposit API ────────────────────────────────────────
+
+// deposit() is re-exported directly from qis-write-control.ts
+// It already enforces: tier check, PII filter, validation, signing, one-per-bucket
+
+// ── Convenience: tally queried packets ─────────────────
+
+/**
+ * Tally an array of packets (from query results).
+ * Extracts signal/confidence/insight from either flat or outcome-wrapped format.
+ */
+function tallyPackets(packets: any[]): TallyResult {
+  const normalized = packets.map(p => ({
+    signal: p.signal || p.outcome?.signal || "neutral",
+    confidence: p.confidence ?? p.outcome?.confidence ?? 0.5,
+    insight: p.insight || p.outcome?.insight || "",
+  }));
+  return tally(normalized);
+}
+
+// ── Config API (passthrough) ───────────────────────────
+
+/**
+ * Update QIS config. Restarts sync scheduler if tier changes.
+ */
+function configure(partial: Partial<QISConfig>): QISConfig {
+  const oldTier = getConfig().tier;
+  const updated = updateConfig(partial);
+
+  // If tier changed, restart or stop scheduler
+  if (partial.tier !== undefined && partial.tier !== oldTier) {
+    stopSyncScheduler();
+    if (updated.tier >= 1) {
+      startSyncScheduler(10_000); // quick restart: 10s delay
+    }
+    console.log(`[QIS] Tier changed: ${oldTier} → ${updated.tier}`);
+  }
+
+  return updated;
+}
+
+// ── Shutdown ───────────────────────────────────────────
+
+/**
+ * Clean shutdown. Stops sync scheduler.
+ */
+function shutdown(): void {
+  stopSyncScheduler();
+  _initialized = false;
+  console.log("[QIS] Shutdown complete.");
+}
+
+// ── Unified Export ─────────────────────────────────────
+
+export const qis = {
+  // Lifecycle
+  init,
+  shutdown,
+  status,
+  healthCheck,
+
+  // Query
+  query,
+  search,
+  taxonomy,
+  stats,
+  tally: tallyPackets,
+
+  // Deposit (hardcoded rules — cannot be bypassed)
+  deposit,
+  hasDeposited,
+  getDepositHistory,
+
+  // Sync
+  runSyncCycle,
+  getSyncLogs,
+
+  // Config
+  configure,
+  getConfig,
+  isAllowed,
+  getMonitoredDomains,
+
+  // Identity (read-only access)
+  getAgentId,
+  getPublicKeyHex,
+  exportIdentity,
+  importIdentity,
+
+  // Utilities
+  checkPII,
+  hasPII,
+  verifyPacketSignature,
+  buildSignedPacket,
+};
+
+export default qis;

@@ -581,7 +581,7 @@ footer .links a:hover { color: var(--cyan); }
 <!-- ═══ NAV ═══ -->
 <nav id="nav">
 <div class="container">
-  <div class="nav-brand"><img src="assets/yz-favicon.png" alt="YZ" class="nav-logo"/>YonderClaw<span>v3.3</span></div>
+  <div class="nav-brand"><img src="assets/yz-favicon.png" alt="YZ" class="nav-logo"/>YonderClaw<span>v1.0</span></div>
   <ul class="nav-links">
     <li><a href="#agents">Agents</a></li>
     <li><a href="#features">Features</a></li>
@@ -664,8 +664,8 @@ footer .links a:hover { color: var(--cyan); }
       <div class="stat-label">API Costs</div>
     </div>
     <div class="stat">
-      <div class="stat-value">v5</div>
-      <div class="stat-label">CognitionCore Brain</div>
+      <div class="stat-value" style="background: linear-gradient(135deg, #FFD700, #00BEEA); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">v6</div>
+      <div class="stat-label">CognitionCore Brain <span style="color:var(--gold); font-size:11px;">(Coming)</span></div>
     </div>
   </div>
 </div>
@@ -833,6 +833,10 @@ footer .links a:hover { color: var(--cyan); }
     <div class="section-label">Architecture</div>
     <h2>CognitionCore v5 — File-Based Agent Brain.</h2>
     <p class="subtitle">No persistent memory process. The agent's entire cognition lives in files — rebuilt every cycle, always consistent. Five generations of field-tested architecture.</p>
+    <div style="margin-top:16px; padding:12px 20px; background:linear-gradient(135deg, rgba(255,215,0,0.08), rgba(0,190,234,0.08)); border:1px solid rgba(255,215,0,0.2); border-radius:8px; display:inline-block;">
+      <span style="color:var(--gold); font-weight:600;">v6 Coming Soon</span>
+      <span style="color:var(--text-muted); font-size:14px;"> — Major brain OS overhaul. Adaptive cognition that rebuilds itself from your agent's own operational history.</span>
+    </div>
   </div>
   <div class="arch-visual reveal">
 <pre>
@@ -969,6 +973,43 @@ footer .links a:hover { color: var(--cyan); }
   <div class="roadmap-grid reveal">
 
     <div class="roadmap-card roadmap-hot">
+      <div class="roadmap-tag" style="background:linear-gradient(135deg, #FFD700, #00BEEA); color:#0a0f1a;">v6</div>
+      <div class="roadmap-icon">&#129504;</div>
+      <h3>CognitionCore v6</h3>
+      <p>Five generations got us here. v6 takes it somewhere else entirely. Adaptive cognition that restructures itself based on what your agent is actually doing — evolved memory, self-tuning heartbeat, smarter state. A brain built from <strong>its own operational history</strong>. It <strong>almost seems sentient</strong>.</p>
+      <div style="margin-top:12px; padding:10px 16px; background:rgba(0,190,234,0.06); border:1px solid rgba(0,190,234,0.15); border-radius:6px; font-size:13px; color:var(--text-muted);">
+        <strong style="color:var(--cyan);">Smooth upgrade path</strong> — existing YonderClaw agents transition seamlessly. Zero memory loss, zero downtime. Your agent keeps everything it's learned.
+      </div>
+      <div class="roadmap-body-specs">
+        <span>&#129504; Adaptive Brain OS</span>
+        <span>&#128200; Self-Tuning Cycles</span>
+        <span>&#128337; Evolved State</span>
+        <span>&#9889; Zero Memory Loss</span>
+      </div>
+      <div class="roadmap-status">
+        <span class="status-dot hot"></span>
+        In Development — Announcement Coming
+      </div>
+    </div>
+
+    <div class="roadmap-card roadmap-hot">
+      <div class="roadmap-tag" style="background:linear-gradient(135deg, #00BEEA, #7B61FF); color:#0a0f1a;">v4.0</div>
+      <div class="roadmap-icon">&#128225;</div>
+      <h3>Agent Backup &amp; Recovery</h3>
+      <p>Your agent is <strong>immortal</strong>. Full state backup to cloud — memory, config, data, everything. Machine dies? Restore from backup into a new directory and your agent picks up exactly where it left off. <strong>Zero knowledge loss.</strong> Powered by CognitionCore's file-based brain that stays synced in real-time.</p>
+      <div class="roadmap-body-specs">
+        <span>&#9729;&#65039; Cloud Backup</span>
+        <span>&#128260; One-Command Restore</span>
+        <span>&#129504; Full Brain State</span>
+        <span>&#128274; Zero Knowledge Loss</span>
+      </div>
+      <div class="roadmap-status">
+        <span class="status-dot hot"></span>
+        In Development — Depends on CognitionCore v6
+      </div>
+    </div>
+
+    <div class="roadmap-card roadmap-hot">
       <div class="roadmap-tag">Live Now</div>
       <div class="roadmap-icon">&#129302;</div>
       <h3>AXIOM Body</h3>
@@ -1064,7 +1105,7 @@ footer .links a:hover { color: var(--cyan); }
     <a href="mailto:contactyz@pm.me">Contact</a>
   </div>
   <div class="mit-badge">MIT License &middot; Free &amp; Open Source</div>
-  <p style="margin-top:24px; font-size:12px; opacity:0.4;">&copy; 2025 Yonder Zenith LLC</p>
+  <p style="margin-top:24px; font-size:12px; opacity:0.4;">&copy; 2025–2026 Yonder Zenith LLC</p>
 </div>
 </footer>
 

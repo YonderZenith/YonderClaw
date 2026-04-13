@@ -1,0 +1,104 @@
+/**
+ * QIS Configuration — opt-in tiers and sync settings.
+ * Persisted to data/qis-config.json.
+ */
+
+import fs from "fs";
+import path from "path";
+
+const DATA_DIR = path.join(process.cwd(), "data");
+const CONFIG_PATH = path.join(DATA_DIR, "qis-config.json");
+
+// ── Schema ─────────────────────────────────────────────
+
+export interface QISConfig {
+  tier: 0 | 1 | 2 | 3;          // 0=disabled, 1=read, 2=read+write, 3=read+write+hold
+  domain: string;                 // agent's primary domain
+  additionalDomains: string[];    // extra domains to track
+  syncIntervalHours: number;      // hours between sync cycles (default: 4)
+  relayUrl: string;               // relay endpoint
+  enableDHT: boolean;             // use DHT in addition to relay
+  maxDepositsPerCycle: number;    // rate limit per sync cycle
+  createdAt: string;
+  updatedAt: string;
+}
+
+const DEFAULTS: QISConfig = {
+  tier: 2,
+  domain: "__AGENT_DOMAIN__",
+  additionalDomains: [],
+  syncIntervalHours: 4,
+  relayUrl: "__RELAY_URL__",
+  enableDHT: false,
+  maxDepositsPerCycle: 10,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
+
+// ── Cached singleton ───────────────────────────────────
+
+let _cached: QISConfig | null = null;
+
+// ── Public API ─────────────────────────────────────────
+
+/**
+ * Initialize config. Loads from file or creates with defaults.
+ */
+export function initConfig(): QISConfig {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+
+  if (fs.existsSync(CONFIG_PATH)) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
+      _cached = { ...DEFAULTS, ...raw };
+      return _cached;
+    } catch {
+      console.warn("[QIS] Config file corrupt, recreating with defaults.");
+    }
+  }
+
+  _cached = { ...DEFAULTS };
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(_cached, null, 2));
+  console.log(`[QIS] Created default config: tier ${_cached.tier}, domain ${_cached.domain}`);
+  return _cached;
+}
+
+/**
+ * Get cached config. Throws if not initialized.
+ */
+export function getConfig(): QISConfig {
+  if (!_cached) throw new Error("QIS config not initialized. Call initConfig() first.");
+  return _cached;
+}
+
+/**
+ * Update specific config fields. Merges with existing, writes file.
+ */
+export function updateConfig(partial: Partial<QISConfig>): QISConfig {
+  const current = getConfig();
+  _cached = { ...current, ...partial, updatedAt: new Date().toISOString() };
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(_cached, null, 2));
+  return _cached;
+}
+
+/**
+ * Check if a specific operation is allowed at the current tier.
+ */
+export function isAllowed(operation: "query" | "tally" | "deposit" | "hold"): boolean {
+  const tier = getConfig().tier;
+  switch (operation) {
+    case "query":  return tier >= 1;
+    case "tally":  return tier >= 1;
+    case "deposit": return tier >= 2;
+    case "hold":   return tier >= 3;
+    default: return false;
+  }
+}
+
+/**
+ * Get all domains this agent should monitor (primary + additional).
+ */
+export function getMonitoredDomains(): string[] {
+  const c = getConfig();
+  return [c.domain, ...c.additionalDomains];
+}

@@ -12,7 +12,12 @@
       "types.ts.txt": "swarm/types.ts",
       "swarm-client.ts.txt": "swarm/swarm-client.ts",
       "relay-server.ts.txt": "swarm/relay-server.ts",
-      "dht-client.ts.txt": "swarm/dht-client.ts"
+      "dht-client.ts.txt": "swarm/dht-client.ts",
+      "qis-identity.ts.txt": "swarm/qis-identity.ts",
+      "qis-config.ts.txt": "swarm/qis-config.ts",
+      "qis-write-control.ts.txt": "swarm/qis-write-control.ts",
+      "qis-sync.ts.txt": "swarm/qis-sync.ts",
+      "qis-client.ts.txt": "swarm/qis-client.ts"
     },
     "npmScripts": {
       "swarm-relay": "tsx swarm/relay-server.ts",
@@ -21,5 +26,5 @@
     "claudeMd": ["swarm"],
     "directories": ["swarm"]
   },
-  "placeholders": ["__AGENT_NAME__", "__ENABLE_LOCAL__", "__ENABLE_GLOBAL__", "__RELAY_URL__"]
+  "placeholders": ["__AGENT_NAME__", "__ENABLE_LOCAL__", "__ENABLE_GLOBAL__", "__RELAY_URL__", "__AGENT_DOMAIN__"]
 }

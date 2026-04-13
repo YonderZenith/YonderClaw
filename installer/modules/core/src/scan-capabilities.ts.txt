@@ -107,7 +107,7 @@ function scan(): Inventory {
 
   // Feature detection
   inv.boardroom = fs.existsSync(path.join(PROJECT_ROOT, "boardroom", "client.ts"));
-  inv.swarm = fs.existsSync(path.join(PROJECT_ROOT, "swarm", "swarm-client.ts"));
+  inv.swarm = fs.existsSync(path.join(PROJECT_ROOT, "swarm", "qis-client.ts")) || fs.existsSync(path.join(PROJECT_ROOT, "swarm", "swarm-client.ts"));
 
   return inv;
 }

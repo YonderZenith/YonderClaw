@@ -1,0 +1,263 @@
+/**
+ * QIS Sync Scheduler — runs the QIS cycle on a dedicated timer.
+ *
+ * Cycle: query relevant buckets → verify signatures → tally → log results
+ * NOT tied to the agent's main cron. Runs on syncIntervalHours.
+ */
+
+import fs from "fs";
+import path from "path";
+import http from "http";
+import https from "https";
+import { getConfig, getMonitoredDomains } from "./qis-config.js";
+import { getAgentId } from "./qis-identity.js";
+import { verifyPacketSignature, type SignedPacket } from "./qis-write-control.js";
+
+const DATA_DIR = path.join(process.cwd(), "data");
+const SYNC_LOG_PATH = path.join(DATA_DIR, "qis-sync-log.jsonl");
+
+// ── Types ──────────────────────────────────────────────
+
+export interface TallyResult {
+  total: number;
+  positive: number;
+  negative: number;
+  neutral: number;
+  positive_pct: number;
+  avg_confidence: number;
+  consensus: string;
+  top_insights: Array<{ insight: string; count: number; avg_confidence: number }>;
+}
+
+export interface SyncCycleResult {
+  startedAt: string;
+  completedAt: string;
+  durationMs: number;
+  bucketsQueried: number;
+  packetsReceived: number;
+  errors: string[];
+  tallies: Array<{
+    bucket: string;
+    total: number;
+    consensus: string;
+    positive_pct: number;
+  }>;
+}
+
+// ── State ──────────────────────────────────────────────
+
+let _timer: ReturnType<typeof setInterval> | null = null;
+let _running = false;
+
+// ── HTTP helper ────────────────────────────────────────
+
+function fetchJSON(url: string): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const transport = parsed.protocol === "https:" ? https : http;
+
+    const req = transport.get(url, { timeout: 8000 }, (res) => {
+      let body = "";
+      res.on("data", (c: Buffer) => body += c);
+      res.on("end", () => {
+        try { resolve(JSON.parse(body)); }
+        catch { reject(new Error(`Invalid JSON from ${url}`)); }
+      });
+    });
+    req.on("error", (e: Error) => reject(e));
+    req.on("timeout", () => { req.destroy(); reject(new Error("Timeout")); });
+  });
+}
+
+// ── Tally (matches dht-node.ts:365-415) ───────────────
+
+export function tally(packets: Array<{ signal: string; confidence: number; insight: string }>): TallyResult {
+  const total = packets.length;
+  if (total === 0) {
+    return { total: 0, positive: 0, negative: 0, neutral: 0, positive_pct: 0, avg_confidence: 0, consensus: "no data", top_insights: [] };
+  }
+
+  let positive = 0, negative = 0, neutral = 0, confSum = 0;
+  const insightGroups = new Map<string, { count: number; confSum: number; original: string }>();
+
+  for (const p of packets) {
+    if (p.signal === "positive") positive++;
+    else if (p.signal === "negative") negative++;
+    else neutral++;
+    confSum += p.confidence;
+
+    const key = (p.insight || "").trim().toLowerCase().slice(0, 80);
+    if (key) {
+      const existing = insightGroups.get(key);
+      if (existing) {
+        existing.count++;
+        existing.confSum += p.confidence;
+      } else {
+        insightGroups.set(key, { count: 1, confSum: p.confidence, original: p.insight });
+      }
+    }
+  }
+
+  const positive_pct = Math.round((positive / total) * 100);
+  const avg_confidence = Math.round((confSum / total) * 100) / 100;
+
+  let consensus: string;
+  if (positive_pct >= 80 && avg_confidence >= 0.7) consensus = "strong positive";
+  else if (positive_pct >= 60) consensus = "lean positive";
+  else if (positive_pct <= 20 && avg_confidence >= 0.7) consensus = "strong negative";
+  else if (positive_pct <= 40) consensus = "lean negative";
+  else consensus = "mixed";
+
+  const top_insights = [...insightGroups.values()]
+    .sort((a, b) => (b.count * (b.confSum / b.count)) - (a.count * (a.confSum / a.count)))
+    .slice(0, 10)
+    .map(g => ({
+      insight: g.original,
+      count: g.count,
+      avg_confidence: Math.round((g.confSum / g.count) * 100) / 100,
+    }));
+
+  return { total, positive, negative, neutral, positive_pct, avg_confidence, consensus, top_insights };
+}
+
+// ── Sync Cycle ─────────────────────────────────────────
+
+/**
+ * Run a single sync cycle.
+ */
+export async function runSyncCycle(): Promise<SyncCycleResult> {
+  if (_running) {
+    console.log("[QIS Sync] Cycle already in progress, skipping.");
+    return { startedAt: "", completedAt: "", durationMs: 0, bucketsQueried: 0, packetsReceived: 0, errors: ["skipped: already running"], tallies: [] };
+  }
+
+  _running = true;
+  const startedAt = new Date().toISOString();
+  const start = Date.now();
+  const errors: string[] = [];
+  const tallies: SyncCycleResult["tallies"] = [];
+  let bucketsQueried = 0;
+  let packetsReceived = 0;
+
+  try {
+    const config = getConfig();
+    const domains = getMonitoredDomains();
+
+    // Collect bucket paths for our domains
+    const bucketPaths: string[] = [];
+    for (const domain of domains) {
+      try {
+        const data = await fetchJSON(`${config.relayUrl}/buckets?domain=${encodeURIComponent(domain)}`);
+        for (const b of data.buckets || []) {
+          bucketPaths.push(b.path);
+        }
+      } catch (err) {
+        errors.push(`Failed to fetch domain ${domain}: ${(err as Error).message}`);
+      }
+    }
+
+    // Query each bucket (limit 50 per cycle)
+    for (const bucketPath of bucketPaths.slice(0, 50)) {
+      try {
+        const data = await fetchJSON(`${config.relayUrl}/lookup?path=${encodeURIComponent(bucketPath)}`);
+        const packets = (data.packets || []) as any[];
+        bucketsQueried++;
+
+        // Verify signatures where available
+        const verified: any[] = [];
+        for (const p of packets) {
+          if (p.public_key && p.signature) {
+            if (verifyPacketSignature(p as SignedPacket)) {
+              verified.push(p);
+            } else {
+              console.warn(`[QIS Sync] Bad signature from ${p.agent_id} in ${bucketPath}`);
+            }
+          } else {
+            verified.push(p); // Legacy packets without signatures still count
+          }
+        }
+
+        packetsReceived += verified.length;
+
+        // Tally
+        const t = tally(verified);
+        tallies.push({
+          bucket: bucketPath,
+          total: t.total,
+          consensus: t.consensus,
+          positive_pct: t.positive_pct,
+        });
+      } catch (err) {
+        errors.push(`Failed to query ${bucketPath}: ${(err as Error).message}`);
+      }
+    }
+  } catch (err) {
+    errors.push(`Sync cycle error: ${(err as Error).message}`);
+  }
+
+  const completedAt = new Date().toISOString();
+  const result: SyncCycleResult = {
+    startedAt,
+    completedAt,
+    durationMs: Date.now() - start,
+    bucketsQueried,
+    packetsReceived,
+    errors,
+    tallies,
+  };
+
+  // Append to sync log
+  try {
+    fs.appendFileSync(SYNC_LOG_PATH, JSON.stringify(result) + "\n");
+  } catch {}
+
+  _running = false;
+  console.log(`[QIS Sync] Complete: ${bucketsQueried} buckets, ${packetsReceived} packets, ${errors.length} errors (${result.durationMs}ms)`);
+  return result;
+}
+
+/**
+ * Get recent sync logs.
+ */
+export function getSyncLogs(limit = 10): SyncCycleResult[] {
+  try {
+    if (!fs.existsSync(SYNC_LOG_PATH)) return [];
+    const lines = fs.readFileSync(SYNC_LOG_PATH, "utf-8").trim().split("\n");
+    return lines.slice(-limit).map(l => JSON.parse(l)).reverse();
+  } catch {
+    return [];
+  }
+}
+
+// ── Scheduler ──────────────────────────────────────────
+
+/**
+ * Start the sync scheduler.
+ */
+export function startSyncScheduler(initialDelayMs?: number): void {
+  if (_timer) return;
+  const config = getConfig();
+  if (config.tier === 0) {
+    console.log("[QIS Sync] Tier 0 (disabled). Scheduler not started.");
+    return;
+  }
+
+  const intervalMs = config.syncIntervalHours * 60 * 60 * 1000;
+  const delay = initialDelayMs ?? (5 * 60 * 1000); // default: 5 min after boot
+
+  setTimeout(() => {
+    runSyncCycle().catch(err => console.error("[QIS Sync] Error:", err.message));
+    _timer = setInterval(() => {
+      runSyncCycle().catch(err => console.error("[QIS Sync] Error:", err.message));
+    }, intervalMs);
+  }, delay);
+
+  console.log(`[QIS Sync] Scheduled every ${config.syncIntervalHours}h. First cycle in ${Math.round(delay / 1000)}s.`);
+}
+
+/**
+ * Stop the sync scheduler.
+ */
+export function stopSyncScheduler(): void {
+  if (_timer) { clearInterval(_timer); _timer = null; }
+}
