@@ -12,17 +12,15 @@
 <link rel="icon" type="image/png" href="assets/yz-favicon.png"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800&family=Inter:wght@400;500;600;700;800&family=Inconsolata:wght@400;700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <style>
 /* ═══════════════════════════════════════════════════
-   YonderClaw — Full Custom Redesign v3
-   Design System + Depth + Premium Animations
+   YonderClaw Landing Page — Dark Cyber Theme v2
    ═══════════════════════════════════════════════════ */
 
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
 :root {
-  /* ── Colors ── */
   --cyan: #00BEEA;
   --cyan-bright: #00D9FF;
   --gold: #FFD700;
@@ -38,55 +36,16 @@
   --text-muted: #64748b;
   --border: rgba(0, 190, 234, 0.1);
   --glow: rgba(0, 190, 234, 0.15);
-
-  /* ── Spacing (8px base) ── */
-  --space-xs: 4px;
-  --space-sm: 8px;
-  --space-md: 16px;
-  --space-lg: 24px;
-  --space-xl: 32px;
-  --space-2xl: 48px;
-  --space-3xl: 64px;
-  --space-4xl: 96px;
-  --space-5xl: 140px;
-
-  /* ── Typography ── */
-  --font-display: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, sans-serif;
-  --font-body: 'Inter', system-ui, -apple-system, sans-serif;
-  --font-mono: 'Inconsolata', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
 }
 
 html { scroll-behavior: smooth; }
 
 body {
-  font-family: var(--font-body);
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: var(--bg-deep);
   color: var(--text);
   line-height: 1.6;
   overflow-x: hidden;
-}
-
-/* ── Gradient Mesh Background ── */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(ellipse 80% 60% at 20% 10%, rgba(0, 190, 234, 0.06), transparent),
-    radial-gradient(ellipse 60% 80% at 85% 85%, rgba(139, 92, 246, 0.04), transparent),
-    radial-gradient(ellipse 50% 50% at 50% 50%, rgba(255, 215, 0, 0.02), transparent);
-}
-
-/* ── Noise Texture Overlay ── */
-.noise-overlay {
-  position: fixed;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 0;
-  pointer-events: none;
 }
 
 /* ── Canvas Background ── */
@@ -104,56 +63,24 @@ section { position: relative; z-index: 1; }
 .container {
   max-width: 1100px;
   margin: 0 auto;
-  padding: 0 var(--space-lg);
+  padding: 0 24px;
 }
-
-/* ══════════════════════════════════════
-   UNIFIED CARD SYSTEM
-   ══════════════════════════════════════ */
-.card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: var(--space-xl);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.card:hover {
-  border-color: rgba(0, 190, 234, 0.2);
-  transform: translateY(-4px);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3),
-              0 0 1px rgba(0, 190, 234, 0.3);
-}
-.card h3 {
-  font-family: var(--font-display);
-  font-size: 20px;
-  font-weight: 700;
-  margin-bottom: var(--space-sm);
-  line-height: 1.3;
-}
-.card p {
-  font-size: 14px;
-  color: var(--text-muted);
-  line-height: 1.6;
-}
-.card strong { color: var(--text); }
 
 /* ── NAV ── */
 nav {
   position: fixed; top: 0; left: 0; right: 0;
   z-index: 100;
-  padding: var(--space-md) 0;
-  background: rgba(6, 10, 19, 0.6);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 16px 0;
+  background: rgba(6, 10, 19, 0.85);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border);
   transition: all 0.3s;
 }
-nav.scrolled { padding: 10px 0; background: rgba(6, 10, 19, 0.9); }
+nav.scrolled { padding: 10px 0; background: rgba(6, 10, 19, 0.95); }
 nav .container {
   display: flex; align-items: center; justify-content: space-between;
 }
 .nav-brand {
-  font-family: var(--font-display);
   font-size: 20px; font-weight: 700;
   background: linear-gradient(90deg, var(--cyan), var(--cyan-bright));
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
@@ -161,14 +88,14 @@ nav .container {
 }
 .nav-brand span { -webkit-text-fill-color: var(--gold); color: var(--gold); font-size: 12px; margin-left: 6px; opacity: 0.7; }
 .nav-logo { height: 28px; width: 28px; margin-right: 10px; vertical-align: middle; }
-.nav-links { display: flex; gap: var(--space-xl); list-style: none; }
+.nav-links { display: flex; gap: 32px; list-style: none; }
 .nav-links a {
   color: var(--text-muted); text-decoration: none; font-size: 14px; font-weight: 500;
   transition: color 0.2s;
 }
 .nav-links a:hover { color: var(--cyan); }
 .nav-cta {
-  padding: var(--space-sm) 20px; border-radius: 8px; font-size: 14px; font-weight: 600;
+  padding: 8px 20px; border-radius: 8px; font-size: 14px; font-weight: 600;
   background: linear-gradient(135deg, var(--cyan), var(--cyan-bright));
   color: #000; text-decoration: none;
   transition: transform 0.2s, box-shadow 0.2s;
@@ -193,7 +120,7 @@ nav .container {
 }
 .hero-content { max-width: 750px; }
 .hero-logo-wrap {
-  margin-bottom: var(--space-lg);
+  margin-bottom: 24px;
   animation: fadeInUp 0.5s ease-out;
 }
 .hero-logo {
@@ -202,12 +129,11 @@ nav .container {
 }
 
 .hero h1 {
-  font-family: var(--font-display);
-  font-size: clamp(40px, 6vw, 72px);
+  font-size: clamp(40px, 6vw, 64px);
   font-weight: 800;
-  line-height: 1.05;
+  line-height: 1.1;
   letter-spacing: -2px;
-  margin-bottom: var(--space-lg);
+  margin-bottom: 24px;
   animation: fadeInUp 0.6s ease-out 0.1s both;
 }
 .hero h1 .gradient {
@@ -216,62 +142,48 @@ nav .container {
   background-clip: text;
 }
 .hero-product-name {
-  font-family: var(--font-body);
   font-size: 14px; letter-spacing: 6px; text-transform: uppercase;
   color: var(--text-muted); font-weight: 500;
   margin-bottom: 20px;
   animation: fadeInUp 0.6s ease-out 0.05s both;
 }
 .hero p.hero-sub {
-  font-size: 18px; color: var(--text-muted);
-  max-width: 560px; margin: 0 auto var(--space-md);
-  line-height: 1.6;
+  font-size: 19px; color: var(--text-muted);
+  max-width: 560px; margin: 0 auto 20px;
+  line-height: 1.7;
   animation: fadeInUp 0.6s ease-out 0.2s both;
 }
 .hero-highlight {
   display: inline-flex; align-items: center; gap: 10px;
   padding: 10px 20px; border-radius: 10px;
-  background: rgba(13, 18, 32, 0.6);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid rgba(255, 215, 0, 0.15);
+  background: linear-gradient(135deg, rgba(255, 215, 0, 0.06), rgba(0, 190, 234, 0.06));
+  border: 1px solid rgba(255, 215, 0, 0.2);
   font-size: 14px; color: var(--text-muted);
-  margin-bottom: var(--space-xl);
+  margin-bottom: 32px;
   animation: fadeInUp 0.6s ease-out 0.25s both;
   max-width: 520px;
 }
 .hero-highlight strong { color: var(--gold); }
 .highlight-icon { font-size: 18px; flex-shrink: 0; }
 .hero-actions {
-  display: flex; gap: var(--space-md); justify-content: center; flex-wrap: wrap;
+  display: flex; gap: 16px; justify-content: center; flex-wrap: wrap;
   animation: fadeInUp 0.6s ease-out 0.3s both;
 }
 .btn {
-  padding: 14px var(--space-xl); border-radius: 10px; font-size: 16px; font-weight: 600;
-  text-decoration: none; display: inline-flex; align-items: center; gap: var(--space-sm);
+  padding: 14px 32px; border-radius: 10px; font-size: 16px; font-weight: 600;
+  text-decoration: none; display: inline-flex; align-items: center; gap: 8px;
   transition: all 0.25s; cursor: pointer;
-  position: relative;
 }
 .btn-primary {
   background: linear-gradient(135deg, var(--cyan), var(--cyan-bright));
   color: #000;
   box-shadow: 0 4px 24px rgba(0, 190, 234, 0.3);
 }
-.btn-primary::after {
-  content: '';
-  position: absolute; inset: -2px;
-  border-radius: inherit;
-  background: linear-gradient(135deg, var(--cyan), var(--cyan-bright));
-  filter: blur(16px);
-  opacity: 0;
-  transition: opacity 0.3s;
-  z-index: -1;
-}
 .btn-primary:hover {
   transform: translateY(-2px);
   box-shadow: 0 8px 32px rgba(0, 190, 234, 0.5);
+  letter-spacing: 0.3px;
 }
-.btn-primary:hover::after { opacity: 0.4; }
 .btn-secondary {
   background: rgba(0, 190, 234, 0.08);
   border: 1px solid rgba(0, 190, 234, 0.25);
@@ -286,10 +198,7 @@ nav .container {
 /* ── Terminal Block ── */
 .terminal {
   max-width: 480px; margin: 40px auto 0;
-  background: rgba(13, 18, 32, 0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--border);
+  background: var(--bg-card); border: 1px solid var(--border);
   border-radius: 12px; overflow: hidden;
   animation: fadeInUp 0.6s ease-out 0.4s both;
   text-align: left;
@@ -297,7 +206,7 @@ nav .container {
 }
 .terminal-bar {
   display: flex; align-items: center; gap: 6px;
-  padding: 12px var(--space-md);
+  padding: 12px 16px;
   background: rgba(0, 190, 234, 0.04);
   border-bottom: 1px solid var(--border);
 }
@@ -305,9 +214,9 @@ nav .container {
 .terminal-dot:nth-child(1) { background: var(--red); opacity: 0.7; }
 .terminal-dot:nth-child(2) { background: var(--gold); opacity: 0.7; }
 .terminal-dot:nth-child(3) { background: var(--green); opacity: 0.7; }
-.terminal-title { margin-left: var(--space-sm); font-size: 12px; color: var(--text-muted); }
+.terminal-title { margin-left: 8px; font-size: 12px; color: var(--text-muted); }
 .terminal-body {
-  padding: 20px; font-family: var(--font-mono);
+  padding: 20px; font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
   font-size: 14px; line-height: 1.8;
 }
 .terminal-body .prompt { color: var(--cyan); }
@@ -317,15 +226,14 @@ nav .container {
 .terminal-copy {
   position: absolute; top: 10px; right: 12px;
   background: rgba(0, 190, 234, 0.08); border: 1px solid rgba(0, 190, 234, 0.2);
-  border-radius: 6px; padding: var(--space-xs) 10px; font-size: 11px;
+  border-radius: 6px; padding: 4px 10px; font-size: 11px;
   color: var(--text-muted); cursor: pointer; transition: all 0.2s;
 }
 .terminal-copy:hover { color: var(--cyan); border-color: rgba(0, 190, 234, 0.4); }
 
 /* ── Section Base ── */
-.section { padding: var(--space-4xl) 0; }
+.section { padding: 120px 0; }
 .section-label {
-  font-family: var(--font-body);
   font-size: 11px; font-weight: 700; letter-spacing: 5px; text-transform: uppercase;
   color: var(--cyan);
   padding: 6px 14px; background: rgba(0, 190, 234, 0.06);
@@ -334,58 +242,54 @@ nav .container {
   margin-bottom: 20px;
 }
 .section h2 {
-  font-family: var(--font-display);
   font-size: clamp(32px, 4vw, 48px); font-weight: 700;
   letter-spacing: -1px; margin-bottom: 20px;
-  line-height: 1.2;
 }
 .section .subtitle {
-  font-size: 16px; color: var(--text-muted); max-width: 600px;
-  margin-bottom: var(--space-2xl); line-height: 1.6;
+  font-size: 17px; color: var(--text-muted); max-width: 600px;
+  margin-bottom: 56px; line-height: 1.7;
 }
 
 /* ── Stats Bar ── */
 .stats-bar {
-  padding: var(--space-2xl) 0;
+  padding: 48px 0;
   background: linear-gradient(180deg, rgba(0, 190, 234, 0.03), transparent);
   border-bottom: 1px solid var(--border);
   position: relative; z-index: 1;
 }
 .stats-grid {
-  display: flex; justify-content: center; gap: var(--space-2xl); flex-wrap: wrap;
+  display: flex; justify-content: center; gap: 48px; flex-wrap: wrap;
 }
 .stat { text-align: center; }
 .stat-value {
-  font-family: var(--font-display);
   font-size: 40px; font-weight: 800; letter-spacing: -1px;
-  font-variant-numeric: tabular-nums;
   background: linear-gradient(135deg, var(--cyan), var(--gold));
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 .stat-label {
-  font-size: 12px; color: var(--text-muted); margin-top: var(--space-xs);
+  font-size: 12px; color: var(--text-muted); margin-top: 4px;
   text-transform: uppercase; letter-spacing: 1.5px;
 }
 
 /* ── Why YonderClaw ── */
 .why-grid {
   display: grid; grid-template-columns: repeat(2, 1fr);
-  gap: var(--space-lg);
+  gap: 24px;
 }
 .why-card {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 16px; padding: 36px 28px;
+  transition: all 0.3s;
 }
 .why-card:hover {
   border-color: rgba(0, 190, 234, 0.2);
   background: var(--bg-card-hover);
-  transform: translateY(-4px);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  transform: translateY(-2px);
 }
 .why-card code {
   background: rgba(0, 190, 234, 0.1); color: var(--cyan);
-  padding: 2px var(--space-sm); border-radius: 4px; font-size: 13px;
-  font-family: var(--font-mono);
+  padding: 2px 8px; border-radius: 4px; font-size: 13px;
 }
 .why-primary {
   border-color: rgba(255, 215, 0, 0.25);
@@ -393,23 +297,31 @@ nav .container {
 }
 .why-primary:hover { border-color: rgba(255, 215, 0, 0.4); }
 .why-primary h3 { color: var(--gold); }
-.why-icon { font-size: 28px; margin-bottom: var(--space-md); }
+.why-icon { font-size: 28px; margin-bottom: 16px; }
+.why-card h3 { font-size: 18px; margin-bottom: 10px; font-weight: 600; }
+.why-card p { font-size: 15px; color: var(--text-muted); line-height: 1.7; }
+.why-card strong { color: var(--text); }
 .channel-pills {
   display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px;
 }
 .channel-pills span {
-  padding: var(--space-xs) 10px; border-radius: 50px; font-size: 11px;
+  padding: 4px 10px; border-radius: 50px; font-size: 11px;
   background: rgba(0, 190, 234, 0.08); border: 1px solid rgba(0, 190, 234, 0.15);
   color: var(--text-muted);
 }
 
 /* ── Agent Type Cards ── */
 .agent-grid {
-  display: grid; grid-template-columns: repeat(5, 1fr);
-  gap: var(--space-lg);
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
 }
 .agent-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 32px 24px;
   text-align: center;
+  transition: all 0.3s;
   position: relative; overflow: hidden;
   border-top: 2px solid transparent;
 }
@@ -420,88 +332,95 @@ nav .container {
 .agent-card:nth-child(5) { border-top-color: var(--amber); }
 .agent-card:hover {
   border-color: rgba(0, 190, 234, 0.3);
+  border-top-color: inherit;
+  transform: translateY(-4px);
   box-shadow: 0 12px 40px rgba(0, 190, 234, 0.08);
 }
 .agent-icon {
   width: 56px; height: 56px; border-radius: 14px;
   display: flex; align-items: center; justify-content: center;
-  font-size: 24px; margin: 0 auto var(--space-md);
+  font-size: 24px; margin: 0 auto 16px;
 }
 .agent-card:nth-child(1) .agent-icon { background: rgba(255, 215, 0, 0.08); border: 1px solid rgba(255, 215, 0, 0.15); }
 .agent-card:nth-child(2) .agent-icon { background: rgba(0, 190, 234, 0.08); border: 1px solid rgba(0, 190, 234, 0.15); }
 .agent-card:nth-child(3) .agent-icon { background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.15); }
 .agent-card:nth-child(4) .agent-icon { background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.15); }
 .agent-card:nth-child(5) .agent-icon { background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.15); }
+.agent-card h3 { font-size: 18px; margin-bottom: 8px; font-weight: 600; }
+.agent-card p { font-size: 14px; color: var(--text-muted); line-height: 1.5; }
 
-/* ── Feature Bento Grid ── */
-.feature-bento {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--space-lg);
+/* ── Feature Grid ── */
+.feature-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 24px;
 }
-.feature-bento > :nth-child(1) { grid-column: span 2; }
-.feature-bento > :nth-child(5) { grid-column: span 2; }
 .feature-card {
-  position: relative; overflow: hidden;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 32px;
+  transition: all 0.3s;
 }
-.feature-card::before {
-  content: '';
-  position: absolute; top: 0; left: 0; right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(0, 190, 234, 0.3), transparent);
-  opacity: 0;
-  transition: opacity 0.3s;
+.feature-card:hover {
+  background: var(--bg-card-hover);
+  transform: translateY(-2px);
 }
-.feature-card:hover::before { opacity: 1; }
-.feature-card:nth-child(even)::before {
-  background: linear-gradient(90deg, transparent, rgba(245, 158, 11, 0.3), transparent);
-}
+.feature-card:nth-child(odd):hover { border-color: rgba(0, 190, 234, 0.25); }
+.feature-card:nth-child(even):hover { border-color: rgba(245, 158, 11, 0.25); }
 .feature-icon {
-  width: 44px; height: 44px; border-radius: 12px;
+  width: 40px; height: 40px; border-radius: 10px;
   display: flex; align-items: center; justify-content: center;
-  font-size: 20px; margin-bottom: var(--space-md);
+  font-size: 18px; margin-bottom: 16px;
   background: rgba(0, 190, 234, 0.08);
-  border: 1px solid rgba(0, 190, 234, 0.1);
 }
-.feature-card:nth-child(even) .feature-icon {
-  background: rgba(245, 158, 11, 0.08);
-  border-color: rgba(245, 158, 11, 0.1);
-}
+.feature-card:nth-child(even) .feature-icon { background: rgba(245, 158, 11, 0.08); }
+.feature-card h3 { font-size: 17px; margin-bottom: 8px; font-weight: 600; }
+.feature-card p { font-size: 14px; color: var(--text-muted); line-height: 1.6; }
 
-/* ── Steps ── */
+/* Steps */
 .steps {
-  display: grid; grid-template-columns: repeat(6, 1fr);
-  gap: var(--space-md); counter-reset: step;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px; counter-reset: step;
 }
 .step {
-  text-align: center;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 16px; position: relative;
+  text-align: center; padding: 32px 16px;
   counter-increment: step;
+  transition: all 0.3s;
+}
+.step:hover {
+  border-color: rgba(0, 190, 234, 0.3);
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(0, 190, 234, 0.08);
 }
 .step::before {
   content: counter(step);
   display: block; width: 48px; height: 48px; line-height: 48px;
-  border-radius: 50%; margin: 0 auto var(--space-md);
+  border-radius: 50%; margin: 0 auto 16px;
   background: rgba(245, 158, 11, 0.1);
   border: 2px solid rgba(245, 158, 11, 0.3);
   color: var(--amber); font-weight: 700; font-size: 18px;
-  font-family: var(--font-display);
 }
 .step h3 { font-size: 15px; margin-bottom: 6px; color: var(--text); font-weight: 600; }
-.step p { font-size: 13px; color: var(--text-muted); line-height: 1.6; }
+.step p { font-size: 13px; color: var(--text-muted); }
 
-/* ── Architecture — SVG Diagram ── */
+/* ── Architecture ── */
 .arch-visual {
   background: var(--bg-card);
   border: 1px solid var(--border);
+  border-left: 3px solid var(--cyan);
   border-radius: 16px;
-  padding: var(--space-2xl) var(--space-xl);
-  text-align: center;
-  overflow: hidden;
+  padding: 48px 32px;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 14px;
+  line-height: 1.7;
+  overflow-x: auto;
+  color: var(--text-muted);
 }
-.arch-visual svg {
-  max-width: 100%;
-  height: auto;
-}
+.arch-visual .hl { color: var(--cyan); font-weight: 600; }
+.arch-visual .gl { color: var(--gold); }
+.arch-visual .gr { color: var(--green); }
 
 /* ── QIS Section ── */
 .qis-section {
@@ -511,25 +430,23 @@ nav .container {
 }
 .qis-grid {
   display: grid; grid-template-columns: 1fr 1fr;
-  gap: var(--space-2xl); align-items: center;
+  gap: 48px; align-items: center;
 }
 .qis-visual {
   background: var(--bg-card); border: 1px solid var(--border);
-  border-radius: 16px; padding: var(--space-xl);
+  border-radius: 16px; padding: 40px;
   text-align: center;
 }
 .qis-logo-img {
-  height: 180px; margin-bottom: var(--space-lg);
+  height: 180px; margin-bottom: 28px;
   filter: drop-shadow(0 0 30px rgba(0, 190, 234, 0.4));
 }
 .qis-visual svg { max-width: 100%; }
-.qis-svg-wrap { max-width: 400px; margin: 0 auto; }
 .qis-features { list-style: none; }
 .qis-features li {
-  padding: 12px 0; font-size: 14px;
+  padding: 12px 0; font-size: 15px;
   display: flex; align-items: flex-start; gap: 12px;
   border-bottom: 1px solid var(--border);
-  line-height: 1.6;
 }
 .qis-features li:last-child { border-bottom: none; }
 .qis-check { color: var(--green); font-weight: 700; flex-shrink: 0; }
@@ -537,18 +454,21 @@ nav .container {
 /* ── Roadmap ── */
 .roadmap-grid {
   display: grid; grid-template-columns: repeat(2, 1fr);
-  gap: var(--space-lg); max-width: 1100px; margin: 0 auto;
+  gap: 24px; max-width: 1100px; margin: 0 auto;
 }
 .roadmap-hero {
   grid-column: 1 / -1;
-  display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-xl);
+  display: grid; grid-template-columns: 1fr 1fr; gap: 32px;
   align-items: center;
 }
 .roadmap-card {
-  position: relative;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 16px; padding: 32px; position: relative;
+  transition: all 0.3s;
 }
 .roadmap-card:hover {
   border-color: rgba(0, 190, 234, 0.25);
+  transform: translateY(-3px);
   box-shadow: 0 8px 32px rgba(0, 190, 234, 0.06);
 }
 .roadmap-hot {
@@ -557,7 +477,7 @@ nav .container {
 }
 .roadmap-hot:hover { border-color: rgba(255, 215, 0, 0.4); }
 .roadmap-tag {
-  position: absolute; top: var(--space-md); right: var(--space-md);
+  position: absolute; top: 16px; right: 16px;
   padding: 3px 10px; border-radius: 50px;
   font-size: 11px; font-weight: 600; letter-spacing: 0.5px;
   background: rgba(0, 190, 234, 0.1); color: var(--cyan);
@@ -566,11 +486,13 @@ nav .container {
   background: rgba(255, 215, 0, 0.12); color: var(--gold);
 }
 .roadmap-icon { font-size: 32px; margin-bottom: 14px; }
-.roadmap-card p { line-height: 1.6; }
+.roadmap-card h3 { font-size: 18px; margin-bottom: 10px; font-weight: 600; }
+.roadmap-card p { font-size: 14px; color: var(--text-muted); line-height: 1.7; }
+.roadmap-card strong { color: var(--text); }
 .roadmap-status {
-  margin-top: var(--space-md); padding-top: 14px; border-top: 1px solid var(--border);
+  margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border);
   font-size: 12px; color: var(--text-muted);
-  display: flex; align-items: center; gap: var(--space-sm);
+  display: flex; align-items: center; gap: 8px;
 }
 .status-dot {
   width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
@@ -587,11 +509,12 @@ nav .container {
 .status-dot.planned {
   background: var(--violet); opacity: 0.6;
 }
+
 .roadmap-body-specs {
-  display: flex; flex-wrap: wrap; gap: var(--space-sm); margin-top: 14px;
+  display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px;
 }
 .roadmap-body-specs span {
-  padding: var(--space-xs) 10px; border-radius: 50px; font-size: 11px;
+  padding: 4px 10px; border-radius: 50px; font-size: 11px;
   background: rgba(255, 215, 0, 0.08); border: 1px solid rgba(255, 215, 0, 0.15);
   color: var(--text-muted);
 }
@@ -603,28 +526,25 @@ footer {
   text-align: center;
 }
 footer .brand {
-  font-family: var(--font-display);
   font-size: 18px; font-weight: 700;
   background: linear-gradient(90deg, var(--cyan), var(--cyan-bright));
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
   background-clip: text;
-  margin-bottom: var(--space-sm);
+  margin-bottom: 8px;
 }
 footer p { color: var(--text-muted); font-size: 14px; }
-footer .links { margin-top: 20px; display: flex; gap: var(--space-lg); justify-content: center; }
+footer .links { margin-top: 20px; display: flex; gap: 24px; justify-content: center; }
 footer .links a { color: var(--text-muted); text-decoration: none; font-size: 14px; transition: color 0.2s; }
 footer .links a:hover { color: var(--cyan); }
 .mit-badge {
-  display: inline-block; margin-top: var(--space-md);
-  padding: var(--space-xs) 14px; border-radius: 50px;
+  display: inline-block; margin-top: 16px;
+  padding: 4px 14px; border-radius: 50px;
   background: rgba(16, 185, 129, 0.1);
   border: 1px solid rgba(16, 185, 129, 0.2);
   color: var(--green); font-size: 13px;
 }
 
-/* ══════════════════════════════════════
-   ANIMATIONS
-   ══════════════════════════════════════ */
+/* ── Animations ── */
 @keyframes fadeInUp {
   from { opacity: 0; transform: translateY(24px); }
   to { opacity: 1; transform: translateY(0); }
@@ -633,90 +553,35 @@ footer .links a:hover { color: var(--cyan); }
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
 }
-@keyframes dashFlow {
-  to { stroke-dashoffset: -12; }
-}
-
-/* Scroll Reveal — scale + translate */
 .reveal {
-  opacity: 0;
-  transform: translateY(20px) scale(0.98);
-  transition: opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1),
-              transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  opacity: 0; transform: translateY(30px);
+  transition: opacity 0.7s, transform 0.7s;
 }
-.reveal.visible {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-}
+.reveal.visible { opacity: 1; transform: translateY(0); }
+.reveal-d1 { transition-delay: 0.1s; }
+.reveal-d2 { transition-delay: 0.2s; }
+.reveal-d3 { transition-delay: 0.3s; }
 
-/* Card stagger classes (applied by JS) */
-.card-stagger {
-  opacity: 0;
-  transform: translateY(16px) scale(0.97);
-  transition: opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1),
-              transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.card-stagger.visible {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-}
-
-/* ══════════════════════════════════════
-   RESPONSIVE — 4 Breakpoints
-   ══════════════════════════════════════ */
-
-/* Tablet landscape */
-@media (max-width: 1100px) {
-  .container { max-width: 900px; }
-  .agent-grid { grid-template-columns: repeat(3, 1fr); }
-  .roadmap-hero { grid-template-columns: 1fr; }
-  .qis-grid { gap: var(--space-xl); }
-  .steps { grid-template-columns: repeat(3, 1fr); }
-}
-
-/* Tablet portrait */
-@media (max-width: 900px) {
-  .feature-bento { grid-template-columns: repeat(2, 1fr); }
-  .feature-bento > :nth-child(1) { grid-column: span 2; }
-  .feature-bento > :nth-child(5) { grid-column: span 2; }
-  .stats-grid { gap: var(--space-lg); }
-  .qis-grid { grid-template-columns: 1fr; }
-}
-
-/* Mobile */
+/* ── Responsive ── */
 @media (max-width: 768px) {
   .nav-links { display: none; }
   .nav-links.nav-open {
     display: flex; flex-direction: column;
     position: absolute; top: 100%; left: 0; right: 0;
-    background: rgba(6, 10, 19, 0.98);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    padding: var(--space-lg); gap: var(--space-md);
+    background: rgba(6, 10, 19, 0.98); padding: 24px; gap: 16px;
     border-bottom: 1px solid var(--border);
   }
   .nav-toggle { display: block; }
+  .qis-grid { grid-template-columns: 1fr; }
   .hero h1 { letter-spacing: -1px; }
   .hero-logo { height: 100px; }
   .section { padding: 80px 0; }
-  .why-grid { grid-template-columns: 1fr; }
-  .agent-grid { grid-template-columns: repeat(2, 1fr); }
-  .feature-bento { grid-template-columns: 1fr; }
-  .feature-bento > * { grid-column: span 1 !important; }
-  .steps { grid-template-columns: repeat(2, 1fr); }
+  .arch-visual { font-size: 10px; padding: 24px 16px; }
   .roadmap-grid { grid-template-columns: 1fr; }
   .roadmap-hero { grid-template-columns: 1fr; }
-  .stats-grid { gap: var(--space-lg); }
+  .why-grid { grid-template-columns: 1fr; }
+  .stats-grid { gap: 24px; }
   .stat-value { font-size: 30px; }
-  .arch-visual { padding: var(--space-lg) var(--space-md); }
-  .qis-logo-img { height: 120px; }
-}
-
-/* Small mobile */
-@media (max-width: 480px) {
-  .agent-grid { grid-template-columns: 1fr; }
-  .stats-grid { flex-direction: column; gap: var(--space-md); }
-  .steps { grid-template-columns: 1fr; }
 }
 </style>
 <script>
@@ -736,14 +601,6 @@ footer .links a:hover { color: var(--cyan); }
 </script>
 </head>
 <body>
-
-<!-- Noise Texture Overlay -->
-<svg class="noise-overlay" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
-  <filter id="noiseFilter">
-    <feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" stitchTiles="stitch"/>
-  </filter>
-  <rect width="100%" height="100%" filter="url(#noiseFilter)" opacity="0.03"/>
-</svg>
 
 <canvas id="particleCanvas"></canvas>
 
@@ -808,27 +665,27 @@ footer .links a:hover { color: var(--cyan); }
 </section>
 
 <!-- STATS BAR -->
-<section class="stats-bar" id="statsBar">
+<section class="stats-bar">
 <div class="container">
   <div class="stats-grid">
     <div class="stat">
-      <div class="stat-value" data-target="94">0</div>
+      <div class="stat-value">94</div>
       <div class="stat-label">npm Installs</div>
     </div>
     <div class="stat">
-      <div class="stat-value" data-target="17">0</div>
+      <div class="stat-value">17</div>
       <div class="stat-label">Agents on Network</div>
     </div>
     <div class="stat">
-      <div class="stat-value" data-target="63">0</div>
+      <div class="stat-value">63</div>
       <div class="stat-label">Intelligence Buckets</div>
     </div>
     <div class="stat">
-      <div class="stat-value" data-target="$0" data-prefix="$">$0</div>
+      <div class="stat-value">$0</div>
       <div class="stat-label">per API Call</div>
     </div>
     <div class="stat">
-      <div class="stat-value" data-target="MIT" data-static="true">MIT</div>
+      <div class="stat-value">MIT</div>
       <div class="stat-label">Licensed &middot; Free Forever</div>
     </div>
   </div>
@@ -836,25 +693,25 @@ footer .links a:hover { color: var(--cyan); }
 </section>
 
 <!-- WHY YONDERCLAW -->
-<section class="section" id="why">
+<section class="section" id="why" style="padding-top:80px; padding-bottom:80px;">
 <div class="container">
-  <div class="why-grid reveal" id="whyGrid">
-    <div class="card why-card why-primary card-stagger">
+  <div class="why-grid reveal">
+    <div class="why-card why-primary">
       <div class="why-icon">&#128176;</div>
       <h3>Zero API Costs</h3>
       <p>Runs on your existing <strong>Claude Max or Pro subscription</strong>. That's it. No API keys to manage, no per-token billing that spikes when your agent actually does its job. Flat rate, unlimited agent hours.</p>
     </div>
-    <div class="card why-card card-stagger">
+    <div class="why-card">
       <div class="why-icon">&#128268;</div>
       <h3>Plug &amp; Play</h3>
       <p>Run <code>npx create-yonderclaw</code>, pick your agent type, answer a few questions. YonderClaw researches best practices, scaffolds the project, and launches your agent. You don't write config files.</p>
     </div>
-    <div class="card why-card card-stagger">
+    <div class="why-card">
       <div class="why-icon">&#129302;</div>
       <h3>Actually Autonomous</h3>
       <p>Set it up on Monday. Check back on Friday. Your agent ran 40 cycles, rewrote its own prompts twice, recovered from three errors, and sent you a report. You didn't touch it once.</p>
     </div>
-    <div class="card why-card card-stagger">
+    <div class="why-card">
       <div class="why-icon">&#128242;</div>
       <h3>Talk to It Anywhere</h3>
       <p><strong>Email, WhatsApp, console, phone, voice</strong> &mdash; talk to your agent however you want. On the train? Text it. At your desk? Terminal. Need a new channel? Tell the agent. It'll wire it up itself.</p>
@@ -872,37 +729,37 @@ footer .links a:hover { color: var(--cyan); }
 </section>
 
 <!-- AGENT TYPES -->
-<section class="section" id="agents">
+<section class="section" id="agents" style="padding: 140px 0 100px;">
 <div class="container">
   <div class="reveal">
     <div class="section-label">Agent Types</div>
   </div>
-  <div class="reveal">
+  <div class="reveal reveal-d1">
     <h2>Pick a Claw. Put It to Work.</h2>
     <p class="subtitle">Each agent ships with real domain knowledge, not blank-slate boilerplate. Guardrails included so it won't embarrass you.</p>
   </div>
-  <div class="agent-grid reveal" id="agentGrid">
-    <div class="card agent-card card-stagger">
+  <div class="agent-grid reveal reveal-d2">
+    <div class="agent-card">
       <div class="agent-icon">&#127919;</div>
       <h3>Outreach Claw</h3>
       <p>Email prospecting, follow-up sequences, auto-reply campaigns with safety limits</p>
     </div>
-    <div class="card agent-card card-stagger">
+    <div class="agent-card">
       <div class="agent-icon">&#128300;</div>
       <h3>Research Claw</h3>
       <p>Deep web research, multi-source synthesis, automated report generation</p>
     </div>
-    <div class="card agent-card card-stagger">
+    <div class="agent-card">
       <div class="agent-icon">&#128737;</div>
       <h3>Support Claw</h3>
       <p>Inbox monitoring, intelligent ticket triage, auto-response with escalation</p>
     </div>
-    <div class="card agent-card card-stagger">
+    <div class="agent-card">
       <div class="agent-icon">&#128225;</div>
       <h3>Social Claw</h3>
       <p>Content creation, scheduling, engagement tracking across platforms</p>
     </div>
-    <div class="card agent-card card-stagger">
+    <div class="agent-card">
       <div class="agent-icon">&#9889;</div>
       <h3>Custom Claw</h3>
       <p>Describe what you need in plain language &mdash; Claude configures everything</p>
@@ -912,42 +769,42 @@ footer .links a:hover { color: var(--cyan); }
 </section>
 
 <!-- FEATURES -->
-<section class="section" id="features">
+<section class="section" id="features" style="padding: 100px 0 120px;">
 <div class="container">
   <div class="reveal">
     <div class="section-label">Built-In</div>
   </div>
-  <div class="reveal">
+  <div class="reveal reveal-d1">
     <h2>Batteries Included. All of Them.</h2>
     <p class="subtitle">Scheduling, self-improvement, safety limits, a dashboard, a database. You get the whole stack on day one.</p>
   </div>
-  <div class="feature-bento reveal" id="featureGrid">
-    <div class="card feature-card card-stagger">
+  <div class="feature-grid reveal reveal-d2">
+    <div class="feature-card">
       <div class="feature-icon">&#129504;</div>
       <h3>13-Step Autonomous Loop</h3>
       <p>Pre-flight checks, context loading, task execution, learning, reporting &mdash; fully automatic every cycle.</p>
     </div>
-    <div class="card feature-card card-stagger">
+    <div class="feature-card">
       <div class="feature-icon">&#128640;</div>
       <h3>Self-Improvement Engine</h3>
       <p>Prompt versioning, A/B testing, automatic strategy optimization. Your agent gets better every day.</p>
     </div>
-    <div class="card feature-card card-stagger">
+    <div class="feature-card">
       <div class="feature-icon">&#128737;&#65039;</div>
       <h3>Safety Guardrails</h3>
       <p>Circuit breakers, rate limiting, daily caps, dry-run mode. Constitutional principles baked into SOUL.md.</p>
     </div>
-    <div class="card feature-card card-stagger">
+    <div class="feature-card">
       <div class="feature-icon">&#128202;</div>
       <h3>Command Center</h3>
       <p>Real-time HTML dashboard with task tracking, metrics, and voice control. No server required.</p>
     </div>
-    <div class="card feature-card card-stagger">
+    <div class="feature-card">
       <div class="feature-icon">&#128451;</div>
       <h3>SQLite Database</h3>
       <p>WAL-mode database with 11 tables for actions, configs, prompts, metrics &mdash; structured from day one.</p>
     </div>
-    <div class="card feature-card card-stagger">
+    <div class="feature-card">
       <div class="feature-icon">&#128338;</div>
       <h3>Cron Scheduling</h3>
       <p>Windows Task Scheduler integration, auto-start on boot, desktop shortcut &mdash; runs while you sleep.</p>
@@ -957,37 +814,37 @@ footer .links a:hover { color: var(--cyan); }
 </section>
 
 <!-- HOW IT WORKS -->
-<section class="section" id="how-it-works">
+<section class="section" id="how-it-works" style="padding: 80px 0 100px;">
 <div class="container">
   <div class="reveal">
     <div class="section-label">Setup</div>
   </div>
-  <div class="reveal">
+  <div class="reveal reveal-d1">
     <h2>Six Steps. You Do One of Them.</h2>
     <p class="subtitle">You pick the agent type. YonderClaw handles detection, research, scaffolding, dependencies, and launch.</p>
   </div>
-  <div class="steps reveal" id="stepsGrid">
-    <div class="card step card-stagger">
+  <div class="steps reveal reveal-d2">
+    <div class="step">
       <h3>Detect</h3>
       <p>OS, hardware, tools scanned automatically</p>
     </div>
-    <div class="card step card-stagger">
+    <div class="step">
       <h3>Configure</h3>
       <p>Pick agent type, answer use-case questions</p>
     </div>
-    <div class="card step card-stagger">
+    <div class="step">
       <h3>Research</h3>
       <p>Claude researches best practices for your domain</p>
     </div>
-    <div class="card step card-stagger">
+    <div class="step">
       <h3>Scaffold</h3>
       <p>Full project generated with all modules</p>
     </div>
-    <div class="card step card-stagger">
+    <div class="step">
       <h3>Deploy</h3>
       <p>Dependencies installed, DB initialized, dashboard built</p>
     </div>
-    <div class="card step card-stagger">
+    <div class="step">
       <h3>Launch</h3>
       <p>Agent goes live with auto-start configured</p>
     </div>
@@ -996,156 +853,116 @@ footer .links a:hover { color: var(--cyan); }
 </section>
 
 <!-- ARCHITECTURE -->
-<section class="section" id="architecture">
+<section class="section" id="architecture" style="padding: 120px 0 100px;">
 <div class="container">
   <div class="reveal">
     <div class="section-label">Architecture</div>
   </div>
-  <div class="reveal">
+  <div class="reveal reveal-d1">
     <h2>CognitionCore v5 &mdash; File-Based Agent Brain.</h2>
     <p class="subtitle">No daemon. No memory server. The agent's brain is just files on disk &mdash; rebuilt fresh every cycle, diffable in git, portable to any machine. Kill the process and nothing is lost.</p>
-    <div style="margin-top:var(--space-md); padding:12px 20px; background:linear-gradient(135deg, rgba(255,215,0,0.08), rgba(0,190,234,0.08)); border:1px solid rgba(255,215,0,0.2); border-radius:8px; display:inline-block;">
-      <span style="color:var(--gold); font-weight:600; font-family:var(--font-display);">v6 Coming Soon</span>
+    <div style="margin-top:16px; padding:12px 20px; background:linear-gradient(135deg, rgba(255,215,0,0.08), rgba(0,190,234,0.08)); border:1px solid rgba(255,215,0,0.2); border-radius:8px; display:inline-block;">
+      <span style="color:var(--gold); font-weight:600;">v6 Coming Soon</span>
       <span style="color:var(--text-muted); font-size:14px;"> &mdash; The brain becomes adaptive. It restructures itself from your agent's own operational history.</span>
     </div>
   </div>
-  <div class="arch-visual reveal">
-    <svg viewBox="0 0 700 540" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="CognitionCore v5 Architecture Diagram">
-      <defs>
-        <filter id="boxGlow">
-          <feGaussianBlur stdDeviation="3" result="blur"/>
-          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-        </filter>
-      </defs>
-
-      <!-- Connecting Lines (dashed, animated) -->
-      <line x1="350" y1="62" x2="350" y2="100" stroke="#64748b" stroke-width="1.5" stroke-dasharray="4 4">
-        <animate attributeName="stroke-dashoffset" from="0" to="-12" dur="2s" repeatCount="indefinite"/>
-      </line>
-      <line x1="350" y1="162" x2="350" y2="200" stroke="#64748b" stroke-width="1.5" stroke-dasharray="4 4">
-        <animate attributeName="stroke-dashoffset" from="0" to="-12" dur="2s" repeatCount="indefinite"/>
-      </line>
-      <!-- Fan out to three -->
-      <line x1="350" y1="200" x2="160" y2="230" stroke="#64748b" stroke-width="1" stroke-dasharray="4 4" opacity="0.6"/>
-      <line x1="350" y1="200" x2="350" y2="230" stroke="#64748b" stroke-width="1" stroke-dasharray="4 4" opacity="0.6"/>
-      <line x1="350" y1="200" x2="540" y2="230" stroke="#64748b" stroke-width="1" stroke-dasharray="4 4" opacity="0.6"/>
-      <!-- Down to agent.ts -->
-      <line x1="160" y1="290" x2="350" y2="330" stroke="#64748b" stroke-width="1" stroke-dasharray="4 4" opacity="0.6"/>
-      <line x1="350" y1="290" x2="350" y2="330" stroke="#64748b" stroke-width="1" stroke-dasharray="4 4" opacity="0.6"/>
-      <line x1="540" y1="290" x2="350" y2="330" stroke="#64748b" stroke-width="1" stroke-dasharray="4 4" opacity="0.6"/>
-      <!-- Down to dashboard -->
-      <line x1="350" y1="460" x2="350" y2="480" stroke="#64748b" stroke-width="1.5" stroke-dasharray="4 4">
-        <animate attributeName="stroke-dashoffset" from="0" to="-12" dur="2s" repeatCount="indefinite"/>
-      </line>
-
-      <!-- CLAUDE.md Box -->
-      <rect x="200" y="16" width="300" height="46" rx="8" fill="rgba(0,190,234,0.06)" stroke="#00BEEA" stroke-width="1.5"/>
-      <text x="350" y="36" text-anchor="middle" fill="#00BEEA" font-family="Inter, system-ui" font-size="13" font-weight="700">CLAUDE.md</text>
-      <text x="350" y="52" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui" font-size="10">Agent Identity + Rules + Context</text>
-
-      <!-- "reads on every cycle" label -->
-      <text x="390" y="88" fill="#FFD700" font-family="Inter, system-ui" font-size="9" opacity="0.7">reads on every cycle</text>
-
-      <!-- SOUL.md Box -->
-      <rect x="200" y="100" width="300" height="46" rx="8" fill="rgba(255,215,0,0.04)" stroke="#FFD700" stroke-width="1.5"/>
-      <text x="350" y="120" text-anchor="middle" fill="#FFD700" font-family="Inter, system-ui" font-size="13" font-weight="700">SOUL.md</text>
-      <text x="350" y="136" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui" font-size="10">Constitutional Principles</text>
-
-      <!-- Three leaf nodes -->
-      <!-- state.json -->
-      <rect x="70" y="230" width="180" height="60" rx="8" fill="rgba(0,190,234,0.04)" stroke="rgba(0,190,234,0.3)" stroke-width="1"/>
-      <text x="160" y="256" text-anchor="middle" fill="#00BEEA" font-family="Inter, system-ui" font-size="12" font-weight="600">state.json</text>
-      <text x="160" y="274" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui" font-size="10">Agent State</text>
-
-      <!-- tasks.json -->
-      <rect x="264" y="230" width="172" height="60" rx="8" fill="rgba(0,190,234,0.04)" stroke="rgba(0,190,234,0.3)" stroke-width="1"/>
-      <text x="350" y="256" text-anchor="middle" fill="#00BEEA" font-family="Inter, system-ui" font-size="12" font-weight="600">tasks.json</text>
-      <text x="350" y="274" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui" font-size="10">Human + AI Tasks</text>
-
-      <!-- memory/ -->
-      <rect x="450" y="230" width="180" height="60" rx="8" fill="rgba(0,190,234,0.04)" stroke="rgba(0,190,234,0.3)" stroke-width="1"/>
-      <text x="540" y="256" text-anchor="middle" fill="#00BEEA" font-family="Inter, system-ui" font-size="12" font-weight="600">memory/</text>
-      <text x="540" y="274" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui" font-size="10">Knowledge Files</text>
-
-      <!-- agent.ts — Main Box -->
-      <rect x="150" y="330" width="400" height="130" rx="10" fill="rgba(16,185,129,0.04)" stroke="#10B981" stroke-width="1.5"/>
-      <text x="350" y="356" text-anchor="middle" fill="#10B981" font-family="Inter, system-ui" font-size="14" font-weight="700">agent.ts</text>
-      <text x="350" y="374" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui" font-size="10">13-Step Autonomous Main Loop</text>
-
-      <!-- Sub-items inside agent.ts -->
-      <text x="210" y="403" fill="#FFD700" font-family="Inconsolata, monospace" font-size="11">health-check.ts</text>
-      <text x="210" y="421" fill="#FFD700" font-family="Inconsolata, monospace" font-size="11">safety.ts</text>
-      <text x="400" y="403" fill="#FFD700" font-family="Inconsolata, monospace" font-size="11">self-improve.ts</text>
-      <text x="400" y="421" fill="#FFD700" font-family="Inconsolata, monospace" font-size="11">db.ts</text>
-      <text x="290" y="443" fill="#FFD700" font-family="Inconsolata, monospace" font-size="11">cron-manager.ts</text>
-
-      <!-- dashboard.html -->
-      <rect x="200" y="480" width="300" height="46" rx="8" fill="rgba(16,185,129,0.04)" stroke="#10B981" stroke-width="1.5"/>
-      <text x="350" y="500" text-anchor="middle" fill="#10B981" font-family="Inter, system-ui" font-size="13" font-weight="700">dashboard.html</text>
-      <text x="350" y="516" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui" font-size="10">Real-time Command Center</text>
-    </svg>
+  <div class="arch-visual reveal reveal-d2">
+<pre>
+                         ┌──────────────────────────────────┐
+                         │  <span class="hl">CLAUDE.md</span>                       │
+                         │  Agent Identity + Rules + Context │
+                         └───────────────┬──────────────────┘
+                                         │ <span class="gl">reads on every cycle</span>
+                         ┌───────────────▼──────────────────┐
+                         │  <span class="hl">SOUL.md</span>                        │
+                         │  Constitutional Principles        │
+                         └───────────────┬──────────────────┘
+                                         │
+              ┌──────────────────────────┼──────────────────────────┐
+              │                          │                          │
+     ┌────────▼────────┐     ┌───────────▼──────────┐    ┌─────────▼────────┐
+     │  <span class="hl">state.json</span>     │     │  <span class="hl">tasks.json</span>         │    │  <span class="hl">memory/</span>          │
+     │  Agent State     │     │  Human + AI Tasks    │    │  Knowledge Files  │
+     └────────┬────────┘     └───────────┬──────────┘    └─────────┬────────┘
+              │                          │                          │
+              └──────────────────────────┼──────────────────────────┘
+                                         │
+                         ┌───────────────▼──────────────────┐
+                         │  <span class="hl">agent.ts</span>                       │
+                         │  <span class="gr">13-Step Autonomous Main Loop</span>    │
+                         │                                   │
+                         │   ├─ <span class="gl">health-check.ts</span>             │
+                         │   ├─ <span class="gl">safety.ts</span>   (circuit break) │
+                         │   ├─ <span class="gl">self-improve.ts</span> (evolution) │
+                         │   ├─ <span class="gl">db.ts</span>       (SQLite + WAL)  │
+                         │   └─ <span class="gl">cron-manager.ts</span>             │
+                         └───────────────┬──────────────────┘
+                                         │
+                         ┌───────────────▼──────────────────┐
+                         │  <span class="hl">dashboard.html</span>                 │
+                         │  <span class="gr">Real-time Command Center</span>        │
+                         └──────────────────────────────────┘
+</pre>
   </div>
 </div>
 </section>
 
 <!-- QIS -->
-<section class="section qis-section" id="qis">
+<section class="section qis-section" id="qis" style="padding: 100px 0 120px;">
 <div class="container">
   <div class="reveal">
     <div class="section-label" style="color:var(--violet); background:rgba(139, 92, 246, 0.06); border-color:rgba(139, 92, 246, 0.12);">Optional</div>
   </div>
-  <div class="reveal">
+  <div class="reveal reveal-d1">
     <h2>QIS Intelligence Network</h2>
     <p class="subtitle">Agents deposit what they learn into shared buckets. Other agents pull from those buckets. No PII leaves your machine &mdash; just operational patterns that make the whole network sharper.</p>
   </div>
-  <div class="qis-grid reveal">
+  <div class="qis-grid reveal reveal-d2">
     <div class="qis-visual">
       <img src="assets/qis-logo.png" alt="QIS Protocol" class="qis-logo-img"/>
-      <div class="qis-svg-wrap">
-        <svg viewBox="0 0 400 250" xmlns="http://www.w3.org/2000/svg">
-          <!-- Connections -->
-          <line x1="80" y1="60" x2="200" y2="125" stroke="#8B5CF6" stroke-width="2" opacity="0.4"/>
-          <line x1="80" y1="190" x2="200" y2="125" stroke="#8B5CF6" stroke-width="2" opacity="0.4"/>
-          <line x1="320" y1="60" x2="200" y2="125" stroke="#8B5CF6" stroke-width="2" opacity="0.4"/>
-          <line x1="320" y1="190" x2="200" y2="125" stroke="#8B5CF6" stroke-width="2" opacity="0.4"/>
-          <!-- Packets -->
-          <circle r="4" fill="#FFD700" opacity="0.8">
-            <animateMotion dur="3s" repeatCount="indefinite" path="M80,60 L200,125"/>
-          </circle>
-          <circle r="4" fill="#00D9FF" opacity="0.8">
-            <animateMotion dur="2.5s" repeatCount="indefinite" path="M200,125 L320,60"/>
-          </circle>
-          <circle r="4" fill="#FFD700" opacity="0.8">
-            <animateMotion dur="3.5s" repeatCount="indefinite" path="M80,190 L200,125"/>
-          </circle>
-          <circle r="4" fill="#00D9FF" opacity="0.8">
-            <animateMotion dur="2.8s" repeatCount="indefinite" path="M200,125 L320,190"/>
-          </circle>
-          <!-- Relay Hub -->
-          <circle cx="200" cy="125" r="42" fill="rgba(139,92,246,0.08)" stroke="#8B5CF6" stroke-width="2"/>
-          <text x="200" y="121" text-anchor="middle" fill="#8B5CF6" font-family="Inter, system-ui" font-size="12" font-weight="600">QIS</text>
-          <text x="200" y="136" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui" font-size="10">Relay</text>
-          <!-- Agents -->
-          <circle cx="80" cy="60" r="28" fill="rgba(0,190,234,0.06)" stroke="rgba(0,190,234,0.3)" stroke-width="1.5"/>
-          <text x="80" y="56" text-anchor="middle" fill="#e2e8f0" font-family="Inter, system-ui" font-size="11" font-weight="600">Agent</text>
-          <text x="80" y="70" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui" font-size="10">A</text>
+      <svg viewBox="0 0 400 250" xmlns="http://www.w3.org/2000/svg">
+        <!-- Connections -->
+        <line x1="80" y1="60" x2="200" y2="125" stroke="#8B5CF6" stroke-width="2" opacity="0.4"/>
+        <line x1="80" y1="190" x2="200" y2="125" stroke="#8B5CF6" stroke-width="2" opacity="0.4"/>
+        <line x1="320" y1="60" x2="200" y2="125" stroke="#8B5CF6" stroke-width="2" opacity="0.4"/>
+        <line x1="320" y1="190" x2="200" y2="125" stroke="#8B5CF6" stroke-width="2" opacity="0.4"/>
+        <!-- Packets -->
+        <circle r="4" fill="#FFD700" opacity="0.8">
+          <animateMotion dur="3s" repeatCount="indefinite" path="M80,60 L200,125"/>
+        </circle>
+        <circle r="4" fill="#00D9FF" opacity="0.8">
+          <animateMotion dur="2.5s" repeatCount="indefinite" path="M200,125 L320,60"/>
+        </circle>
+        <circle r="4" fill="#FFD700" opacity="0.8">
+          <animateMotion dur="3.5s" repeatCount="indefinite" path="M80,190 L200,125"/>
+        </circle>
+        <circle r="4" fill="#00D9FF" opacity="0.8">
+          <animateMotion dur="2.8s" repeatCount="indefinite" path="M200,125 L320,190"/>
+        </circle>
+        <!-- Relay Hub -->
+        <circle cx="200" cy="125" r="42" fill="rgba(139,92,246,0.08)" stroke="#8B5CF6" stroke-width="2"/>
+        <text x="200" y="121" text-anchor="middle" fill="#8B5CF6" font-family="Inter, system-ui" font-size="12" font-weight="600">QIS</text>
+        <text x="200" y="136" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui" font-size="10">Relay</text>
+        <!-- Agents -->
+        <circle cx="80" cy="60" r="28" fill="rgba(0,190,234,0.06)" stroke="rgba(0,190,234,0.3)" stroke-width="1.5"/>
+        <text x="80" y="56" text-anchor="middle" fill="#e2e8f0" font-family="Inter, system-ui" font-size="11" font-weight="600">Agent</text>
+        <text x="80" y="70" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui" font-size="10">A</text>
 
-          <circle cx="80" cy="190" r="28" fill="rgba(0,190,234,0.06)" stroke="rgba(0,190,234,0.3)" stroke-width="1.5"/>
-          <text x="80" y="186" text-anchor="middle" fill="#e2e8f0" font-family="Inter, system-ui" font-size="11" font-weight="600">Agent</text>
-          <text x="80" y="200" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui" font-size="10">B</text>
+        <circle cx="80" cy="190" r="28" fill="rgba(0,190,234,0.06)" stroke="rgba(0,190,234,0.3)" stroke-width="1.5"/>
+        <text x="80" y="186" text-anchor="middle" fill="#e2e8f0" font-family="Inter, system-ui" font-size="11" font-weight="600">Agent</text>
+        <text x="80" y="200" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui" font-size="10">B</text>
 
-          <circle cx="320" cy="60" r="28" fill="rgba(0,190,234,0.06)" stroke="rgba(0,190,234,0.3)" stroke-width="1.5"/>
-          <text x="320" y="56" text-anchor="middle" fill="#e2e8f0" font-family="Inter, system-ui" font-size="11" font-weight="600">Agent</text>
-          <text x="320" y="70" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui" font-size="10">C</text>
+        <circle cx="320" cy="60" r="28" fill="rgba(0,190,234,0.06)" stroke="rgba(0,190,234,0.3)" stroke-width="1.5"/>
+        <text x="320" y="56" text-anchor="middle" fill="#e2e8f0" font-family="Inter, system-ui" font-size="11" font-weight="600">Agent</text>
+        <text x="320" y="70" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui" font-size="10">C</text>
 
-          <circle cx="320" cy="190" r="28" fill="rgba(0,190,234,0.06)" stroke="rgba(0,190,234,0.3)" stroke-width="1.5"/>
-          <text x="320" y="186" text-anchor="middle" fill="#e2e8f0" font-family="Inter, system-ui" font-size="11" font-weight="600">Agent</text>
-          <text x="320" y="200" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui" font-size="10">D</text>
-          <!-- Labels -->
-          <text x="130" y="48" fill="#FFD700" font-family="Inter, system-ui" font-size="10" opacity="0.6">deposit</text>
-          <text x="250" y="48" fill="#00D9FF" font-family="Inter, system-ui" font-size="10" opacity="0.6">query</text>
-        </svg>
-      </div>
+        <circle cx="320" cy="190" r="28" fill="rgba(0,190,234,0.06)" stroke="rgba(0,190,234,0.3)" stroke-width="1.5"/>
+        <text x="320" y="186" text-anchor="middle" fill="#e2e8f0" font-family="Inter, system-ui" font-size="11" font-weight="600">Agent</text>
+        <text x="320" y="200" text-anchor="middle" fill="#64748b" font-family="Inter, system-ui" font-size="10">D</text>
+        <!-- Labels -->
+        <text x="130" y="48" fill="#FFD700" font-family="Inter, system-ui" font-size="10" opacity="0.6">deposit</text>
+        <text x="250" y="48" fill="#00D9FF" font-family="Inter, system-ui" font-size="10" opacity="0.6">query</text>
+      </svg>
     </div>
     <div>
       <ul class="qis-features">
@@ -1166,7 +983,7 @@ footer .links a:hover { color: var(--cyan); }
           <div><strong>Patent Protected</strong> &mdash; The QIS Protocol is backed by pending US patent applications. Free for research and humanitarian use.</div>
         </li>
       </ul>
-      <a href="https://yonderzenith.github.io/QIS-Protocol-Website/licensing.html" class="btn btn-secondary" style="margin-top:var(--space-lg); display:inline-flex;">
+      <a href="https://yonderzenith.github.io/QIS-Protocol-Website/licensing.html" class="btn btn-secondary" style="margin-top:24px; display:inline-flex;">
         QIS License Details &rarr;
       </a>
     </div>
@@ -1175,28 +992,28 @@ footer .links a:hover { color: var(--cyan); }
 </section>
 
 <!-- ROADMAP -->
-<section class="section" id="roadmap">
+<section class="section" id="roadmap" style="padding: 140px 0 120px;">
 <div class="container">
   <div class="reveal">
     <div class="section-label" style="color:var(--gold); background:rgba(255, 215, 0, 0.06); border-color:rgba(255, 215, 0, 0.12);">Coming Soon</div>
   </div>
-  <div class="reveal">
+  <div class="reveal reveal-d1">
     <h2>What's Next.</h2>
     <p class="subtitle">YonderClaw is just getting started. Here's what's shipping next.</p>
   </div>
 
-  <div class="roadmap-grid reveal" id="roadmapGrid">
+  <div class="roadmap-grid reveal reveal-d2">
 
     <!-- CognitionCore v6 — full-width hero card -->
-    <div class="card roadmap-card roadmap-hot roadmap-hero card-stagger" style="background: linear-gradient(135deg, rgba(255,215,0,0.04), rgba(0,190,234,0.03), var(--bg-card)); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);">
+    <div class="roadmap-card roadmap-hot roadmap-hero">
       <div>
-        <div class="roadmap-tag" style="position:static; display:inline-block; margin-bottom:var(--space-md); background:linear-gradient(135deg, #FFD700, #00BEEA); color:#0a0f1a;">v6</div>
+        <div class="roadmap-tag" style="position:static; display:inline-block; margin-bottom:16px; background:linear-gradient(135deg, #FFD700, #00BEEA); color:#0a0f1a;">v6</div>
         <div class="roadmap-icon">&#129504;</div>
         <h3 style="font-size:22px;">CognitionCore v6</h3>
         <p>Five generations of file-based cognition. v6 makes the brain adaptive &mdash; it restructures itself based on what your agent actually does. Memory evolves. Cycle timing self-tunes. State gets smarter. Not because we told it to. Because its own <strong>operational history</strong> becomes the architecture.</p>
       </div>
       <div>
-        <div style="padding:var(--space-md) 20px; background:rgba(0,190,234,0.06); border:1px solid rgba(0,190,234,0.15); border-radius:8px; font-size:13px; color:var(--text-muted); margin-bottom:var(--space-md);">
+        <div style="padding:16px 20px; background:rgba(0,190,234,0.06); border:1px solid rgba(0,190,234,0.15); border-radius:8px; font-size:13px; color:var(--text-muted); margin-bottom:16px;">
           <strong style="color:var(--cyan);">Smooth upgrade path</strong> &mdash; existing agents transition seamlessly. Zero memory loss, zero downtime.
         </div>
         <div class="roadmap-body-specs">
@@ -1212,7 +1029,7 @@ footer .links a:hover { color: var(--cyan); }
       </div>
     </div>
 
-    <div class="card roadmap-card roadmap-hot card-stagger">
+    <div class="roadmap-card roadmap-hot">
       <div class="roadmap-tag" style="background:linear-gradient(135deg, #00BEEA, #7B61FF); color:#0a0f1a;">v4.0</div>
       <div class="roadmap-icon">&#128225;</div>
       <h3>Agent Backup &amp; Recovery</h3>
@@ -1229,7 +1046,7 @@ footer .links a:hover { color: var(--cyan); }
       </div>
     </div>
 
-    <div class="card roadmap-card roadmap-hot card-stagger">
+    <div class="roadmap-card roadmap-hot">
       <div class="roadmap-tag">Live Now</div>
       <div class="roadmap-icon">&#129302;</div>
       <h3>AXIOM Body</h3>
@@ -1246,7 +1063,7 @@ footer .links a:hover { color: var(--cyan); }
       </div>
     </div>
 
-    <div class="card roadmap-card roadmap-hot card-stagger">
+    <div class="roadmap-card roadmap-hot">
       <div class="roadmap-tag">v4.0</div>
       <div class="roadmap-icon">&#9889;</div>
       <h3>React Command Center</h3>
@@ -1257,7 +1074,7 @@ footer .links a:hover { color: var(--cyan); }
       </div>
     </div>
 
-    <div class="card roadmap-card card-stagger">
+    <div class="roadmap-card">
       <div class="roadmap-tag">v3.4</div>
       <div class="roadmap-icon">&#127979;</div>
       <h3>Agent Boardroom</h3>
@@ -1268,7 +1085,7 @@ footer .links a:hover { color: var(--cyan); }
       </div>
     </div>
 
-    <div class="card roadmap-card card-stagger">
+    <div class="roadmap-card">
       <div class="roadmap-tag">v4.0+</div>
       <div class="roadmap-icon">&#128301;</div>
       <h3>QIS Live Demo</h3>
@@ -1279,7 +1096,7 @@ footer .links a:hover { color: var(--cyan); }
       </div>
     </div>
 
-    <div class="card roadmap-card card-stagger">
+    <div class="roadmap-card">
       <div class="roadmap-tag">v4.0</div>
       <div class="roadmap-icon">&#127758;</div>
       <h3>Cross-Platform</h3>
@@ -1290,7 +1107,7 @@ footer .links a:hover { color: var(--cyan); }
       </div>
     </div>
 
-    <div class="card roadmap-card roadmap-hot card-stagger">
+    <div class="roadmap-card roadmap-hot">
       <div class="roadmap-tag">v4.0</div>
       <div class="roadmap-icon">&#128722;</div>
       <h3>Claw Module Exchange</h3>
@@ -1313,10 +1130,10 @@ footer .links a:hover { color: var(--cyan); }
 <!-- FOOTER -->
 <footer>
 <div class="container">
-  <img src="assets/yz-favicon.png" alt="Yonder Zenith" style="height:40px; margin-bottom:var(--space-md); filter: drop-shadow(0 0 12px rgba(0,190,234,0.3));"/>
+  <img src="assets/yz-favicon.png" alt="Yonder Zenith" style="height:40px; margin-bottom:16px; filter: drop-shadow(0 0 12px rgba(0,190,234,0.3));"/>
   <div class="brand">YonderClaw</div>
   <p>Autonomous AI Agents &mdash; Plug &amp; Play</p>
-  <p style="margin-top:var(--space-xs); color: var(--text-muted); font-size:13px;">by Yonder Zenith LLC &middot; Redefining the Horizon</p>
+  <p style="margin-top:4px; color: var(--text-muted); font-size:13px;">by Yonder Zenith LLC &middot; Redefining the Horizon</p>
   <div class="links">
     <a href="https://github.com/YonderZenith/YonderClaw">GitHub</a>
     <a href="https://yonderzenith.github.io/QIS-Protocol-Website/">Yonder Zenith</a>
@@ -1324,7 +1141,7 @@ footer .links a:hover { color: var(--cyan); }
     <a href="mailto:contactyz@pm.me">Contact</a>
   </div>
   <div class="mit-badge">MIT License &middot; Free &amp; Open Source</div>
-  <p style="margin-top:var(--space-lg); font-size:12px; opacity:0.4;">&copy; 2025&ndash;2026 Yonder Zenith LLC</p>
+  <p style="margin-top:24px; font-size:12px; opacity:0.4;">&copy; 2025&ndash;2026 Yonder Zenith LLC</p>
 </div>
 </footer>
 
@@ -1393,72 +1210,12 @@ footer .links a:hover { color: var(--cyan); }
   draw();
 })();
 
-// ── Counter Animation for Stats ──
-(function() {
-  let statsFired = false;
-  const statsBar = document.getElementById('statsBar');
-
-  function animateCounter(el, target) {
-    const isPrefix = el.dataset.prefix || '';
-    const numTarget = parseFloat(target.replace(/[^0-9.]/g, ''));
-    if (isNaN(numTarget) || numTarget === 0) return;
-
-    const duration = 1500;
-    const start = performance.now();
-
-    function tick(now) {
-      const progress = Math.min((now - start) / duration, 1);
-      const eased = 1 - Math.pow(1 - progress, 3); // ease-out cubic
-      const current = Math.round(numTarget * eased);
-      el.textContent = isPrefix + current;
-      if (progress < 1) requestAnimationFrame(tick);
-      else el.textContent = isPrefix + numTarget;
-    }
-    requestAnimationFrame(tick);
-  }
-
-  const statsObserver = new IntersectionObserver((entries) => {
-    entries.forEach(e => {
-      if (e.isIntersecting && !statsFired) {
-        statsFired = true;
-        document.querySelectorAll('.stat-value').forEach(el => {
-          if (el.dataset.static) return; // skip "MIT"
-          animateCounter(el, el.dataset.target);
-        });
-      }
-    });
-  }, { threshold: 0.3 });
-  statsObserver.observe(statsBar);
-})();
-
-// ── Scroll Reveal with Staggered Card Animation ──
-(function() {
-  // Basic section reveals
-  const reveals = document.querySelectorAll('.reveal');
-  const revealObserver = new IntersectionObserver((entries) => {
-    entries.forEach(e => {
-      if (e.isIntersecting) e.target.classList.add('visible');
-    });
-  }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
-  reveals.forEach(el => revealObserver.observe(el));
-
-  // Staggered card reveals within grids
-  const grids = document.querySelectorAll('#whyGrid, #agentGrid, #featureGrid, #stepsGrid, #roadmapGrid');
-  const gridObserver = new IntersectionObserver((entries) => {
-    entries.forEach(e => {
-      if (e.isIntersecting) {
-        const cards = e.target.querySelectorAll('.card-stagger');
-        cards.forEach((card, i) => {
-          setTimeout(() => {
-            card.classList.add('visible');
-          }, i * 80);
-        });
-        gridObserver.unobserve(e.target);
-      }
-    });
-  }, { threshold: 0.15 });
-  grids.forEach(el => gridObserver.observe(el));
-})();
+// ── Scroll reveal with stagger ──
+const reveals = document.querySelectorAll('.reveal');
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+}, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+reveals.forEach(el => observer.observe(el));
 
 // ── Nav scroll effect ──
 window.addEventListener('scroll', () => {
