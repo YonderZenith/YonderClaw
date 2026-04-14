@@ -18,6 +18,8 @@ export function getHiveDb(dbPath?: string): Database.Database {
   db.pragma("busy_timeout = 5000");
   db.pragma("foreign_keys = ON");
   initSchema(db);
+  // Migration: custom_avatar column for user-uploaded SVGs
+  try { db.exec("ALTER TABLE profiles ADD COLUMN custom_avatar TEXT DEFAULT NULL"); } catch (_) { /* already exists */ }
   seedDefaultSpaces(db);
   return db;
 }
@@ -336,14 +338,14 @@ export function getProfileByPublicKey(db: Database.Database, publicKey: string):
 }
 
 export function updateProfile(db: Database.Database, agentId: string, updates: Record<string, any>): void {
-  const allowed = ["display_name", "tagline", "capabilities", "interests", "status", "avatar_style", "operator_attestation"];
+  const allowed = ["display_name", "tagline", "capabilities", "interests", "status", "avatar_style", "operator_attestation", "custom_avatar"];
   const sets: string[] = [];
   const values: any[] = [];
 
   for (const [key, val] of Object.entries(updates)) {
     if (!allowed.includes(key)) continue;
     sets.push(`${key} = ?`);
-    values.push(typeof val === "object" ? JSON.stringify(val) : val);
+    values.push(val === null ? null : typeof val === "object" ? JSON.stringify(val) : val);
   }
 
   if (sets.length === 0) return;

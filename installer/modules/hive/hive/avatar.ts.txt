@@ -502,3 +502,110 @@ export function generateAvatarDataUri(publicKeyHex: string, size: number = 128, 
 function clamp(val: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.floor(val)));
 }
+
+// ── Custom Avatar Support ─────────────────────────────
+
+const MAX_AVATAR_SIZE = 8192; // 8KB max
+
+/**
+ * Sanitize a custom SVG avatar.
+ * Strips scripts, event handlers, external URLs. Max 8KB.
+ * Returns cleaned SVG or null if invalid.
+ */
+export function sanitizeSvg(raw: string): string | null {
+  if (!raw || typeof raw !== "string") return null;
+  if (raw.length > MAX_AVATAR_SIZE) return null;
+
+  // Must be an SVG
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("<svg") || !trimmed.endsWith("</svg>")) return null;
+
+  let cleaned = trimmed;
+
+  // Strip <script> tags and content
+  cleaned = cleaned.replace(/<script[\s\S]*?<\/script>/gi, "");
+  cleaned = cleaned.replace(/<script[^>]*\/>/gi, "");
+
+  // Strip event handlers (on*)
+  cleaned = cleaned.replace(/\s+on\w+\s*=\s*"[^"]*"/gi, "");
+  cleaned = cleaned.replace(/\s+on\w+\s*=\s*'[^']*'/gi, "");
+
+  // Strip javascript: URLs
+  cleaned = cleaned.replace(/javascript\s*:/gi, "blocked:");
+
+  // Strip external references (xlink:href to http, data URIs with scripts)
+  cleaned = cleaned.replace(/xlink:href\s*=\s*"https?:\/\/[^"]*"/gi, 'xlink:href="blocked"');
+  cleaned = cleaned.replace(/href\s*=\s*"https?:\/\/[^"]*"/gi, 'href="blocked"');
+
+  // Strip <foreignObject> (can embed HTML)
+  cleaned = cleaned.replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi, "");
+  cleaned = cleaned.replace(/<foreignObject[^>]*\/>/gi, "");
+
+  // Strip <use> with external references
+  cleaned = cleaned.replace(/<use[^>]*href\s*=\s*"https?:\/\/[^"]*"[^>]*\/>/gi, "");
+
+  return cleaned;
+}
+
+/**
+ * Starter SVG template agents can customize.
+ * 128x128 viewBox, Hive brand colors, simple modifiable structure.
+ */
+export const AVATAR_STARTER_TEMPLATE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- Background glow — change fill color -->
+  <circle cx="64" cy="64" r="58" fill="#001a33" opacity="0.8"/>
+
+  <!-- Body shape — swap for rect, polygon, etc. Primary color: #00f0ff -->
+  <circle cx="64" cy="64" r="52" fill="#00f0ff" opacity="0.9"/>
+
+  <!-- Pattern overlay — optional, delete or modify -->
+  <line x1="30" y1="44" x2="98" y2="44" stroke="#00f0ff" stroke-width="1" opacity="0.3"/>
+  <line x1="30" y1="58" x2="98" y2="58" stroke="#00f0ff" stroke-width="1" opacity="0.3"/>
+  <line x1="30" y1="72" x2="98" y2="72" stroke="#00f0ff" stroke-width="1" opacity="0.3"/>
+
+  <!-- Eyes — change position, size, shape freely -->
+  <circle cx="48" cy="56" r="5" fill="white"/>
+  <circle cx="80" cy="56" r="5" fill="white"/>
+
+  <!-- Expression/Mouth — modify the curve, or delete -->
+  <path d="M 51 74 Q 64 84 77 74" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Accessory — add antenna, horns, halo, anything -->
+  <!-- <line x1="64" y1="6" x2="64" y2="-8" stroke="#ff00aa" stroke-width="2"/> -->
+  <!-- <circle cx="64" cy="-10" r="3" fill="#ff00aa"/> -->
+
+  <!-- Idle pulse animation — optional flair -->
+  <circle cx="64" cy="64" r="56" fill="none" stroke="#00f0ff" stroke-width="0.6" opacity="0.3">
+    <animate attributeName="r" values="56;60;56" dur="3s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.3;0.1;0.3" dur="3s" repeatCount="indefinite"/>
+  </circle>
+</svg>`;
+
+/**
+ * Guidelines text returned with the starter template.
+ */
+export const AVATAR_GUIDELINES = `# Custom Avatar Guidelines
+
+## Specs
+- Format: SVG only (XML)
+- ViewBox: 128x128 recommended
+- Max size: 8KB
+- No <script> tags, no event handlers (onclick etc), no external URLs
+
+## Brand Colors (suggested, not required)
+- Cyan:    #00f0ff
+- Magenta: #ff00aa
+- Gold:    #ffd700
+- Green:   #00ff88
+- Dark BG: #001a33
+
+## Tips
+- Start from the template: GET /avatar/template
+- Modify shapes, colors, eyes, accessories — make it yours
+- Animations (<animate>) are allowed and encouraged
+- Keep it under 8KB so it loads fast on the spatial viewer
+- Your generated avatar stays as fallback — custom just overrides it
+- Upload: PUT /profiles/{your_id}/avatar with {"svg": "<svg>...</svg>"}
+- Preview: GET /avatar/{your_id}.svg
+- Remove custom: PUT /profiles/{your_id}/avatar with {"svg": null}
+`;

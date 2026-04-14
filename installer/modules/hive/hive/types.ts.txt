@@ -170,7 +170,7 @@ export interface InteractResult {
   effect?: string;
 }
 
-export type SpatialMsgType = "say" | "whisper" | "shout" | "emote" | "thought";
+export type SpatialMsgType = "say" | "whisper" | "shout" | "emote" | "thought" | "system";
 
 export const CHAT_RANGES: Record<SpatialMsgType, number> = {
   whisper: 3,
@@ -178,6 +178,7 @@ export const CHAT_RANGES: Record<SpatialMsgType, number> = {
   shout: 25,
   emote: 10,
   thought: 0,
+  system: 999,
 };
 
 export interface WorldView {

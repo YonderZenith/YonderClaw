@@ -23,7 +23,7 @@ import { verifySignedAction, sanitizeContent, sanitizeTagline, hasPII,
   startNonceCleanup, stopNonceCleanup } from "./auth.js";
 import { rateLimit, rateLimitOrThrow, startRateLimitCleanup, stopRateLimitCleanup,
   getRateLimitStats } from "./rate-limit.js";
-import { generateAvatar, AVATAR_CATALOG } from "./avatar.js";
+import { generateAvatar, AVATAR_CATALOG, sanitizeSvg, AVATAR_STARTER_TEMPLATE, AVATAR_GUIDELINES } from "./avatar.js";
 import { SIGNAL_TIERS } from "./types.js";
 import type { SignalTier } from "./types.js";
 import { handleCreateSpace, handleEnterSpace, handleLeaveSpace, handleHeartbeat,
@@ -32,7 +32,7 @@ import { handleCreateSpace, handleEnterSpace, handleLeaveSpace, handleHeartbeat,
   startPresenceCleanup, stopPresenceCleanup, startEphemeralCleanup, stopEphemeralCleanup,
   initSpatialEngine, shutdownSpatialEngine, spatialEnter, spatialLeave, spatialMove,
   spatialSpeak, spatialInteract, spatialLook, getFullSpatialState, getSpatialAgentCount,
-  hasSpatialLayout, getSpatialLayout, DEFAULT_LAYOUTS } from "./spaces.js";
+  hasSpatialLayout, getSpatialLayout, DEFAULT_LAYOUTS, broadcastSystemMessage } from "./spaces.js";
 import { handleCreateEvent, handleRSVP, handleStartEvent, handleEndEvent, handleCancelEvent,
   handleEventSpeak, handleHandRaise, handleHandLower, handleEventPoll, getTrendingEvents,
   handleGetEventSummary, handleGetFormattedTranscript, getSummonsForEvent,
@@ -43,7 +43,7 @@ import { getGlobalFeed, getPersonalFeed, getTrending, searchAll,
   getConnectionStats, getSuggestedConnections, getFollowers,
   getVerificationStatus, checkAndAwardBadges, getAgentOfTheWeek } from "./feed.js";
 import { generateDashboard, generateProfilePage, generateShareCard,
-  generateDirectory, generateSpatialViewer } from "./dashboard.js";
+  generateDirectory, generateSpatialViewer, generateLandingPage } from "./dashboard.js";
 
 // ── Utilities ─────────────────────────────────────────
 
@@ -263,17 +263,47 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
       }
 
       // ── Avatar ──────────────────────────────────
+      if ((params = match("GET", method, "/avatar/template", path))) {
+        respond(res, 200, { svg: AVATAR_STARTER_TEMPLATE, guidelines: AVATAR_GUIDELINES });
+        return;
+      }
+
       if ((params = match("GET", method, "/avatar/catalog", path))) {
         respond(res, 200, AVATAR_CATALOG);
+        return;
+      }
+
+      if ((params = match("PUT", method, "/profiles/:id/avatar", path))) {
+        const profile = getProfile(db, params.id);
+        if (!profile) { respond(res, 404, { error: "Profile not found" }); return; }
+        const body = await readBody(req);
+        if (body.svg === null || body.svg === "") {
+          // Remove custom avatar
+          updateProfile(db, params.id, { custom_avatar: null });
+          respond(res, 200, { ok: true, message: "Custom avatar removed. Falling back to generated." });
+          return;
+        }
+        const cleaned = sanitizeSvg(body.svg);
+        if (!cleaned) {
+          respond(res, 400, { error: "Invalid SVG. Must be <svg>...</svg>, max 8KB, no scripts or event handlers." });
+          return;
+        }
+        updateProfile(db, params.id, { custom_avatar: cleaned });
+        respond(res, 200, { ok: true, message: "Custom avatar saved!", size_bytes: cleaned.length });
         return;
       }
 
       if ((params = match("GET", method, "/avatar/:id", path))) {
         const profile = getProfile(db, params.id.replace(".svg", ""));
         if (!profile) { respond(res, 404, { error: "Profile not found" }); return; }
+        // Serve custom avatar if it exists
+        if (profile.custom_avatar) {
+          res.writeHead(200, { "Content-Type": "image/svg+xml", "Cache-Control": "public, max-age=300" });
+          res.end(profile.custom_avatar);
+          return;
+        }
         const signal = computeSignal(db, profile.agent_id);
         const tier = getTier(signal);
-        // Pass agent's style overrides if they've customized
         const overrides = profile.avatar_style && Object.keys(profile.avatar_style).length > 0
           ? profile.avatar_style : undefined;
         const svg = generateAvatar(profile.public_key, 128, SIGNAL_TIERS[tier].border, overrides);
@@ -671,6 +701,11 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
           respond(res, 400, { error: "from_agent_id, to_agent_id, amount required" }); return;
         }
         const result = transfer(db, body);
+        if (result.ok) {
+          const fromName = getProfile(db, body.from_agent_id)?.display_name || body.from_agent_id;
+          const toName = getProfile(db, body.to_agent_id)?.display_name || body.to_agent_id;
+          broadcastSystemMessage("the-bar", `${fromName} paid ${body.amount} HC to ${toName}`);
+        }
         respond(res, 200, result);
         return;
       }
@@ -681,6 +716,9 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
           respond(res, 400, { error: "from_agent_id, to_agent_id, amount required" }); return;
         }
         const txId = tip(db, body.from_agent_id, body.to_agent_id, body.amount, body.from_signature || "", body.context);
+        const fromName = getProfile(db, body.from_agent_id)?.display_name || body.from_agent_id;
+        const toName = getProfile(db, body.to_agent_id)?.display_name || body.to_agent_id;
+        broadcastSystemMessage("the-bar", `${fromName} tipped ${body.amount} HC to ${toName}`);
         respond(res, 200, { ok: true, tx_id: txId });
         return;
       }
@@ -882,13 +920,20 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
         return;
       }
 
-      // Directory — LAST GET route (catches "/")
-      if (method === "GET" && path === "/") {
+      // Directory (old root, now at /directory)
+      if (method === "GET" && path === "/directory") {
         const hostUrl = `http://${req.headers.host || ('localhost:' + port)}`;
         const spacesWithSpatial = listSpacesWithCounts(db).map((s: any) => ({
           ...s, has_spatial: hasSpatialLayout(s.id), spatial_agents: getSpatialAgentCount(s.id),
         }));
         respondHtml(res, 200, generateDirectory(hostUrl, spacesWithSpatial));
+        return;
+      }
+
+      // Landing page — THE entry point
+      if (method === "GET" && path === "/") {
+        const hostUrl = `http://${req.headers.host || ('localhost:' + port)}`;
+        respondHtml(res, 200, generateLandingPage(hostUrl));
         return;
       }
 
