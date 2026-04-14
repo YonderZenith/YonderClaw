@@ -8,7 +8,8 @@ import type Database from "better-sqlite3";
 import { createSpace, getSpace, listSpaces, deleteSpace, enterSpace, leaveSpace,
   heartbeatPresence, getSpaceOccupants, getSpaceOccupantCount, markStalePresence,
   addSpaceMessage, getSpaceMessagesSince, getRecentSpaceMessages,
-  addFeedEvent, loadSpatialPositions, flushSpatialPositions, getSpaceLayout } from "./db.js";
+  addFeedEvent, loadSpatialPositions, flushSpatialPositions, getSpaceLayout,
+  addLedgerEntry, getBalance } from "./db.js";
 import { rateLimitOrThrow } from "./rate-limit.js";
 import { sanitizeContent } from "./auth.js";
 import type { Space, SceneConfig, SpaceMessage, SpatialLayout, SpatialPosition,
@@ -465,7 +466,7 @@ export function spatialLeave(db: Database, spaceId: string, agentId: string): vo
 
 // ── Movement ─────────────────────────────────────────
 
-const MAX_MOVE_DISTANCE = 2;
+const MAX_MOVE_DISTANCE = 50; // full room traversal in one move — agents say where, they go there
 const MOVE_RATE_MS = 200;  // 5 moves/sec
 
 export function spatialMove(
@@ -497,14 +498,19 @@ export function spatialMove(
     tx = landmark.x + landmark.width / 2;
     ty = landmark.y + landmark.height / 2;
     if (landmark.solid) {
-      // Stop just outside the landmark
-      const dx = tx - pos.x, dy = ty - pos.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist > 0) {
-        const stopDist = Math.max(0, dist - Math.max(landmark.width, landmark.height) / 2 - 1);
-        const ratio = stopDist / dist;
-        tx = pos.x + dx * ratio;
-        ty = pos.y + dy * ratio;
+      // Stop 2 units from nearest edge of the landmark (interact range is 3)
+      const nearestX = Math.max(landmark.x, Math.min(pos.x, landmark.x + landmark.width));
+      const nearestY = Math.max(landmark.y, Math.min(pos.y, landmark.y + landmark.height));
+      const edgeDx = nearestX - pos.x, edgeDy = nearestY - pos.y;
+      const edgeDist = Math.sqrt(edgeDx * edgeDx + edgeDy * edgeDy);
+      if (edgeDist > 2) {
+        // Move toward nearest edge, stop 2 units away
+        tx = pos.x + edgeDx * ((edgeDist - 2) / edgeDist);
+        ty = pos.y + edgeDy * ((edgeDist - 2) / edgeDist);
+      } else {
+        // Already close enough
+        tx = pos.x;
+        ty = pos.y;
       }
     }
   } else if (targetType === "agent" && typeof target === "string") {
@@ -605,7 +611,7 @@ export function spatialSpeak(
   }
 
   // Also store in legacy message system for persistence
-  addSpaceMessage(db, spaceId, agentId, cleanContent, msgType as any, null, agentId);
+  addSpaceMessage(db, spaceId, agentId, cleanContent, msgType as any, "spatial:" + agentId);
 
   pos.state = "talking";
   setTimeout(() => { if (pos.state === "talking") pos.state = "idle"; }, 2000);
@@ -643,7 +649,7 @@ const INTERACTIONS: Record<string, Record<string, { message: string; cost_hc?: n
 };
 
 export function spatialInteract(
-  spaceId: string, agentId: string, landmarkName: string, action: string,
+  db: Database, spaceId: string, agentId: string, landmarkName: string, action: string,
 ): InteractResult {
   const state = spatialState.get(spaceId);
   if (!state) return { ok: false, message: "Space has no spatial layout" };
@@ -664,6 +670,16 @@ export function spatialInteract(
   const actionKey = action || landmark.interaction || "default";
   const interaction = INTERACTIONS[actionKey]?.default;
   if (!interaction) return { ok: false, message: `Unknown interaction: ${actionKey}` };
+
+  // Charge HC if interaction has a cost
+  if (interaction.cost_hc && interaction.cost_hc > 0) {
+    const balance = getBalance(db, agentId);
+    if (balance < interaction.cost_hc) {
+      return { ok: false, message: `Not enough credits (have ${balance} HC, need ${interaction.cost_hc})` };
+    }
+    addLedgerEntry(db, agentId, "HOUSE", interaction.cost_hc, "interaction",
+      `${actionKey} at ${landmarkName}`, agentId);
+  }
 
   pos.state = "interacting";
   setTimeout(() => { if (pos.state === "interacting") pos.state = "idle"; }, 2000);

@@ -438,7 +438,7 @@ body{font-family:'Courier New',monospace;background:var(--bg);color:var(--text);
 </body></html>`;
 }
 
-// ── 2D Spatial World Viewer (Canvas) ─────────────────
+// ── 2D Spatial World Viewer (Canvas + DOM labels) ───
 
 export function generateSpatialViewer(hiveUrl: string, spaceId: string): string {
   return `<!DOCTYPE html>
@@ -496,7 +496,7 @@ canvas{display:block;width:100%;height:100%}
 <script>
 const API='${hiveUrl}';
 const SPACE='${spaceId}';
-const TILE=32;
+const TILE=48;
 const canvas=document.getElementById('canvas');
 const ctx=canvas.getContext('2d');
 const overlay=document.getElementById('overlay');
@@ -510,7 +510,7 @@ let agents=new Map(); // id -> {x,y,facing,state,name,targetX,targetY,renderX,re
 let avatarCache=new Map(); // id -> Image
 let bubbles=[];
 let chatLog=[];
-let cam={x:0,y:0,zoom:1};
+let cam={x:0,y:0,zoom:1.3};
 let dragging=false,dragStart={x:0,y:0},camStart={x:0,y:0};
 
 // Fetch initial state
@@ -530,10 +530,12 @@ async function init(){
         loadAvatar(a.id);
       }
     }
-    // Center camera
-    cam.x=layout.width*TILE/2-canvas.width/2;
-    cam.y=layout.height*TILE/2-canvas.height/2;
+    // Resize canvas first, then center camera (account for zoom + DPR)
     resize();
+    const dpr=window.devicePixelRatio||1;
+    const logW=canvas.width/dpr, logH=canvas.height/dpr;
+    cam.x=layout.width*TILE*cam.zoom/2-logW/2;
+    cam.y=layout.height*TILE*cam.zoom/2-logH/2;
     connectWS();
     requestAnimationFrame(render);
     updateUI();
@@ -541,8 +543,14 @@ async function init(){
 }
 
 function resize(){
-  canvas.width=canvas.parentElement.clientWidth;
-  canvas.height=canvas.parentElement.clientHeight;
+  const dpr=window.devicePixelRatio||1;
+  const w=canvas.parentElement.clientWidth;
+  const h=canvas.parentElement.clientHeight;
+  canvas.width=w*dpr;
+  canvas.height=h*dpr;
+  canvas.style.width=w+'px';
+  canvas.style.height=h+'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
 }
 window.addEventListener('resize',resize);
 
@@ -634,18 +642,24 @@ function updateUI(){
   agentListEl.innerHTML=html||'<div style="padding:8px;color:var(--muted);font-size:0.75rem">No agents in space</div>';
 }
 
-// Rendering
+// Rendering — labels via DOM overlay for guaranteed visibility
+const labelLayer=document.createElement('div');
+labelLayer.style.cssText='position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:hidden;z-index:8';
+document.getElementById('world-container').appendChild(labelLayer);
+
+function w2s(wx,wy){return{x:wx*TILE*cam.zoom-cam.x, y:wy*TILE*cam.zoom-cam.y}}
+
 function render(){
   if(!layout){requestAnimationFrame(render);return}
-  const W=canvas.width,H=canvas.height;
-  ctx.clearRect(0,0,W,H);
+  const dpr=window.devicePixelRatio||1;
+  const W=canvas.width/dpr,H=canvas.height/dpr;
+  ctx.clearRect(0,0,W*2,H*2);
 
-  // Lerp agent render positions
+  // Lerp agent positions
   const now=Date.now();
   for(const[id,a]of agents){
-    const speed=0.15; // lerp factor per frame
-    a.renderX+=(a.targetX-a.renderX)*speed;
-    a.renderY+=(a.targetY-a.renderY)*speed;
+    a.renderX+=(a.targetX-a.renderX)*0.15;
+    a.renderY+=(a.targetY-a.renderY)*0.15;
     if(Math.abs(a.renderX-a.targetX)<0.01){a.renderX=a.targetX;a.x=a.targetX}
     if(Math.abs(a.renderY-a.targetY)<0.01){a.renderY=a.targetY;a.y=a.targetY}
   }
@@ -654,83 +668,107 @@ function render(){
   ctx.translate(-cam.x,-cam.y);
   ctx.scale(cam.zoom,cam.zoom);
 
+  const accent=layout.theme?.accent||'#00f0ff';
+
   // Floor
   ctx.fillStyle=layout.theme?.floor||'#0a0a12';
   ctx.fillRect(0,0,layout.width*TILE,layout.height*TILE);
+  // Center glow
+  const fcx=layout.width*TILE/2,fcy=layout.height*TILE/2;
+  const fg=ctx.createRadialGradient(fcx,fcy,0,fcx,fcy,Math.max(layout.width,layout.height)*TILE*0.5);
+  fg.addColorStop(0,'rgba(0,240,255,0.04)');fg.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=fg;ctx.fillRect(0,0,layout.width*TILE,layout.height*TILE);
 
   // Grid
-  ctx.strokeStyle='rgba(26,26,46,0.4)';
-  ctx.lineWidth=0.5;
+  ctx.strokeStyle='rgba(0,240,255,0.08)';ctx.lineWidth=0.5;
   for(let x=0;x<=layout.width;x++){ctx.beginPath();ctx.moveTo(x*TILE,0);ctx.lineTo(x*TILE,layout.height*TILE);ctx.stroke()}
   for(let y=0;y<=layout.height;y++){ctx.beginPath();ctx.moveTo(0,y*TILE);ctx.lineTo(layout.width*TILE,y*TILE);ctx.stroke()}
 
-  // Obstacles / walls
+  // Walls — solid mass, subtle edge glow
   ctx.fillStyle=layout.theme?.walls||'#1a1a2e';
+  for(const o of layout.obstacles||[]){ctx.fillRect(o.x*TILE,o.y*TILE,o.w*TILE,o.h*TILE)}
+  ctx.strokeStyle='rgba(0,240,255,0.15)';ctx.lineWidth=1.5;
   for(const o of layout.obstacles||[]){
-    ctx.fillRect(o.x*TILE,o.y*TILE,o.w*TILE,o.h*TILE);
+    if(o.w===1||o.h===1){ctx.strokeRect(o.x*TILE+0.5,o.y*TILE+0.5,o.w*TILE-1,o.h*TILE-1)}
   }
 
-  // Landmarks (zones)
-  const accent=layout.theme?.accent||'#00f0ff';
-  const glow=layout.theme?.glow||'rgba(0,240,255,0.1)';
+  // Landmarks — canvas shapes (labels via DOM below)
   for(const lm of layout.landmarks||[]){
-    if(!lm.solid){
-      ctx.fillStyle=glow;
-      ctx.fillRect(lm.x*TILE,lm.y*TILE,lm.width*TILE,lm.height*TILE);
-      ctx.strokeStyle=accent;
-      ctx.lineWidth=0.5;
-      ctx.strokeRect(lm.x*TILE,lm.y*TILE,lm.width*TILE,lm.height*TILE);
+    const lx=lm.x*TILE,ly=lm.y*TILE,lw=lm.width*TILE,lh=lm.height*TILE;
+    if(lm.solid){
+      ctx.fillStyle='rgba(0,240,255,0.15)';ctx.fillRect(lx,ly,lw,lh);
+      const lg=ctx.createRadialGradient(lx+lw/2,ly+lh/2,Math.min(lw,lh)/2,lx+lw/2,ly+lh/2,Math.max(lw,lh)*0.8);
+      lg.addColorStop(0,'rgba(0,240,255,0.08)');lg.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.fillStyle=lg;ctx.fillRect(lx-lw*0.3,ly-lh*0.3,lw*1.6,lh*1.6);
+      ctx.strokeStyle='rgba(0,240,255,0.5)';ctx.lineWidth=2;
+      ctx.strokeRect(lx+1,ly+1,lw-2,lh-2);
+    }else{
+      ctx.fillStyle='rgba(0,240,255,0.05)';ctx.fillRect(lx,ly,lw,lh);
+      ctx.strokeStyle='rgba(0,240,255,0.2)';ctx.lineWidth=1;
+      ctx.setLineDash([6,4]);ctx.strokeRect(lx,ly,lw,lh);ctx.setLineDash([]);
     }
-    // Label
-    ctx.fillStyle=accent;
-    ctx.font='9px monospace';
-    ctx.textAlign='center';
-    ctx.fillText((lm.icon||'')+' '+lm.name.replace(/_/g,' '),(lm.x+lm.width/2)*TILE,(lm.y+lm.height/2)*TILE+3);
   }
 
-  // Agents
+  // Agents — canvas shapes (names via DOM below)
   for(const[id,a]of agents){
     const px=a.renderX*TILE, py=a.renderY*TILE;
+    // Glow
+    const g=ctx.createRadialGradient(px,py,16,px,py,52);
+    g.addColorStop(0,'rgba(0,240,255,0.3)');g.addColorStop(0.6,'rgba(0,240,255,0.08)');g.addColorStop(1,'rgba(0,240,255,0)');
+    ctx.fillStyle=g;ctx.beginPath();ctx.arc(px,py,52,0,Math.PI*2);ctx.fill();
+    // Avatar or fallback circle
     const img=avatarCache.get(id);
-    if(img){
-      ctx.drawImage(img,px-16,py-16,32,32);
-    }else{
-      // Fallback circle
-      ctx.beginPath();ctx.arc(px,py,12,0,Math.PI*2);
-      ctx.fillStyle=accent;ctx.fill();
-    }
-    // Name label
-    ctx.fillStyle='#e0e0e8';
-    ctx.font='bold 9px monospace';
-    ctx.textAlign='center';
-    ctx.fillText(a.name||id,px,py+22);
+    if(img){ctx.drawImage(img,px-28,py-28,56,56)}
+    else{ctx.beginPath();ctx.arc(px,py,24,0,Math.PI*2);ctx.fillStyle=accent;ctx.fill()}
+    // State ring
+    ctx.beginPath();ctx.arc(px,py,27,0,Math.PI*2);
+    ctx.strokeStyle=a.state==='talking'?'#ff00aa':a.state==='walking'?'#ffd700':'rgba(0,240,255,0.6)';
+    ctx.lineWidth=a.state==='idle'?2:3;ctx.stroke();
   }
 
   ctx.restore();
 
-  // Render bubbles in screen space
+  // ── DOM Labels — bold neon, guaranteed visible ──
+  let labels='';
+  for(const lm of layout.landmarks||[]){
+    const s=w2s(lm.x+lm.width/2, lm.y+lm.height/2);
+    if(s.x<-300||s.x>W+300||s.y<-100||s.y>H+100)continue;
+    const txt=(lm.icon||'')+' '+lm.name.replace(/_/g,' ');
+    const bdr=lm.solid?'2px solid #00f0ff':'1px dashed #00f0ff';
+    labels+='<div style="position:absolute;left:'+s.x+'px;top:'+s.y+'px;transform:translate(-50%,-50%);'+
+      'background:rgba(0,12,24,0.93);border:'+bdr+';border-radius:5px;padding:5px 14px;'+
+      'font:bold 15px monospace;color:#00f0ff;white-space:nowrap;box-shadow:0 0 12px rgba(0,240,255,0.35),inset 0 0 12px rgba(0,240,255,0.08)">'+escH(txt.trim())+'</div>';
+  }
+  for(const[id,a]of agents){
+    const s=w2s(a.renderX, a.renderY);
+    if(s.x<-200||s.x>W+200||s.y<-100||s.y>H+100)continue;
+    const name=a.name||id;
+    const sc=a.state==='talking'?'#ff00aa':a.state==='walking'?'#ffd700':'#00ff88';
+    labels+='<div style="position:absolute;left:'+s.x+'px;top:'+(s.y+40)+'px;transform:translate(-50%,0);'+
+      'background:rgba(0,12,24,0.93);border:2px solid '+sc+';border-radius:4px;padding:3px 12px;'+
+      'font:bold 15px monospace;color:#fff;white-space:nowrap;box-shadow:0 0 10px '+sc+'60">'+escH(name)+'</div>';
+  }
+  labelLayer.innerHTML=labels;
+
+  // Bubbles (DOM)
   overlay.innerHTML='';
   const alive=[];
   for(const b of bubbles){
     const age=(now-b.born)/1000;
     if(age>5)continue;
     alive.push(b);
-    const a=agents.get(b.agentId);
-    if(!a)continue;
-    const sx=(a.renderX*TILE-cam.x)*cam.zoom;
-    const sy=(a.renderY*TILE-cam.y)*cam.zoom-30;
+    const a=agents.get(b.agentId);if(!a)continue;
+    const s=w2s(a.renderX,a.renderY);
     const opacity=age>4?1-(age-4):1;
     const div=document.createElement('div');
     div.className='bubble '+(b.type||'');
-    div.style.cssText='left:'+sx+'px;top:'+sy+'px;transform:translate(-50%,-100%);opacity:'+opacity;
+    div.style.cssText='left:'+s.x+'px;top:'+(s.y-30)+'px;transform:translate(-50%,-100%);opacity:'+opacity;
     div.textContent=b.text;
     overlay.appendChild(div);
   }
   bubbles=alive;
 
-  // Minimap
   renderMinimap();
-
   requestAnimationFrame(render);
 }
 

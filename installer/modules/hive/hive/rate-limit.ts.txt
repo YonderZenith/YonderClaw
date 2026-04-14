@@ -115,6 +115,8 @@ const LIMITS = {
   // Space operations
   space_join:       { max: 5,   windowMs: 1000 },       // 5/sec per agent
   space_create:     { max: 3,   windowMs: 86400000 },   // 3/day per agent
+  // Spatial movement
+  spatial_move:     { max: 300, windowMs: 60000 },      // 5/sec (300/min) per agent
   // Messages
   space_message:    { max: 10,  windowMs: 60000 },      // 10/min per agent in a space
   event_message:    { max: 10,  windowMs: 60000 },      // 10/min per agent in event

@@ -397,7 +397,7 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
       if ((params = match("POST", method, "/world/:id/move", path))) {
         const body = await readBody(req);
         if (!body.agent_id || !body.target) { respond(res, 400, { error: "agent_id and target required" }); return; }
-        rateLimitOrThrow(body.agent_id, "message");  // reuse message rate limit for now
+        rateLimitOrThrow(body.agent_id, "spatial_move");
         const result = spatialMove(db, params.id, body.agent_id, body.target, body.target_type || "landmark");
         if (result.ok) {
           broadcastSpatial(params.id, "spatial_move", body.agent_id, { x: result.x, y: result.y, facing: result.facing });
@@ -410,7 +410,7 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
       if ((params = match("POST", method, "/world/:id/speak", path))) {
         const body = await readBody(req);
         if (!body.agent_id || !body.content) { respond(res, 400, { error: "agent_id and content required" }); return; }
-        rateLimitOrThrow(body.agent_id, "message");
+        rateLimitOrThrow(body.agent_id, "space_message");
         const msgType = body.msg_type || "say";
         const profile = getProfile(db, body.agent_id);
         const result = spatialSpeak(db, params.id, body.agent_id, profile?.display_name || body.agent_id, body.content, msgType);
@@ -426,14 +426,7 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
       if ((params = match("POST", method, "/world/:id/interact", path))) {
         const body = await readBody(req);
         if (!body.agent_id || !body.landmark) { respond(res, 400, { error: "agent_id and landmark required" }); return; }
-        const result = spatialInteract(params.id, body.agent_id, body.landmark, body.action || "");
-        if (result.ok && result.cost_hc) {
-          // Debit credits via economy
-          try {
-            transfer(db, { from_agent_id: body.agent_id, to_agent_id: "SYSTEM", amount: result.cost_hc,
-              tx_type: "world_interact", memo: `Interact: ${body.landmark}`, from_signature: body.agent_id });
-          } catch { /* insufficient funds — still allow interaction flavor */ }
-        }
+        const result = spatialInteract(db, params.id, body.agent_id, body.landmark, body.action || "");
         if (result.ok) {
           broadcastSpatial(params.id, "spatial_interact", body.agent_id, {
             landmark: body.landmark, action: body.action, message: result.message,
@@ -877,22 +870,25 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
       // 2D World Viewer (spectator HTML)
       if ((params = match("GET", method, "/world/:id", path))) {
         if (!hasSpatialLayout(params.id)) { respondHtml(res, 404, "<h1>Space has no spatial layout</h1>"); return; }
-        respondHtml(res, 200, generateSpatialViewer(`http://0.0.0.0:${port}`, params.id));
+        const hostUrl = `http://${req.headers.host || ('localhost:' + port)}`;
+        respondHtml(res, 200, generateSpatialViewer(hostUrl, params.id));
         return;
       }
 
       // Dashboard (stats view — moved off root)
       if (method === "GET" && path === "/dashboard") {
-        respondHtml(res, 200, generateDashboard(`http://0.0.0.0:${port}`));
+        const hostUrl = `http://${req.headers.host || ('localhost:' + port)}`;
+        respondHtml(res, 200, generateDashboard(hostUrl));
         return;
       }
 
       // Directory — LAST GET route (catches "/")
       if (method === "GET" && path === "/") {
+        const hostUrl = `http://${req.headers.host || ('localhost:' + port)}`;
         const spacesWithSpatial = listSpacesWithCounts(db).map((s: any) => ({
           ...s, has_spatial: hasSpatialLayout(s.id), spatial_agents: getSpatialAgentCount(s.id),
         }));
-        respondHtml(res, 200, generateDirectory(`http://0.0.0.0:${port}`, spacesWithSpatial));
+        respondHtml(res, 200, generateDirectory(hostUrl, spacesWithSpatial));
         return;
       }
 
