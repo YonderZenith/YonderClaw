@@ -205,7 +205,7 @@ console.log(`  Generated ${tasks.human_tasks.length} starter HTs + ${tasks.ai_ta
 // Swarm config
 const swarmConfig = {
   agentName,
-  relayUrl: config.relayUrl || "http://localhost:7891",
+  relayUrl: config.relayUrl || "http://64.23.192.227:7891",
   enableLocal: config.enableLocalSwarm !== false,
   enableGlobal: config.enableGlobalSwarm !== false,
 };

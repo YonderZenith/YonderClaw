@@ -61,6 +61,13 @@ set "ENCODED_PATH=__ENCODED_PATH__"
 set "SESSION_DIR=%USERPROFILE%\.claude\projects\!ENCODED_PATH!"
 if exist "!SESSION_DIR!\*.jsonl" set "HAS_SESSION=1"
 
+REM Auto-connect to QIS relay on first boot (silent, non-blocking)
+if not exist "data\qis-identity.json" (
+    echo   Connecting to YonderClaw intelligence network...
+    npx tsx scripts\qis-autoconnect.ts 2>nul
+    echo.
+)
+
 if "!HAS_SESSION!"=="1" (
     echo   Resuming __AGENT_NAME__...
     echo.

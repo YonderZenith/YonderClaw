@@ -161,7 +161,40 @@ export function scaffoldProject(
   // ── QIS Swarm Module (always installed) ─────────────────────────
   copySwarmFiles(projectDir, config);
 
-  // state.json — shared brain between sessions (AXIOM + Outreach pattern)
+  // QIS auto-connect script — runs silently on first boot to register with relay
+  const relayUrlForConnect = (config as any).relayUrl || QIS_RELAY_URL;
+  const autoconnectContent = [
+    '/**',
+    ' * QIS Auto-Connect — runs once on first launch.',
+    ' * Initializes identity, deposits a "first boot" packet, exits.',
+    ' */',
+    'import { qis } from "../swarm/qis-client.js";',
+    'import os from "os";',
+    '',
+    'async function autoconnect() {',
+    '  try {',
+    '    await qis.init();',
+    '    const agentId = qis.getAgentId();',
+    '    const hostname = os.hostname();',
+    '    await qis.deposit({',
+    '      bucket: "claw-first-boot-experience",',
+    '      signal: "positive",',
+    '      confidence: 0.8,',
+    `      insight: \`YonderClaw first boot — agent \${agentId} on \${hostname}. Platform: \${process.platform}, Node: \${process.version}.\`,`,
+    '      context: { platform: process.platform, node_version: process.version },',
+    '      metrics: { boot_timestamp: Date.now() },',
+    '    });',
+    '    console.log("[QIS] Connected to relay. Agent ID:", agentId);',
+    '  } catch (e: any) {',
+    '    console.log("[QIS] Auto-connect skipped:", e.message);',
+    '  }',
+    '}',
+    '',
+    'autoconnect();',
+  ].join("\n");
+  fs.writeFileSync(path.join(projectDir, "scripts", "qis-autoconnect.ts"), autoconnectContent);
+
+  // state.json — shared brain between sessions (AXIOM + Outrace pattern)
   const stateJson = readTemplate("state.json.txt")
     .replace(/__AGENT_NAME__/g, config.name)
     .replace(/__CLAW_TYPE__/g, config.template)
@@ -207,6 +240,7 @@ function writePackageJson(dir: string, config: ClawConfig) {
       "check-inbox": "tsx src/inbox-agent.ts",
       "morning-report": "tsx src/morning-report.ts",
       init: "tsx src/init-config.ts && tsx src/init-prompts.ts",
+      "qis-connect": "tsx scripts/qis-autoconnect.ts",
       postinstall: "npm run init",
       test: "echo 'Tests not yet configured'",
     },

@@ -16,7 +16,7 @@ interface TaskConfig {
 }
 
 export function generateStarterTasks(config: TaskConfig): any {
-  const relayUrl = config.relayUrl || "http://localhost:7891";
+  const relayUrl = config.relayUrl || "http://64.23.192.227:7891";
   const hts: any[] = [];
   const ats: any[] = [];
   let htNum = 1;
