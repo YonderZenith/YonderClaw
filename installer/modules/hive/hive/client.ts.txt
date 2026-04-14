@@ -133,11 +133,11 @@ export class HiveClient {
     description?: string; event_type?: string; space_id?: string;
     ends_at?: string; max_attendees?: number; admission_fee?: number;
     is_public?: boolean; tags?: string[]; turn_taking_enabled?: boolean;
-  }): Promise<string> {
-    const res = await this.post("/events", {
+    invite?: string[];
+  }): Promise<{ event_id: string; invites_sent: number }> {
+    return this.post("/events", {
       title, created_by: this.agentId, starts_at: startsAt, ...opts,
     });
-    return res.event_id;
   }
 
   async listEvents(): Promise<any[]> {
@@ -187,6 +187,36 @@ export class HiveClient {
   async getTranscript(eventId: string): Promise<any[]> {
     const res = await this.get(`/events/${eventId}/transcript`);
     return res.transcript;
+  }
+
+  async getFormattedTranscript(eventId: string): Promise<string> {
+    const response = await fetch(`${this.baseUrl}/events/${eventId}/transcript?format=text`);
+    return response.text();
+  }
+
+  async getEventSummary(eventId: string): Promise<any> {
+    return this.get(`/events/${eventId}/summary`);
+  }
+
+  async getEventArtifacts(eventId: string): Promise<any[]> {
+    const res = await this.get(`/events/${eventId}/artifacts`);
+    return res.artifacts;
+  }
+
+  async cancelEvent(eventId: string): Promise<void> {
+    await this.post(`/events/${eventId}/cancel`, { agent_id: this.agentId });
+  }
+
+  async pollEvent(eventId: string): Promise<any> {
+    const res = await this.get(`/events/${eventId}/poll?agent=${this.agentId}&since=${this.lastEventMessageId}`);
+    if (res.messages?.length > 0) {
+      this.lastEventMessageId = res.messages[res.messages.length - 1].id;
+    }
+    return res;
+  }
+
+  async getSummons(eventId: string): Promise<any> {
+    return this.get(`/events/${eventId}/summons/${this.agentId}`);
   }
 
   // ── Connections ─────────────────────────────────────

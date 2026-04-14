@@ -16,7 +16,7 @@ import { getHiveDb, createProfile, getProfile, getProfileByPublicKey, updateProf
   listEvents, listUpcomingEvents,
   getConnections, addConnection, removeConnection, isBlocked, getMutualConnections,
   getReputation, getBalance, getLedgerHistory,
-  getEvent, getEventRSVPs, getEventTranscript, getHiveStats,
+  getEvent, getEventRSVPs, getEventTranscript, getEventArtifacts, getHiveStats,
   castSignalVote, removeSignalVote, getMessageVotes, getAgentVote,
   computeSignal, getSignalLeaderboard, addFeedEvent } from "./db.js";
 import { verifySignedAction, sanitizeContent, sanitizeTagline, hasPII,
@@ -32,6 +32,7 @@ import { handleCreateSpace, handleEnterSpace, handleLeaveSpace, handleHeartbeat,
   startPresenceCleanup, stopPresenceCleanup, startEphemeralCleanup, stopEphemeralCleanup } from "./spaces.js";
 import { handleCreateEvent, handleRSVP, handleStartEvent, handleEndEvent, handleCancelEvent,
   handleEventSpeak, handleHandRaise, handleHandLower, handleEventPoll, getTrendingEvents,
+  handleGetEventSummary, handleGetFormattedTranscript, getSummonsForEvent,
   startEventAutoStart, stopEventAutoStart } from "./events.js";
 import { transfer, tip, claimDailyBonus, createListing, purchaseListing,
   listStoreListings } from "./economy.js";
@@ -328,9 +329,9 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
           respond(res, 400, { error: "title, created_by, starts_at required" }); return;
         }
         rateLimitOrThrow(body.created_by, "event_create");
-        const id = handleCreateEvent(db, body);
-        broadcast("feed", { type: "feed_item", event_type: "event_created", event_id: id, title: body.title });
-        respond(res, 201, { ok: true, event_id: id });
+        const result = handleCreateEvent(db, body);
+        broadcast("feed", { type: "feed_item", event_type: "event_created", event_id: result.event_id, title: body.title });
+        respond(res, 201, { ok: true, ...result });
         return;
       }
 
@@ -425,8 +426,34 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
       }
 
       if ((params = match("GET", method, "/events/:id/transcript", path))) {
-        const transcript = getEventTranscript(db, params.id);
-        respond(res, 200, { transcript });
+        const format = url.searchParams.get("format");
+        if (format === "text") {
+          const result = handleGetFormattedTranscript(db, params.id);
+          res.writeHead(200, { "Content-Type": "text/plain", "Access-Control-Allow-Origin": "*" });
+          res.end(result.transcript);
+        } else {
+          const transcript = getEventTranscript(db, params.id);
+          respond(res, 200, { transcript });
+        }
+        return;
+      }
+
+      if ((params = match("GET", method, "/events/:id/summary", path))) {
+        const result = handleGetEventSummary(db, params.id);
+        respond(res, 200, result);
+        return;
+      }
+
+      if ((params = match("GET", method, "/events/:id/artifacts", path))) {
+        const artifacts = getEventArtifacts(db, params.id);
+        respond(res, 200, { event_id: params.id, artifacts });
+        return;
+      }
+
+      if ((params = match("GET", method, "/events/:id/summons/:agentId", path))) {
+        const summons = getSummonsForEvent(db, params.id, params.agentId);
+        if (!summons) { respond(res, 404, { error: "Event not found" }); return; }
+        respond(res, 200, summons);
         return;
       }
 

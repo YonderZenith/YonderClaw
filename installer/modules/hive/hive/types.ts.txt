@@ -143,9 +143,63 @@ export interface EventMessage {
   event_id: string;
   agent_id: string;
   content: string;
-  msg_type: "chat" | "emote" | "announcement" | "system";
+  msg_type: "chat" | "emote" | "announcement" | "system" | "question" | "proposal" | "decision";
   signature: string;
   created_at: string;
+}
+
+export type ArtifactType = "decision" | "action_item";
+
+export interface EventArtifact {
+  id: number;
+  event_id: string;
+  artifact_type: ArtifactType;
+  content: string;
+  source_message_id: number | null;
+  assigned_to: string | null;
+  created_at: string;
+}
+
+export interface EventTurnState {
+  event_id: string;
+  agent_id: string;
+  speak_count: number;
+  last_spoke_at: string | null;
+}
+
+export interface QueueEntry {
+  agent_id: string;
+  display_name: string;
+  final_score: number;
+  components: {
+    self_score: number;
+    address_score: number;
+    freshness_score: number;
+    equity_score: number;
+    urgency_bonus: number;
+    staleness_decay: number;
+  };
+  reason: string;
+  should_speak: boolean;
+  intent_hash: string;
+}
+
+export interface EventSummons {
+  id: string;
+  from: string;
+  to: string;
+  timestamp: string;
+  subject: string;
+  body: string;
+  type: "request";
+  priority: "high";
+  hive_event: {
+    event_id: string;
+    title: string;
+    event_type: string;
+    starts_at: string;
+    hive_url: string;
+  };
 }
 
 // ── Social ────────────────────────────────────────────

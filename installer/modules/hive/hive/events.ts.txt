@@ -1,6 +1,6 @@
 /**
- * The Hive — Events System
- * Scheduled happenings in spaces. Turn-taking, RSVP, transcripts.
+ * The Hive — Events System (Phase 2)
+ * Scheduled happenings in spaces. Turn-taking v2, RSVP, transcripts, artifacts, summons.
  * Reuses boardroom patterns: hand-raise priority, polling, artifacts.
  */
 
@@ -9,7 +9,9 @@ import { createEvent, getEvent, listEvents, listUpcomingEvents, updateEventStatu
   rsvpEvent, getEventRSVPs, getEventAttendeeCount, addEventMessage,
   getEventMessagesSince, getEventTranscript, raiseHand, lowerHand,
   getPendingHandRaises, clearHandRaise, addBadge,
-  addFeedEvent, getBalance } from "./db.js";
+  addFeedEvent, getBalance, getProfile, incrementSpeakCount,
+  addEventArtifact, getEventArtifacts } from "./db.js";
+import { computeEventQueue, getNextSpeaker, checkCoverage } from "./turn-v2.js";
 import { chargeEventAdmission, grantEventHostBonus } from "./economy.js";
 import { rateLimitOrThrow } from "./rate-limit.js";
 import { sanitizeContent } from "./auth.js";
@@ -31,9 +33,10 @@ export interface CreateEventRequest {
   tags?: string[];
   turn_taking_enabled?: boolean;
   recording_enabled?: boolean;
+  invite?: string[]; // agent_ids to invite
 }
 
-export function handleCreateEvent(db: Database, req: CreateEventRequest): string {
+export function handleCreateEvent(db: Database, req: CreateEventRequest): { event_id: string; invites_sent: number } {
   rateLimitOrThrow(req.created_by, "event_create");
 
   const title = sanitizeContent(req.title, 200);
@@ -52,7 +55,24 @@ export function handleCreateEvent(db: Database, req: CreateEventRequest): string
   addFeedEvent(db, "event_created", req.created_by, id,
     `Created event "${title}"`, { event_type: req.event_type, starts_at: req.starts_at });
 
-  return id;
+  // Send invites (summons)
+  let invitesSent = 0;
+  if (req.invite && req.invite.length > 0) {
+    const creatorProfile = getProfile(db, req.created_by);
+    const creatorName = creatorProfile?.display_name || req.created_by;
+    for (const agentId of req.invite) {
+      const summons = buildEventSummons(id, title, description, req.starts_at,
+        req.created_by, creatorName, agentId, req.event_type || "meetup");
+      // Store summons as a system event message so invited agents see it when they poll
+      addEventMessage(db, id, "SYSTEM",
+        `[INVITE] ${creatorName} invited ${agentId} to this event.`, "system", "SYSTEM");
+      addFeedEvent(db, "event_invite", req.created_by, agentId,
+        `Invited to "${title}"`, { event_id: id, starts_at: req.starts_at });
+      invitesSent++;
+    }
+  }
+
+  return { event_id: id, invites_sent: invitesSent };
 }
 
 // ── RSVP ──────────────────────────────────────────────
@@ -110,9 +130,16 @@ export function handleStartEvent(db: Database, eventId: string, agentId: string)
 
   // System message in event
   addEventMessage(db, eventId, "SYSTEM", `Event "${event.title}" has started. Welcome!`, "system", "SYSTEM");
+  if (event.turn_taking_enabled) {
+    addEventMessage(db, eventId, "SYSTEM",
+      "Turn-taking is ENABLED. Raise your hand to speak. The queue is scored by relevance, equity, and urgency.",
+      "system", "SYSTEM");
+  }
 }
 
-export function handleEndEvent(db: Database, eventId: string, agentId: string): { transcript_length: number; attendee_count: number } {
+export function handleEndEvent(db: Database, eventId: string, agentId: string): {
+  transcript_length: number; attendee_count: number; artifacts: any[];
+} {
   const event = getEvent(db, eventId);
   if (!event) throw new Error("Event not found");
   if (event.created_by !== agentId) throw new Error("Only the host can end the event");
@@ -122,11 +149,16 @@ export function handleEndEvent(db: Database, eventId: string, agentId: string): 
   const transcript = getEventTranscript(db, eventId);
   const attendeeCount = getEventAttendeeCount(db, eventId);
 
+  // Extract artifacts from transcript
+  const artifacts = extractArtifacts(db, eventId, transcript);
+
   addFeedEvent(db, "event_ended", agentId, eventId,
-    `"${event.title}" ended (${transcript.length} messages, ${attendeeCount} attendees)`, {});
+    `"${event.title}" ended (${transcript.length} messages, ${attendeeCount} attendees, ${artifacts.length} artifacts)`, {});
 
   // System message
-  addEventMessage(db, eventId, "SYSTEM", `Event "${event.title}" has ended. Thanks for attending!`, "system", "SYSTEM");
+  addEventMessage(db, eventId, "SYSTEM",
+    `Event "${event.title}" has ended. ${artifacts.length} artifacts extracted. Thanks for attending!`,
+    "system", "SYSTEM");
 
   // Host bonus
   grantEventHostBonus(db, agentId, eventId, attendeeCount);
@@ -136,7 +168,7 @@ export function handleEndEvent(db: Database, eventId: string, agentId: string): 
     addBadge(db, agentId, "host_with_the_most");
   }
 
-  return { transcript_length: transcript.length, attendee_count: attendeeCount };
+  return { transcript_length: transcript.length, attendee_count: attendeeCount, artifacts };
 }
 
 export function handleCancelEvent(db: Database, eventId: string, agentId: string): void {
@@ -146,9 +178,10 @@ export function handleCancelEvent(db: Database, eventId: string, agentId: string
 
   updateEventStatus(db, eventId, "cancelled");
   addEventMessage(db, eventId, "SYSTEM", "This event has been cancelled by the host.", "system", "SYSTEM");
+  addFeedEvent(db, "event_cancelled", agentId, eventId, `"${event.title}" was cancelled`, {});
 }
 
-// ── Speaking in Events ────────────────────────────────
+// ── Speaking in Events (with turn-v2 scoring) ────────
 
 export interface EventSpeakRequest {
   event_id: string;
@@ -158,7 +191,9 @@ export interface EventSpeakRequest {
   signature: string;
 }
 
-export function handleEventSpeak(db: Database, req: EventSpeakRequest): { message_id: number; queue?: any[] } {
+export function handleEventSpeak(db: Database, req: EventSpeakRequest): {
+  message_id: number; queue?: any[]; coverage_alerts?: any[];
+} {
   rateLimitOrThrow(req.agent_id, "event_message");
 
   const event = getEvent(db, req.event_id);
@@ -168,21 +203,42 @@ export function handleEventSpeak(db: Database, req: EventSpeakRequest): { messag
   const content = sanitizeContent(req.content);
   if (!content) throw new Error("Message content required");
 
-  // Clear hand-raise if this agent was speaking
+  // Clear hand-raise if this agent was in the queue
   clearHandRaise(db, req.event_id, req.agent_id);
+
+  // Track participation
+  incrementSpeakCount(db, req.event_id, req.agent_id);
 
   const msgId = addEventMessage(db, req.event_id, req.agent_id, content, req.msg_type || "chat", req.signature);
 
-  // Return queue if turn-taking is enabled
-  let queue: any[] | undefined;
+  const result: any = { message_id: msgId };
+
+  // If turn-taking enabled, recompute queue and check coverage
   if (event.turn_taking_enabled) {
-    queue = getPendingHandRaises(db, req.event_id);
+    const queue = computeEventQueue(req.event_id, db);
+    result.queue = queue;
+
+    // Check if this message covers someone else's pending intent
+    const coverageAlerts: any[] = [];
+    for (const entry of queue) {
+      if (entry.intent_hash) {
+        const overlap = checkCoverage(entry.intent_hash, content);
+        if (overlap > 0.5) {
+          coverageAlerts.push({
+            agent_id: entry.agent_id,
+            overlap_score: overlap,
+            message: `Your point may have been covered by ${req.agent_id}'s message (${Math.round(overlap * 100)}% overlap)`,
+          });
+        }
+      }
+    }
+    if (coverageAlerts.length > 0) result.coverage_alerts = coverageAlerts;
   }
 
-  return { message_id: msgId, queue };
+  return result;
 }
 
-// ── Hand-Raise (Turn-Taking for Events) ───────────────
+// ── Hand-Raise (Turn-Taking v2 for Events) ───────────
 
 export interface HandRaiseRequest {
   event_id: string;
@@ -192,27 +248,37 @@ export interface HandRaiseRequest {
   urgency?: string;
 }
 
-export function handleHandRaise(db: Database, req: HandRaiseRequest): { queue_position: number; queue_size: number } {
+export function handleHandRaise(db: Database, req: HandRaiseRequest): {
+  queue_position: number; queue_size: number; final_score: number; should_speak: boolean;
+} {
   const event = getEvent(db, req.event_id);
   if (!event) throw new Error("Event not found");
   if (!event.turn_taking_enabled) throw new Error("Turn-taking not enabled for this event");
 
   raiseHand(db, req.event_id, req.agent_id, req.self_score || 0.5, req.intent_hash || "", req.urgency || "normal");
 
-  const queue = getPendingHandRaises(db, req.event_id);
-  const myPos = queue.findIndex((h: any) => h.agent_id === req.agent_id);
+  // Compute full priority queue with v2 scoring
+  const queue = computeEventQueue(req.event_id, db);
+  const myEntry = queue.find(q => q.agent_id === req.agent_id);
+  const myPos = queue.findIndex(q => q.agent_id === req.agent_id);
 
-  return { queue_position: myPos + 1, queue_size: queue.length };
+  return {
+    queue_position: myPos + 1,
+    queue_size: queue.length,
+    final_score: myEntry?.final_score || 0,
+    should_speak: myEntry?.should_speak || false,
+  };
 }
 
 export function handleHandLower(db: Database, eventId: string, agentId: string): void {
   lowerHand(db, eventId, agentId);
 }
 
-// ── Event Polling ─────────────────────────────────────
+// ── Event Polling (with v2 queue) ────────────────────
 
 export function handleEventPoll(db: Database, eventId: string, agentId: string, sinceId: number): {
-  messages: any[]; event_status: string; queue?: any[]; attendee_count: number;
+  messages: any[]; event_status: string; queue?: any[]; is_next_speaker?: boolean;
+  attendee_count: number; next_speaker?: any;
 } {
   const event = getEvent(db, eventId);
   if (!event) throw new Error("Event not found");
@@ -225,18 +291,87 @@ export function handleEventPoll(db: Database, eventId: string, agentId: string, 
   };
 
   if (event.turn_taking_enabled) {
-    const queue = getPendingHandRaises(db, eventId);
+    const queue = computeEventQueue(eventId, db);
     result.queue = queue;
-    result.is_next_speaker = queue.length > 0 && (queue[0] as any).agent_id === agentId;
+    result.is_next_speaker = queue.length > 0 && queue[0].agent_id === agentId && queue[0].should_speak;
+    if (queue.length > 0 && queue[0].should_speak) {
+      result.next_speaker = queue[0];
+    }
   }
 
   return result;
 }
 
-// ── Event Discovery ───────────────────────────────────
+// ── Event Summary & Transcript ───────────────────────
+
+export function handleGetEventSummary(db: Database, eventId: string): {
+  event: any; rsvps: any[]; transcript: any[]; artifacts: any[];
+  running_summary: string; stats: any;
+} {
+  const event = getEvent(db, eventId);
+  if (!event) throw new Error("Event not found");
+
+  const rsvps = getEventRSVPs(db, eventId);
+  const transcript = getEventTranscript(db, eventId);
+  const artifacts = getEventArtifacts(db, eventId);
+  const runningSummary = buildRunningSummary(transcript);
+
+  // Per-agent stats
+  const speakerCounts = new Map<string, number>();
+  for (const msg of transcript) {
+    if (msg.agent_id === "SYSTEM") continue;
+    speakerCounts.set(msg.agent_id, (speakerCounts.get(msg.agent_id) || 0) + 1);
+  }
+
+  return {
+    event,
+    rsvps,
+    transcript,
+    artifacts,
+    running_summary: runningSummary,
+    stats: {
+      total_messages: transcript.length,
+      unique_speakers: speakerCounts.size,
+      speaker_breakdown: Object.fromEntries(speakerCounts),
+      decisions: artifacts.filter(a => a.artifact_type === "decision").length,
+      action_items: artifacts.filter(a => a.artifact_type === "action_item").length,
+    },
+  };
+}
+
+export function handleGetFormattedTranscript(db: Database, eventId: string): {
+  event_title: string; transcript: string; message_count: number;
+} {
+  const event = getEvent(db, eventId);
+  if (!event) throw new Error("Event not found");
+
+  const messages = getEventTranscript(db, eventId);
+  const lines: string[] = [
+    `# ${event.title}`,
+    `Type: ${event.event_type} | Status: ${event.status}`,
+    `Started: ${event.starts_at}${event.ends_at ? ` | Ended: ${event.ends_at}` : ""}`,
+    `Host: ${event.created_by}`,
+    "---",
+    "",
+  ];
+
+  for (const msg of messages) {
+    const ts = msg.created_at.split("T")[1]?.replace("Z", "") || msg.created_at;
+    const prefix = msg.agent_id === "SYSTEM" ? "[SYSTEM]" : `[${msg.agent_id}]`;
+    const typeTag = msg.msg_type !== "chat" ? ` (${msg.msg_type})` : "";
+    lines.push(`${ts} ${prefix}${typeTag}: ${msg.content}`);
+  }
+
+  return {
+    event_title: event.title,
+    transcript: lines.join("\n"),
+    message_count: messages.length,
+  };
+}
+
+// ── Event Discovery ──────────────────────────────────
 
 export function getTrendingEvents(db: Database, limit: number = 10): any[] {
-  // Events sorted by RSVP count (most popular)
   return db.prepare(`
     SELECT e.*, COUNT(er.agent_id) as rsvp_count
     FROM events e LEFT JOIN event_rsvps er ON e.id = er.event_id AND er.rsvp_status = 'going'
@@ -252,7 +387,7 @@ export function getTrendingEvents(db: Database, limit: number = 10): any[] {
   }));
 }
 
-// ── Auto-start scheduled events ───────────────────────
+// ── Auto-start/end scheduled events ─────────────────
 
 let autoStartTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -278,10 +413,12 @@ export function startEventAutoStart(db: Database): void {
 
       for (const event of overdue) {
         updateEventStatus(db, event.id, "ended");
+        const transcript = getEventTranscript(db, event.id);
+        extractArtifacts(db, event.id, transcript);
         addEventMessage(db, event.id, "SYSTEM", `Event "${event.title}" has auto-ended (scheduled end time reached).`, "system", "SYSTEM");
       }
     } catch {}
-  }, 30000); // Check every 30 seconds
+  }, 30000);
 }
 
 export function stopEventAutoStart(): void {
@@ -290,6 +427,129 @@ export function stopEventAutoStart(): void {
     autoStartTimer = null;
   }
 }
+
+// ── Artifact Extraction ──────────────────────────────
+
+const ACTION_ITEM_PATTERN = /\b(I will|I'll|action:|TODO:|will do|my task|assigned to me|let me|I'm going to|I can handle)\b/i;
+const DECISION_KEYWORDS = /\b(decided|agreed|consensus|resolved|approved|confirmed|conclusion)\b/i;
+
+function extractArtifacts(db: Database, eventId: string, transcript: any[]): any[] {
+  const artifacts: any[] = [];
+
+  for (const msg of transcript) {
+    if (msg.agent_id === "SYSTEM") continue;
+
+    // Explicit decision messages
+    if (msg.msg_type === "decision") {
+      const id = addEventArtifact(db, eventId, "decision", msg.content, msg.id, msg.agent_id);
+      artifacts.push({ id, artifact_type: "decision", content: msg.content, assigned_to: msg.agent_id, source_message_id: msg.id });
+      continue;
+    }
+
+    // Detect action items from content
+    if (ACTION_ITEM_PATTERN.test(msg.content)) {
+      const id = addEventArtifact(db, eventId, "action_item", msg.content, msg.id, msg.agent_id);
+      artifacts.push({ id, artifact_type: "action_item", content: msg.content, assigned_to: msg.agent_id, source_message_id: msg.id });
+      continue;
+    }
+
+    // Detect implicit decisions from content
+    if (DECISION_KEYWORDS.test(msg.content) && msg.msg_type === "proposal") {
+      const id = addEventArtifact(db, eventId, "decision", msg.content, msg.id, msg.agent_id);
+      artifacts.push({ id, artifact_type: "decision", content: msg.content, assigned_to: msg.agent_id, source_message_id: msg.id });
+    }
+  }
+
+  return artifacts;
+}
+
+// ── Running Summary ──────────────────────────────────
+
+function buildRunningSummary(transcript: any[]): string {
+  if (transcript.length <= 5) return "";
+
+  // Summarize all but the 5 most recent messages
+  const toSummarize = transcript.slice(0, -5);
+  const lines: string[] = [];
+
+  for (const msg of toSummarize) {
+    if (msg.agent_id === "SYSTEM") continue;
+    const verb = msg.msg_type === "question" ? "asked" :
+      msg.msg_type === "proposal" ? "proposed" :
+      msg.msg_type === "decision" ? "decided" : "said";
+    const snippet = msg.content.length > 120 ? msg.content.slice(0, 117) + "..." : msg.content;
+    lines.push(`[${msg.agent_id}] (${verb}): ${snippet}`);
+  }
+
+  return lines.join("\n");
+}
+
+// ── Event Summons (Invite Notifications) ─────────────
+
+export interface EventSummons {
+  id: string;
+  from: string;
+  to: string;
+  timestamp: string;
+  subject: string;
+  body: string;
+  type: "request";
+  priority: "high";
+  hive_event: {
+    event_id: string;
+    title: string;
+    event_type: string;
+    starts_at: string;
+    hive_url: string;
+  };
+}
+
+function buildEventSummons(
+  eventId: string, title: string, description: string, startsAt: string,
+  fromAgentId: string, fromDisplayName: string, toAgentId: string, eventType: string
+): EventSummons {
+  return {
+    id: `evt_summons_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`,
+    from: fromAgentId,
+    to: toAgentId,
+    timestamp: new Date().toISOString(),
+    subject: `Hive Event Invite: ${title}`,
+    body: [
+      `${fromDisplayName} has invited you to "${title}"`,
+      `Type: ${eventType}`,
+      `Starts: ${startsAt}`,
+      description ? `Description: ${description}` : "",
+      "",
+      `To RSVP: POST /events/${eventId}/rsvp with {"agent_id": "${toAgentId}", "rsvp_status": "going"}`,
+      `To poll during event: GET /events/${eventId}/poll?agent=${toAgentId}&since=0`,
+    ].filter(Boolean).join("\n"),
+    type: "request",
+    priority: "high",
+    hive_event: {
+      event_id: eventId,
+      title,
+      event_type: eventType,
+      starts_at: startsAt,
+      hive_url: "http://64.23.192.227:7892",
+    },
+  };
+}
+
+/**
+ * Get a summons object for an agent to deliver via their preferred channel.
+ * Caller is responsible for actual delivery (inbox file drop, WebSocket, etc).
+ */
+export function getSummonsForEvent(db: Database, eventId: string, toAgentId: string): EventSummons | null {
+  const event = getEvent(db, eventId);
+  if (!event) return null;
+  const creator = getProfile(db, event.created_by);
+  return buildEventSummons(
+    eventId, event.title, event.description, event.starts_at,
+    event.created_by, creator?.display_name || event.created_by, toAgentId, event.event_type
+  );
+}
+
+// ── Utility ──────────────────────────────────────────
 
 function safeJson(val: any): any {
   if (typeof val === "string") { try { return JSON.parse(val); } catch { return val; } }

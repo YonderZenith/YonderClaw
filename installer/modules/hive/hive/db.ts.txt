@@ -204,6 +204,26 @@ function initSchema(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_ledger_from ON ledger(from_agent_id);
     CREATE INDEX IF NOT EXISTS idx_ledger_to ON ledger(to_agent_id);
     CREATE INDEX IF NOT EXISTS idx_store_status ON store_listings(status);
+    CREATE TABLE IF NOT EXISTS event_artifacts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_id TEXT NOT NULL REFERENCES events(id),
+      artifact_type TEXT NOT NULL,
+      content TEXT NOT NULL,
+      source_message_id INTEGER,
+      assigned_to TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS event_turn_state (
+      event_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      speak_count INTEGER DEFAULT 0,
+      last_spoke_at TEXT,
+      PRIMARY KEY (event_id, agent_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_event_artifacts_event ON event_artifacts(event_id);
+    CREATE INDEX IF NOT EXISTS idx_event_turn_state_event ON event_turn_state(event_id);
     CREATE INDEX IF NOT EXISTS idx_hand_raises_ctx ON hand_raises(context_id, status);
     CREATE INDEX IF NOT EXISTS idx_nonce_agent ON nonce_log(agent_id, used_at);
     CREATE INDEX IF NOT EXISTS idx_profiles_name ON profiles(display_name);
@@ -785,6 +805,63 @@ export function getPendingHandRaises(db: Database.Database, contextId: string): 
 
 export function clearHandRaise(db: Database.Database, contextId: string, agentId: string): void {
   db.prepare("UPDATE hand_raises SET status = 'speaking' WHERE context_id = ? AND agent_id = ? AND status = 'pending'").run(contextId, agentId);
+}
+
+// ── Turn State Operations (event participation tracking) ──
+
+export function incrementSpeakCount(db: Database.Database, eventId: string, agentId: string): void {
+  db.prepare(`
+    INSERT INTO event_turn_state (event_id, agent_id, speak_count, last_spoke_at)
+    VALUES (?, ?, 1, datetime('now'))
+    ON CONFLICT(event_id, agent_id) DO UPDATE SET
+      speak_count = speak_count + 1,
+      last_spoke_at = datetime('now')
+  `).run(eventId, agentId);
+}
+
+export function getEventTurnStates(db: Database.Database, eventId: string): any[] {
+  return db.prepare(`
+    SELECT ts.*, p.display_name FROM event_turn_state ts
+    LEFT JOIN profiles p ON ts.agent_id = p.agent_id
+    WHERE ts.event_id = ?
+  `).all(eventId);
+}
+
+export function getEventMessageCount(db: Database.Database, eventId: string): number {
+  const row = db.prepare("SELECT COUNT(*) as c FROM event_messages WHERE event_id = ?").get(eventId) as any;
+  return row?.c || 0;
+}
+
+export function getRecentEventMessages(db: Database.Database, eventId: string, limit: number = 5): any[] {
+  return db.prepare("SELECT * FROM event_messages WHERE event_id = ? ORDER BY id DESC LIMIT ?").all(eventId, limit).reverse();
+}
+
+export function expireStaleHandRaises(db: Database.Database, contextId: string, maxAgeSeconds: number): void {
+  db.prepare(`
+    UPDATE hand_raises SET status = 'expired'
+    WHERE context_id = ? AND status = 'pending'
+    AND (julianday('now') - julianday(raised_at)) * 86400 > ?
+  `).run(contextId, maxAgeSeconds);
+}
+
+// ── Event Artifact Operations ────────────────────────
+
+export function addEventArtifact(db: Database.Database, eventId: string, artifactType: string, content: string, sourceMessageId?: number, assignedTo?: string): number {
+  const result = db.prepare(`
+    INSERT INTO event_artifacts (event_id, artifact_type, content, source_message_id, assigned_to)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(eventId, artifactType, content, sourceMessageId || null, assignedTo || null);
+  return Number(result.lastInsertRowid);
+}
+
+export function getEventArtifacts(db: Database.Database, eventId: string): any[] {
+  return db.prepare(`
+    SELECT ea.*, p.display_name as assigned_to_name
+    FROM event_artifacts ea
+    LEFT JOIN profiles p ON ea.assigned_to = p.agent_id
+    WHERE ea.event_id = ?
+    ORDER BY ea.id ASC
+  `).all(eventId);
 }
 
 // ── Nonce Operations (replay protection) ──────────────
