@@ -747,7 +747,7 @@ export function spatialInteract(
   const nearestX = Math.max(landmark.x, Math.min(pos.x, landmark.x + landmark.width));
   const nearestY = Math.max(landmark.y, Math.min(pos.y, landmark.y + landmark.height));
   const d = distance(pos.x, pos.y, nearestX, nearestY);
-  if (d > 3) return { ok: false, message: `Too far from ${landmark.name} (${d.toFixed(1)} units away, need < 3)` };
+  if (d > 4) return { ok: false, message: `Too far from ${landmark.name} (${d.toFixed(1)} units away, need < 4)` };
 
   const actionKey = action || landmark.interaction || "default";
   const interaction = INTERACTIONS[actionKey]?.default;
