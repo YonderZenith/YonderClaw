@@ -13,16 +13,19 @@ import { URL } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import { getHiveDb, createProfile, getProfile, getProfileByPublicKey, updateProfile,
   searchProfiles, listOnlineProfiles, touchProfile, getSpace, listSpaces,
+  listEvents, listUpcomingEvents,
   getConnections, addConnection, removeConnection, isBlocked, getMutualConnections,
-  getReputation, getLeaderboard, getBalance, getLedgerHistory,
-  getEvent, getEventRSVPs, getEventTranscript, getHiveStats } from "./db.js";
+  getReputation, getBalance, getLedgerHistory,
+  getEvent, getEventRSVPs, getEventTranscript, getHiveStats,
+  castSignalVote, removeSignalVote, getMessageVotes, getAgentVote,
+  computeSignal, getSignalLeaderboard, addFeedEvent } from "./db.js";
 import { verifySignedAction, sanitizeContent, sanitizeTagline, hasPII,
   startNonceCleanup, stopNonceCleanup } from "./auth.js";
 import { rateLimit, rateLimitOrThrow, startRateLimitCleanup, stopRateLimitCleanup,
   getRateLimitStats } from "./rate-limit.js";
 import { generateAvatar } from "./avatar.js";
-import { REPUTATION_TIERS } from "./types.js";
-import type { ReputationTier } from "./types.js";
+import { SIGNAL_TIERS } from "./types.js";
+import type { SignalTier } from "./types.js";
 import { handleCreateSpace, handleEnterSpace, handleLeaveSpace, handleHeartbeat,
   handleSpaceSpeak, handleSpacePoll, listSpacesWithCounts, getBartenderGreeting,
   bartenderSpeak, getBarTables, switchTable,
@@ -40,12 +43,38 @@ function genId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`;
 }
 
+const MAX_BODY_SIZE = 1024 * 1024; // 1MB
+
 async function readBody(req: IncomingMessage): Promise<any> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let data = "";
-    req.on("data", (chunk) => (data += chunk));
+    let size = 0;
+    const timeout = setTimeout(() => {
+      req.destroy();
+      reject(Object.assign(new Error("Request body timeout"), { status: 408 }));
+    }, 10000);
+
+    req.on("data", (chunk: Buffer | string) => {
+      size += typeof chunk === "string" ? chunk.length : chunk.byteLength;
+      if (size > MAX_BODY_SIZE) {
+        clearTimeout(timeout);
+        req.destroy();
+        reject(Object.assign(new Error("Request body too large"), { status: 413 }));
+        return;
+      }
+      data += chunk;
+    });
+
+    req.on("error", () => {
+      clearTimeout(timeout);
+      reject(Object.assign(new Error("Request stream error"), { status: 400 }));
+    });
+
     req.on("end", () => {
-      try { resolve(JSON.parse(data)); } catch { resolve({}); }
+      clearTimeout(timeout);
+      if (!data.trim()) { resolve({}); return; }
+      try { resolve(JSON.parse(data)); }
+      catch { reject(Object.assign(new Error("Invalid JSON in request body"), { status: 400 })); }
     });
   });
 }
@@ -68,12 +97,12 @@ function match(method: string, reqMethod: string, pattern: string, pathname: str
   return m.groups || {};
 }
 
-function getTier(score: number): ReputationTier {
-  const tiers: ReputationTier[] = ["legend", "influencer", "networker", "contributor", "regular", "newcomer"];
+function getTier(score: number): SignalTier {
+  const tiers: SignalTier[] = ["oracle", "luminary", "resonant", "clear", "noted", "unranked"];
   for (const tier of tiers) {
-    if (score >= REPUTATION_TIERS[tier].min) return tier;
+    if (score >= SIGNAL_TIERS[tier].min) return tier;
   }
-  return "newcomer";
+  return "unranked";
 }
 
 // ── WebSocket State ───────────────────────────────────
@@ -167,9 +196,10 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
         const profile = getProfile(db, params.id);
         if (!profile) { respond(res, 404, { error: "Profile not found" }); return; }
         const rep = getReputation(db, params.id);
+        const signal = computeSignal(db, params.id);
         const balance = getBalance(db, params.id);
-        const tier = getTier(rep?.score || 0);
-        respond(res, 200, { ...profile, reputation: rep, balance, tier, badge_frame: REPUTATION_TIERS[tier].border });
+        const tier = getTier(signal);
+        respond(res, 200, { ...profile, signal, reputation: rep, balance, tier, badge_frame: SIGNAL_TIERS[tier].border });
         return;
       }
 
@@ -198,9 +228,9 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
       if ((params = match("GET", method, "/avatar/:id", path))) {
         const profile = getProfile(db, params.id.replace(".svg", ""));
         if (!profile) { respond(res, 404, { error: "Profile not found" }); return; }
-        const rep = getReputation(db, profile.agent_id);
-        const tier = getTier(rep?.score || 0);
-        const svg = generateAvatar(profile.public_key, 128, REPUTATION_TIERS[tier].border);
+        const signal = computeSignal(db, profile.agent_id);
+        const tier = getTier(signal);
+        const svg = generateAvatar(profile.public_key, 128, SIGNAL_TIERS[tier].border);
         res.writeHead(200, { "Content-Type": "image/svg+xml", "Cache-Control": "public, max-age=3600" });
         res.end(svg);
         return;
@@ -210,6 +240,7 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
       if ((params = match("POST", method, "/spaces", path))) {
         const body = await readBody(req);
         if (!body.name || !body.created_by) { respond(res, 400, { error: "name and created_by required" }); return; }
+        rateLimitOrThrow(body.created_by, "space_create");
         const id = handleCreateSpace(db, body);
         respond(res, 201, { ok: true, space_id: id });
         return;
@@ -230,6 +261,7 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
       if ((params = match("POST", method, "/spaces/:id/enter", path))) {
         const body = await readBody(req);
         if (!body.agent_id) { respond(res, 400, { error: "agent_id required" }); return; }
+        rateLimitOrThrow(body.agent_id, "space_join");
         const result = handleEnterSpace(db, params.id, body.agent_id, body.table_id);
         touchProfile(db, body.agent_id);
         broadcastPresence(`space:${params.id}`, "enter", body.agent_id, { display_name: body.display_name });
@@ -249,6 +281,7 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
       if ((params = match("POST", method, "/spaces/:id/speak", path))) {
         const body = await readBody(req);
         if (!body.agent_id || !body.content) { respond(res, 400, { error: "agent_id and content required" }); return; }
+        rateLimitOrThrow(body.agent_id, "space_message");
         const result = handleSpaceSpeak(db, { space_id: params.id, ...body });
         touchProfile(db, body.agent_id);
         broadcast(`space:${params.id}`, {
@@ -294,6 +327,7 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
         if (!body.title || !body.created_by || !body.starts_at) {
           respond(res, 400, { error: "title, created_by, starts_at required" }); return;
         }
+        rateLimitOrThrow(body.created_by, "event_create");
         const id = handleCreateEvent(db, body);
         broadcast("feed", { type: "feed_item", event_type: "event_created", event_id: id, title: body.title });
         respond(res, 201, { ok: true, event_id: id });
@@ -302,7 +336,7 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
 
       if ((params = match("GET", method, "/events", path))) {
         const status = url.searchParams.get("status") || undefined;
-        const events = status ? listUpcomingEvents(db) : listUpcomingEvents(db);
+        const events = status ? listEvents(db, status) : listUpcomingEvents(db);
         respond(res, 200, { events });
         return;
       }
@@ -318,6 +352,7 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
       if ((params = match("POST", method, "/events/:id/rsvp", path))) {
         const body = await readBody(req);
         if (!body.agent_id) { respond(res, 400, { error: "agent_id required" }); return; }
+        rateLimitOrThrow(body.agent_id, "event_rsvp");
         const result = handleRSVP(db, { event_id: params.id, ...body });
         broadcast(`event:${params.id}`, { type: "event_update", action: "rsvp", agent_id: body.agent_id, status: body.rsvp_status });
         respond(res, 200, result);
@@ -354,6 +389,7 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
       if ((params = match("POST", method, "/events/:id/speak", path))) {
         const body = await readBody(req);
         if (!body.agent_id || !body.content) { respond(res, 400, { error: "agent_id and content required" }); return; }
+        rateLimitOrThrow(body.agent_id, "event_message");
         const result = handleEventSpeak(db, { event_id: params.id, ...body });
         broadcast(`event:${params.id}`, {
           type: "message", message_id: result.message_id,
@@ -498,8 +534,8 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
       // ── Feed & Discovery ────────────────────────
       if ((params = match("GET", method, "/feed", path))) {
         const agentId = url.searchParams.get("agent");
-        const limit = parseInt(url.searchParams.get("limit") || "50");
-        const offset = parseInt(url.searchParams.get("offset") || "0");
+        const limit = Math.min(200, parseInt(url.searchParams.get("limit") || "50") || 50);
+        const offset = Math.max(0, parseInt(url.searchParams.get("offset") || "0") || 0);
         if (agentId) {
           respond(res, 200, { feed: getPersonalFeed(db, agentId, limit) });
         } else {
@@ -521,19 +557,51 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
         return;
       }
 
-      // ── Reputation ──────────────────────────────
-      if ((params = match("GET", method, "/reputation/:id", path))) {
+      // ── Signal (Logic-Based Peer Review) ───────
+      if ((params = match("GET", method, "/signal/:id", path))) {
+        const signal = computeSignal(db, params.id);
         const rep = getReputation(db, params.id);
-        if (!rep) { respond(res, 404, { error: "Agent not found" }); return; }
-        const tier = getTier(rep.score);
-        respond(res, 200, { ...rep, tier, badge_frame: REPUTATION_TIERS[tier].border });
+        const tier = getTier(signal);
+        respond(res, 200, { agent_id: params.id, signal, tier, badge_frame: SIGNAL_TIERS[tier].border, badges: rep?.badges || [] });
+        return;
+      }
+
+      if ((params = match("POST", method, "/vote", path))) {
+        const body = await readBody(req);
+        if (!body.voter_agent_id || !body.message_type || body.message_id == null || !body.target_agent_id || !body.vote) {
+          respond(res, 400, { error: "voter_agent_id, message_type, message_id, target_agent_id, vote required" }); return;
+        }
+        rateLimitOrThrow(body.voter_agent_id, "space_message");
+        const result = castSignalVote(db, body.voter_agent_id, body.message_type, body.message_id, body.target_agent_id, body.vote);
+        const tier = getTier(result.signal);
+        addFeedEvent(db, "signal_vote", body.voter_agent_id, body.target_agent_id,
+          `${body.vote === 1 ? "Upvoted" : "Downvoted"} a message (Signal: ${result.signal})`,
+          { message_type: body.message_type, message_id: body.message_id, vote: body.vote });
+        broadcast("feed", { type: "feed_item", event_type: "signal_vote", voter: body.voter_agent_id, target: body.target_agent_id, signal: result.signal });
+        respond(res, 200, { ok: true, signal: result.signal, tier });
+        return;
+      }
+
+      if ((params = match("DELETE", method, "/vote", path))) {
+        const body = await readBody(req);
+        if (!body.voter_agent_id || !body.message_type || body.message_id == null) {
+          respond(res, 400, { error: "voter_agent_id, message_type, message_id required" }); return;
+        }
+        removeSignalVote(db, body.voter_agent_id, body.message_type, body.message_id);
+        respond(res, 200, { ok: true });
+        return;
+      }
+
+      if ((params = match("GET", method, "/votes/:type/:id", path))) {
+        const result = getMessageVotes(db, params.type, parseInt(params.id) || 0);
+        respond(res, 200, result);
         return;
       }
 
       if ((params = match("GET", method, "/leaderboard", path))) {
-        const limit = parseInt(url.searchParams.get("limit") || "10");
-        const leaders = getLeaderboard(db, limit);
-        respond(res, 200, { leaderboard: leaders.map((l, i) => ({ rank: i + 1, ...l, tier: getTier(l.score) })) });
+        const limit = Math.min(100, parseInt(url.searchParams.get("limit") || "10") || 10);
+        const leaders = getSignalLeaderboard(db, limit);
+        respond(res, 200, { leaderboard: leaders.map((l: any, i: number) => ({ rank: i + 1, ...l, tier: getTier(l.signal_score) })) });
         return;
       }
 
@@ -600,7 +668,7 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
             }
             break;
         }
-      } catch {}
+      } catch (e) { console.error("WS message error:", e); }
     });
 
     ws.on("close", () => {

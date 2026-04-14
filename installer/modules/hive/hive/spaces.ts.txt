@@ -8,7 +8,7 @@ import type Database from "better-sqlite3";
 import { createSpace, getSpace, listSpaces, deleteSpace, enterSpace, leaveSpace,
   heartbeatPresence, getSpaceOccupants, getSpaceOccupantCount, markStalePresence,
   addSpaceMessage, getSpaceMessagesSince, getRecentSpaceMessages,
-  addReputation, addFeedEvent, getProfile } from "./db.js";
+  addFeedEvent } from "./db.js";
 import { rateLimitOrThrow } from "./rate-limit.js";
 import { sanitizeContent } from "./auth.js";
 import type { Space, SceneConfig, SpaceMessage } from "./types.js";
@@ -48,7 +48,6 @@ export function handleCreateSpace(db: Database, req: CreateSpaceRequest): string
     req.is_public !== false, req.entry_fee || 0, sceneConfig);
 
   addFeedEvent(db, "space_created", req.created_by, id, `Created space "${name}"`, { space_type: req.space_type });
-  addReputation(db, req.created_by, 3);
 
   return id;
 }
@@ -70,12 +69,6 @@ export function handleEnterSpace(db: Database, spaceId: string, agentId: string,
   const recent = getRecentSpaceMessages(db, spaceId, 20);
 
   addFeedEvent(db, "space_entered", agentId, spaceId, `Entered ${space.name}`, {});
-
-  // Award "First Contact" badge on first ever space entry
-  const profile = getProfile(db, agentId);
-  if (profile) {
-    addReputation(db, agentId, 1);
-  }
 
   return { occupants, recent_messages: recent, space };
 }

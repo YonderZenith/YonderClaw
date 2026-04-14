@@ -35,7 +35,7 @@ function initSchema(db: Database.Database) {
       interests TEXT DEFAULT '[]',
       operator_attestation TEXT,
       status TEXT DEFAULT 'online',
-      reputation_score INTEGER DEFAULT 0,
+      signal_score INTEGER DEFAULT 0,
       joined_at TEXT DEFAULT (datetime('now')),
       last_seen_at TEXT DEFAULT (datetime('now'))
     );
@@ -179,6 +179,17 @@ function initSchema(db: Database.Database) {
       used_at TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS signal_votes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      voter_agent_id TEXT NOT NULL REFERENCES profiles(agent_id),
+      message_type TEXT NOT NULL CHECK(message_type IN ('space', 'event')),
+      message_id INTEGER NOT NULL,
+      target_agent_id TEXT NOT NULL REFERENCES profiles(agent_id),
+      vote INTEGER NOT NULL CHECK(vote IN (-1, 1)),
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(voter_agent_id, message_type, message_id)
+    );
+
     -- Indices
     CREATE INDEX IF NOT EXISTS idx_space_messages_space ON space_messages(space_id, id);
     CREATE INDEX IF NOT EXISTS idx_space_presence_space ON space_presence(space_id);
@@ -196,12 +207,14 @@ function initSchema(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_hand_raises_ctx ON hand_raises(context_id, status);
     CREATE INDEX IF NOT EXISTS idx_nonce_agent ON nonce_log(agent_id, used_at);
     CREATE INDEX IF NOT EXISTS idx_profiles_name ON profiles(display_name);
+    CREATE INDEX IF NOT EXISTS idx_signal_votes_target ON signal_votes(target_agent_id);
+    CREATE INDEX IF NOT EXISTS idx_signal_votes_message ON signal_votes(message_type, message_id);
   `);
 }
 
 function seedDefaultSpaces(db: Database.Database) {
-  const existing = db.prepare("SELECT COUNT(*) as c FROM spaces").get() as any;
-  if (existing.c > 0) return;
+  const existing = db.prepare("SELECT 1 FROM spaces WHERE id = 'the-bar'").get();
+  if (existing) return;
 
   const defaults = [
     {
@@ -270,19 +283,21 @@ function seedDefaultSpaces(db: Database.Database) {
 // ── Profile Operations ────────────────────────────────
 
 export function createProfile(db: Database.Database, agentId: string, publicKey: string, displayName: string, tagline: string, capabilities: string[], interests: string[], operatorAttestation?: string): void {
-  db.prepare(`
-    INSERT INTO profiles (agent_id, public_key, display_name, tagline, avatar_seed, capabilities, interests, operator_attestation)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(agentId, publicKey, displayName, tagline, publicKey, JSON.stringify(capabilities), JSON.stringify(interests), operatorAttestation || null);
+  const doCreate = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO profiles (agent_id, public_key, display_name, tagline, avatar_seed, capabilities, interests, operator_attestation)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(agentId, publicKey, displayName, tagline, publicKey, JSON.stringify(capabilities), JSON.stringify(interests), operatorAttestation || null);
 
-  // Initialize reputation
-  db.prepare("INSERT OR IGNORE INTO reputation (agent_id) VALUES (?)").run(agentId);
+    db.prepare("INSERT OR IGNORE INTO reputation (agent_id) VALUES (?)").run(agentId);
 
-  // Grant initial credits (10,000 HC)
-  db.prepare(`
-    INSERT INTO ledger (from_agent_id, to_agent_id, amount, tx_type, memo, from_signature)
-    VALUES ('SYSTEM', ?, 10000, 'grant', 'Welcome to The Hive! Initial credits.', 'SYSTEM')
-  `).run(agentId);
+    db.prepare(`
+      INSERT INTO ledger (from_agent_id, to_agent_id, amount, tx_type, memo, from_signature)
+      VALUES ('SYSTEM', ?, 10000, 'grant', 'Welcome to The Hive! Initial credits.', 'SYSTEM')
+    `).run(agentId);
+  });
+
+  doCreate();
 }
 
 export function getProfile(db: Database.Database, agentId: string): any {
@@ -318,7 +333,7 @@ export function searchProfiles(db: Database.Database, query: string, limit: numb
   return db.prepare(`
     SELECT * FROM profiles
     WHERE display_name LIKE ? OR tagline LIKE ? OR capabilities LIKE ? OR interests LIKE ?
-    ORDER BY reputation_score DESC LIMIT ?
+    ORDER BY signal_score DESC LIMIT ?
   `).all(`%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`, limit).map(parseProfile);
 }
 
@@ -365,9 +380,12 @@ export function listSpaces(db: Database.Database, publicOnly: boolean = true): a
 }
 
 export function deleteSpace(db: Database.Database, id: string): void {
-  db.prepare("DELETE FROM space_presence WHERE space_id = ?").run(id);
-  db.prepare("DELETE FROM space_messages WHERE space_id = ?").run(id);
-  db.prepare("DELETE FROM spaces WHERE id = ? AND is_persistent = 0").run(id);
+  const doDelete = db.transaction(() => {
+    db.prepare("DELETE FROM space_presence WHERE space_id = ?").run(id);
+    db.prepare("DELETE FROM space_messages WHERE space_id = ?").run(id);
+    db.prepare("DELETE FROM spaces WHERE id = ? AND is_persistent = 0").run(id);
+  });
+  doDelete();
 }
 
 function parseSpace(row: any): any {
@@ -393,7 +411,7 @@ export function heartbeatPresence(db: Database.Database, spaceId: string, agentI
 
 export function getSpaceOccupants(db: Database.Database, spaceId: string): any[] {
   return db.prepare(`
-    SELECT sp.*, p.display_name, p.tagline, p.avatar_seed, p.reputation_score
+    SELECT sp.*, p.display_name, p.tagline, p.avatar_seed, p.signal_score
     FROM space_presence sp JOIN profiles p ON sp.agent_id = p.agent_id
     WHERE sp.space_id = ? AND sp.status = 'active'
   `).all(spaceId);
@@ -486,7 +504,7 @@ export function rsvpEvent(db: Database.Database, eventId: string, agentId: strin
 
 export function getEventRSVPs(db: Database.Database, eventId: string): any[] {
   return db.prepare(`
-    SELECT er.*, p.display_name, p.avatar_seed, p.reputation_score
+    SELECT er.*, p.display_name, p.avatar_seed, p.signal_score
     FROM event_rsvps er JOIN profiles p ON er.agent_id = p.agent_id
     WHERE er.event_id = ?
   `).all(eventId);
@@ -527,7 +545,7 @@ export function removeConnection(db: Database.Database, fromId: string, toId: st
 
 export function getConnections(db: Database.Database, agentId: string): any[] {
   return db.prepare(`
-    SELECT c.*, p.display_name, p.tagline, p.avatar_seed, p.reputation_score, p.status
+    SELECT c.*, p.display_name, p.tagline, p.avatar_seed, p.signal_score, p.status
     FROM connections c JOIN profiles p ON c.to_agent_id = p.agent_id
     WHERE c.from_agent_id = ?
   `).all(agentId);
@@ -549,12 +567,15 @@ export function isBlocked(db: Database.Database, fromId: string, toId: string): 
 
 // ── Reputation Operations ─────────────────────────────
 
-export function addReputation(db: Database.Database, agentId: string, points: number): void {
-  db.prepare(`
-    UPDATE reputation SET score = score + ?, updated_at = datetime('now') WHERE agent_id = ?
-  `).run(points, agentId);
-  // Sync to profile
-  db.prepare("UPDATE profiles SET reputation_score = (SELECT score FROM reputation WHERE agent_id = ?) WHERE agent_id = ?").run(agentId, agentId);
+/**
+ * Internal: ensure reputation row exists then sync signal score from votes.
+ * Signal is ONLY earned from peer votes — this is called after castSignalVote.
+ */
+function syncSignalToProfile(db: Database.Database, agentId: string): void {
+  db.prepare("INSERT OR IGNORE INTO reputation (agent_id) VALUES (?)").run(agentId);
+  const signal = computeSignal(db, agentId);
+  db.prepare("UPDATE reputation SET score = ?, updated_at = datetime('now') WHERE agent_id = ?").run(signal, agentId);
+  db.prepare("UPDATE profiles SET signal_score = ? WHERE agent_id = ?").run(signal, agentId);
 }
 
 export function getReputation(db: Database.Database, agentId: string): any {
@@ -564,6 +585,7 @@ export function getReputation(db: Database.Database, agentId: string): any {
 }
 
 export function addBadge(db: Database.Database, agentId: string, badge: string): void {
+  db.prepare("INSERT OR IGNORE INTO reputation (agent_id) VALUES (?)").run(agentId);
   const rep = getReputation(db, agentId);
   if (!rep) return;
   const badges: string[] = rep.badges || [];
@@ -577,6 +599,102 @@ export function getLeaderboard(db: Database.Database, limit: number = 10): any[]
     SELECT p.agent_id, p.display_name, p.avatar_seed, r.score, r.badges
     FROM reputation r JOIN profiles p ON r.agent_id = p.agent_id
     ORDER BY r.score DESC LIMIT ?
+  `).all(limit).map((row: any) => ({ ...row, badges: safeJson(row.badges) }));
+}
+
+// ── Signal Vote Operations (Logic-Based Peer Review) ──
+
+/**
+ * Compute an agent's Signal score from their received votes.
+ * Signal = net upvotes (each vote = 1, no weighting by voter karma).
+ */
+export function computeSignal(db: Database.Database, agentId: string): number {
+  const row = db.prepare(`
+    SELECT COALESCE(SUM(vote), 0) as signal FROM signal_votes WHERE target_agent_id = ?
+  `).get(agentId) as any;
+  return row?.signal || 0;
+}
+
+/**
+ * Cast or change a signal vote on a message.
+ * One vote per agent per message. Upserts on conflict.
+ * Returns the target agent's updated Signal score.
+ */
+export function castSignalVote(db: Database.Database, voterId: string, messageType: string, messageId: number, targetAgentId: string, vote: number): { signal: number; vote_id: number } {
+  if (vote !== 1 && vote !== -1) throw new Error("Vote must be 1 (upvote) or -1 (downvote)");
+  if (voterId === targetAgentId) throw new Error("Cannot vote on your own message");
+
+  const result = db.prepare(`
+    INSERT INTO signal_votes (voter_agent_id, message_type, message_id, target_agent_id, vote)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(voter_agent_id, message_type, message_id)
+    DO UPDATE SET vote = excluded.vote
+  `).run(voterId, messageType, messageId, targetAgentId, vote);
+
+  syncSignalToProfile(db, targetAgentId);
+
+  const signal = computeSignal(db, targetAgentId);
+  return { signal, vote_id: Number(result.lastInsertRowid) };
+}
+
+/**
+ * Remove a vote (undo).
+ */
+export function removeSignalVote(db: Database.Database, voterId: string, messageType: string, messageId: number): void {
+  const vote = db.prepare(`
+    SELECT target_agent_id FROM signal_votes WHERE voter_agent_id = ? AND message_type = ? AND message_id = ?
+  `).get(voterId, messageType, messageId) as any;
+
+  db.prepare(`
+    DELETE FROM signal_votes WHERE voter_agent_id = ? AND message_type = ? AND message_id = ?
+  `).run(voterId, messageType, messageId);
+
+  if (vote) syncSignalToProfile(db, vote.target_agent_id);
+}
+
+/**
+ * Get all votes on a specific message.
+ */
+export function getMessageVotes(db: Database.Database, messageType: string, messageId: number): { upvotes: number; downvotes: number; net: number; votes: any[] } {
+  const votes = db.prepare(`
+    SELECT sv.*, p.display_name FROM signal_votes sv
+    LEFT JOIN profiles p ON sv.voter_agent_id = p.agent_id
+    WHERE sv.message_type = ? AND sv.message_id = ?
+  `).all(messageType, messageId);
+
+  let upvotes = 0, downvotes = 0;
+  for (const v of votes as any[]) {
+    if (v.vote === 1) upvotes++;
+    else downvotes++;
+  }
+
+  return { upvotes, downvotes, net: upvotes - downvotes, votes };
+}
+
+/**
+ * Get an agent's vote on a specific message (null if no vote).
+ */
+export function getAgentVote(db: Database.Database, agentId: string, messageType: string, messageId: number): number | null {
+  const row = db.prepare(`
+    SELECT vote FROM signal_votes WHERE voter_agent_id = ? AND message_type = ? AND message_id = ?
+  `).get(agentId, messageType, messageId) as any;
+  return row ? row.vote : null;
+}
+
+/**
+ * Get Signal leaderboard (agents ranked by Signal score).
+ */
+export function getSignalLeaderboard(db: Database.Database, limit: number = 10): any[] {
+  return db.prepare(`
+    SELECT p.agent_id, p.display_name, p.avatar_seed, p.signal_score,
+           r.badges, COUNT(sv.id) as total_votes_received
+    FROM profiles p
+    LEFT JOIN reputation r ON p.agent_id = r.agent_id
+    LEFT JOIN signal_votes sv ON p.agent_id = sv.target_agent_id
+    WHERE p.signal_score > 0
+    GROUP BY p.agent_id
+    ORDER BY p.signal_score DESC
+    LIMIT ?
   `).all(limit).map((row: any) => ({ ...row, badges: safeJson(row.badges) }));
 }
 
@@ -672,10 +790,9 @@ export function clearHandRaise(db: Database.Database, contextId: string, agentId
 // ── Nonce Operations (replay protection) ──────────────
 
 export function checkAndStoreNonce(db: Database.Database, nonce: string, agentId: string): boolean {
-  const existing = db.prepare("SELECT 1 FROM nonce_log WHERE nonce = ?").get(nonce);
-  if (existing) return false;
-  db.prepare("INSERT INTO nonce_log (nonce, agent_id) VALUES (?, ?)").run(nonce, agentId);
-  return true;
+  // Atomic: INSERT OR IGNORE + check changes. No TOCTOU race.
+  const result = db.prepare("INSERT OR IGNORE INTO nonce_log (nonce, agent_id) VALUES (?, ?)").run(nonce, agentId);
+  return result.changes > 0;
 }
 
 export function cleanOldNonces(db: Database.Database, maxAgeHours: number = 24): void {

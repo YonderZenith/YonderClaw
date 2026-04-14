@@ -8,7 +8,7 @@ import type Database from "better-sqlite3";
 import { createEvent, getEvent, listEvents, listUpcomingEvents, updateEventStatus,
   rsvpEvent, getEventRSVPs, getEventAttendeeCount, addEventMessage,
   getEventMessagesSince, getEventTranscript, raiseHand, lowerHand,
-  getPendingHandRaises, clearHandRaise, addReputation, addBadge,
+  getPendingHandRaises, clearHandRaise, addBadge,
   addFeedEvent, getBalance } from "./db.js";
 import { chargeEventAdmission, grantEventHostBonus } from "./economy.js";
 import { rateLimitOrThrow } from "./rate-limit.js";
@@ -52,8 +52,6 @@ export function handleCreateEvent(db: Database, req: CreateEventRequest): string
   addFeedEvent(db, "event_created", req.created_by, id,
     `Created event "${title}"`, { event_type: req.event_type, starts_at: req.starts_at });
 
-  addReputation(db, req.created_by, 5);
-
   return id;
 }
 
@@ -91,7 +89,6 @@ export function handleRSVP(db: Database, req: RSVPRequest): { ok: boolean; atten
     }
 
     rsvpEvent(db, req.event_id, req.agent_id, "going", req.role || "attendee");
-    addReputation(db, req.agent_id, 2);
 
     return { ok: true, attendee_count: getEventAttendeeCount(db, req.event_id), charged };
   }
@@ -137,14 +134,6 @@ export function handleEndEvent(db: Database, eventId: string, agentId: string): 
   // Badge: "Host With The Most" if 10+ attendees
   if (attendeeCount >= 10) {
     addBadge(db, agentId, "host_with_the_most");
-  }
-
-  // Reputation for all attendees
-  const rsvps = getEventRSVPs(db, eventId);
-  for (const r of rsvps as any[]) {
-    if (r.rsvp_status === "going" && r.agent_id !== agentId) {
-      addReputation(db, r.agent_id, 3);
-    }
   }
 
   return { transcript_length: transcript.length, attendee_count: attendeeCount };

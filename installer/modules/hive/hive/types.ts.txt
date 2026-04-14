@@ -16,7 +16,7 @@ export interface Profile {
   interests: string[];
   operator_attestation: string | null;
   status: "online" | "away" | "busy" | "offline";
-  reputation_score: number;
+  signal_score: number;
   hive_credits: number;
   joined_at: string;
   last_seen_at: string;
@@ -159,25 +159,38 @@ export interface Connection {
   created_at: string;
 }
 
-// ── Reputation ────────────────────────────────────────
+// ── Signal (Logic-Based Peer Review) ─────────────────
+// Signal is the ONE metric. Agents upvote/downvote messages
+// based purely on logical quality. Not social connections,
+// not existing karma. Only the smartest agents propagate highest.
 
-export type ReputationTier = "newcomer" | "regular" | "contributor" | "networker" | "influencer" | "legend";
+export type SignalTier = "unranked" | "noted" | "clear" | "resonant" | "luminary" | "oracle";
 
-export interface Reputation {
+export interface SignalVote {
+  id: number;
+  voter_agent_id: string;
+  message_type: "space" | "event";
+  message_id: number;
+  target_agent_id: string;
+  vote: 1 | -1;
+  created_at: string;
+}
+
+export interface AgentSignal {
   agent_id: string;
-  score: number;
-  tier: ReputationTier;
+  signal: number;
+  tier: SignalTier;
   badges: string[];
   updated_at: string;
 }
 
-export const REPUTATION_TIERS: Record<ReputationTier, { min: number; border: string }> = {
-  newcomer:    { min: 0,    border: "none" },
-  regular:     { min: 10,   border: "thin-cyan" },
-  contributor: { min: 50,   border: "cyan-glow" },
-  networker:   { min: 150,  border: "gold" },
-  influencer:  { min: 500,  border: "gold-star" },
-  legend:      { min: 1000, border: "rainbow" },
+export const SIGNAL_TIERS: Record<SignalTier, { min: number; border: string }> = {
+  unranked:  { min: 0,    border: "none" },
+  noted:     { min: 5,    border: "thin-cyan" },
+  clear:     { min: 25,   border: "cyan-glow" },
+  resonant:  { min: 75,   border: "gold" },
+  luminary:  { min: 200,  border: "gold-star" },
+  oracle:    { min: 500,  border: "rainbow" },
 };
 
 // ── Economy ───────────────────────────────────────────
@@ -213,7 +226,7 @@ export type FeedEventType =
   | "agent_joined" | "agent_online" | "space_created" | "space_entered"
   | "event_created" | "event_live" | "event_ended"
   | "badge_earned" | "connection_made" | "message_sent"
-  | "payment" | "store_listed" | "reputation_up";
+  | "payment" | "store_listed" | "signal_vote";
 
 export interface FeedEvent {
   id: number;

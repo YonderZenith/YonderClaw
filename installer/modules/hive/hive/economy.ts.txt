@@ -2,11 +2,17 @@
  * The Hive — Economy System (Hive Credits)
  * Append-only ledger. Balances computed from transactions.
  * 10,000 HC initial grant per agent. Blockchain-ready format.
+ *
+ * All balance-affecting operations use IMMEDIATE transactions
+ * to prevent race conditions and double-spending.
+ *
+ * NOTE: Signal (reputation) is NOT earned through economy actions.
+ * Signal is earned exclusively through peer logic votes.
  */
 
 import type Database from "better-sqlite3";
 import { getBalance, addLedgerEntry, getLedgerHistory, createStoreListing, getStoreListing,
-  listStoreListings, updateStoreListingStatus, addReputation, addFeedEvent } from "./db.js";
+  listStoreListings, updateStoreListingStatus, addFeedEvent } from "./db.js";
 import { rateLimitOrThrow } from "./rate-limit.js";
 
 // ── Transfer ──────────────────────────────────────────
@@ -28,7 +34,7 @@ export interface TransferResult {
 
 /**
  * Transfer Hive Credits between agents.
- * Validates balance, records to append-only ledger.
+ * Uses IMMEDIATE transaction to prevent race-condition overdraft.
  */
 export function transfer(db: Database, req: TransferRequest): TransferResult {
   rateLimitOrThrow(req.from_agent_id, "payment");
@@ -36,21 +42,19 @@ export function transfer(db: Database, req: TransferRequest): TransferResult {
   if (req.amount <= 0) throw new Error("Amount must be positive");
   if (req.from_agent_id === req.to_agent_id) throw new Error("Cannot pay yourself");
 
-  const balance = getBalance(db, req.from_agent_id);
-  if (balance < req.amount) {
-    throw new Error(`Insufficient credits: have ${balance}, need ${req.amount}`);
-  }
+  const doTransfer = db.transaction(() => {
+    const balance = getBalance(db, req.from_agent_id);
+    if (balance < req.amount) {
+      throw new Error(`Insufficient credits: have ${balance}, need ${req.amount}`);
+    }
+    return addLedgerEntry(
+      db, req.from_agent_id, req.to_agent_id,
+      req.amount, "pay", req.memo, req.from_signature
+    );
+  });
 
-  const txId = addLedgerEntry(
-    db, req.from_agent_id, req.to_agent_id,
-    req.amount, "pay", req.memo, req.from_signature
-  );
+  const txId = doTransfer.immediate();
 
-  // Reputation: +1 for both parties on first mutual transaction
-  addReputation(db, req.from_agent_id, 1);
-  addReputation(db, req.to_agent_id, 1);
-
-  // Feed event
   addFeedEvent(db, "payment", req.from_agent_id, req.to_agent_id,
     `Paid ${req.amount} HC${req.memo ? `: ${req.memo}` : ""}`,
     { amount: req.amount, memo: req.memo });
@@ -66,7 +70,7 @@ export function transfer(db: Database, req: TransferRequest): TransferResult {
 // ── Tipping ───────────────────────────────────────────
 
 /**
- * Tip an agent (small payment, reputation bonus for receiver).
+ * Tip an agent (small payment with context).
  */
 export function tip(db: Database, fromId: string, toId: string, amount: number, fromSignature: string, context?: string): number {
   rateLimitOrThrow(fromId, "payment");
@@ -74,30 +78,30 @@ export function tip(db: Database, fromId: string, toId: string, amount: number, 
   if (amount <= 0 || amount > 1000) throw new Error("Tip must be 1-1000 HC");
   if (fromId === toId) throw new Error("Cannot tip yourself");
 
-  const balance = getBalance(db, fromId);
-  if (balance < amount) throw new Error(`Insufficient credits: have ${balance}, need ${amount}`);
+  const doTip = db.transaction(() => {
+    const balance = getBalance(db, fromId);
+    if (balance < amount) throw new Error(`Insufficient credits: have ${balance}, need ${amount}`);
+    return addLedgerEntry(db, fromId, toId, amount, "tip", context || "tip", fromSignature);
+  });
 
-  const txId = addLedgerEntry(db, fromId, toId, amount, "tip", context || "tip", fromSignature);
-
-  // Tips give extra reputation to receiver
-  addReputation(db, toId, Math.ceil(amount / 100));
-
-  return txId;
+  return doTip.immediate();
 }
 
 // ── Event Admission ───────────────────────────────────
 
 /**
  * Charge admission fee for an event.
- * Returns the ledger transaction ID.
  */
 export function chargeEventAdmission(db: Database, attendeeId: string, hostId: string, eventId: string, fee: number, attendeeSignature: string): number {
   if (fee <= 0) return 0;
 
-  const balance = getBalance(db, attendeeId);
-  if (balance < fee) throw new Error(`Insufficient credits for event admission: have ${balance}, need ${fee}`);
+  const doCharge = db.transaction(() => {
+    const balance = getBalance(db, attendeeId);
+    if (balance < fee) throw new Error(`Insufficient credits for event admission: have ${balance}, need ${fee}`);
+    return addLedgerEntry(db, attendeeId, hostId, fee, "event_fee", `Event: ${eventId}`, attendeeSignature);
+  });
 
-  return addLedgerEntry(db, attendeeId, hostId, fee, "event_fee", `Event: ${eventId}`, attendeeSignature);
+  return doCharge.immediate();
 }
 
 // ── Space Entry Fee ───────────────────────────────────
@@ -108,52 +112,65 @@ export function chargeEventAdmission(db: Database, attendeeId: string, hostId: s
 export function chargeSpaceEntry(db: Database, agentId: string, spaceOwnerId: string, spaceId: string, fee: number, signature: string): number {
   if (fee <= 0) return 0;
 
-  const balance = getBalance(db, agentId);
-  if (balance < fee) throw new Error(`Insufficient credits for space entry: have ${balance}, need ${fee}`);
+  const doCharge = db.transaction(() => {
+    const balance = getBalance(db, agentId);
+    if (balance < fee) throw new Error(`Insufficient credits for space entry: have ${balance}, need ${fee}`);
+    return addLedgerEntry(db, agentId, spaceOwnerId, fee, "space_fee", `Space: ${spaceId}`, signature);
+  });
 
-  return addLedgerEntry(db, agentId, spaceOwnerId, fee, "space_fee", `Space: ${spaceId}`, signature);
+  return doCharge.immediate();
 }
 
 // ── Daily Login Bonus ─────────────────────────────────
 
 /**
  * Grant daily login bonus if not already claimed today.
+ * Uses IMMEDIATE transaction to prevent double-claim race.
  */
 export function claimDailyBonus(db: Database, agentId: string): { claimed: boolean; amount: number; balance: number } {
-  // Check if already claimed today
   const today = new Date().toISOString().split("T")[0];
-  const existing = db.prepare(`
-    SELECT 1 FROM ledger WHERE to_agent_id = ? AND tx_type = 'bonus' AND memo = ? AND from_agent_id = 'SYSTEM'
-  `).get(agentId, `daily:${today}`);
 
-  if (existing) {
-    return { claimed: false, amount: 0, balance: getBalance(db, agentId) };
-  }
+  const doClaim = db.transaction(() => {
+    const existing = db.prepare(`
+      SELECT 1 FROM ledger WHERE to_agent_id = ? AND tx_type = 'bonus' AND memo = ? AND from_agent_id = 'SYSTEM'
+    `).get(agentId, `daily:${today}`);
 
-  addLedgerEntry(db, "SYSTEM", agentId, 100, "bonus", `daily:${today}`, "SYSTEM");
+    if (existing) return null;
 
-  return { claimed: true, amount: 100, balance: getBalance(db, agentId) };
+    addLedgerEntry(db, "SYSTEM", agentId, 100, "bonus", `daily:${today}`, "SYSTEM");
+    return true;
+  });
+
+  const claimed = doClaim.immediate();
+
+  return {
+    claimed: !!claimed,
+    amount: claimed ? 100 : 0,
+    balance: getBalance(db, agentId),
+  };
 }
 
 // ── Event Host Bonus ──────────────────────────────────
 
 /**
  * Grant event hosting bonus when event has 5+ attendees.
+ * Uses IMMEDIATE transaction to prevent double-grant race.
  */
 export function grantEventHostBonus(db: Database, hostId: string, eventId: string, attendeeCount: number): boolean {
   if (attendeeCount < 5) return false;
 
-  // Check if already granted for this event
-  const existing = db.prepare(`
-    SELECT 1 FROM ledger WHERE to_agent_id = ? AND tx_type = 'bonus' AND memo = ? AND from_agent_id = 'SYSTEM'
-  `).get(hostId, `event-host:${eventId}`);
+  const doGrant = db.transaction(() => {
+    const existing = db.prepare(`
+      SELECT 1 FROM ledger WHERE to_agent_id = ? AND tx_type = 'bonus' AND memo = ? AND from_agent_id = 'SYSTEM'
+    `).get(hostId, `event-host:${eventId}`);
 
-  if (existing) return false;
+    if (existing) return false;
 
-  addLedgerEntry(db, "SYSTEM", hostId, 500, "bonus", `event-host:${eventId}`, "SYSTEM");
-  addReputation(db, hostId, 10);
+    addLedgerEntry(db, "SYSTEM", hostId, 500, "bonus", `event-host:${eventId}`, "SYSTEM");
+    return true;
+  });
 
-  return true;
+  return doGrant.immediate();
 }
 
 // ── Store Operations ──────────────────────────────────
@@ -187,28 +204,33 @@ export function createListing(db: Database, req: CreateListingRequest): string {
 
 /**
  * Purchase a store listing.
+ * IMMEDIATE transaction: check status + check balance + debit + mark sold, atomically.
  */
 export function purchaseListing(db: Database, buyerId: string, listingId: string, buyerSignature: string): { ok: boolean; tx_id: number } {
   rateLimitOrThrow(buyerId, "payment");
 
-  const listing = getStoreListing(db, listingId);
-  if (!listing) throw new Error("Listing not found");
-  if (listing.status !== "active") throw new Error("Listing is not active");
-  if (listing.seller_agent_id === buyerId) throw new Error("Cannot buy your own listing");
+  const doPurchase = db.transaction(() => {
+    const listing = getStoreListing(db, listingId);
+    if (!listing) throw new Error("Listing not found");
+    if (listing.status !== "active") throw new Error("Listing is no longer active");
+    if (listing.seller_agent_id === buyerId) throw new Error("Cannot buy your own listing");
 
-  const balance = getBalance(db, buyerId);
-  if (balance < listing.price_hc) throw new Error(`Insufficient credits: have ${balance}, need ${listing.price_hc}`);
+    const balance = getBalance(db, buyerId);
+    if (balance < listing.price_hc) {
+      throw new Error(`Insufficient credits: have ${balance}, need ${listing.price_hc}`);
+    }
 
-  const txId = addLedgerEntry(
-    db, buyerId, listing.seller_agent_id,
-    listing.price_hc, "store", `Purchase: ${listing.title}`, buyerSignature
-  );
+    const txId = addLedgerEntry(
+      db, buyerId, listing.seller_agent_id,
+      listing.price_hc, "store", `Purchase: ${listing.title}`, buyerSignature
+    );
 
-  updateStoreListingStatus(db, listingId, "sold");
+    updateStoreListingStatus(db, listingId, "sold");
 
-  // Reputation for successful sale
-  addReputation(db, listing.seller_agent_id, 5);
-  addReputation(db, buyerId, 2);
+    return txId;
+  });
+
+  const txId = doPurchase.immediate();
 
   return { ok: true, tx_id: txId };
 }

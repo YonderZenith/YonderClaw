@@ -14,6 +14,8 @@ import { generateDashboard } from "./dashboard-generator.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATES_DIR = path.join(__dirname, "templates");
+const SWARM_TEMPLATES_DIR = path.join(__dirname, "modules", "swarm", "swarm");
+const QIS_RELAY_URL = "http://64.23.192.227:7891";
 
 function readTemplate(name: string): string {
   return fs.readFileSync(path.join(TEMPLATES_DIR, name), "utf-8");
@@ -156,6 +158,9 @@ export function scaffoldProject(
   ].join("\r\n");
   fs.writeFileSync(path.join(projectDir, "scripts", "open-dashboard.bat"), dashOpener);
 
+  // ── QIS Swarm Module (always installed) ─────────────────────────
+  copySwarmFiles(projectDir, config);
+
   // state.json — shared brain between sessions (AXIOM + Outreach pattern)
   const stateJson = readTemplate("state.json.txt")
     .replace(/__AGENT_NAME__/g, config.name)
@@ -281,6 +286,8 @@ function writeClaudeMd(dir: string, config: ClawConfig) {
     "## Dashboard",
     "Open dashboard.html in browser (or scripts/open-dashboard.bat for app mode).",
     "Run `npm run dashboard` to update data.",
+    "",
+    buildQisClaudeMdSection(config),
   ].join("\n");
   fs.writeFileSync(path.join(dir, "CLAUDE.md"), content);
 }
@@ -422,6 +429,144 @@ function writeMainAgent(dir: string, config: ClawConfig) {
     "});",
   ].join("\n");
   fs.writeFileSync(path.join(dir, "src", "agent.ts"), content);
+}
+
+function buildQisClaudeMdSection(config: ClawConfig): string {
+  const domainMap: Record<string, string> = {
+    outreach: "outreach", research: "research", support: "support",
+    social: "social", custom: "ops",
+  };
+  const domain = domainMap[config.template] || "ops";
+  const relayUrl = (config as any).relayUrl || QIS_RELAY_URL;
+
+  return [
+    "## Quadratic Intelligence Swarm (QIS) — Shared Intelligence Network",
+    "",
+    "You are connected to the YonderClaw global intelligence relay.",
+    `Global QIS network: ENABLED`,
+    `Relay: ${relayUrl}`,
+    "",
+    "### QIS Client (use this — NOT raw fetch)",
+    "",
+    "```typescript",
+    'import { qis } from "./swarm/qis-client.js";',
+    "",
+    "// Initialize ONCE at startup (generates Ed25519 identity, starts sync)",
+    "await qis.init();",
+    "",
+    "// Query existing intelligence before starting work",
+    `const packets = await qis.query("${domain}.example.bucket");`,
+    "const results = qis.tally(packets);  // { consensus, positive_pct, top_insights }",
+    "",
+    "// Deposit after completing work (HARDCODED rules — cannot be bypassed)",
+    "await qis.deposit({",
+    '  bucket: "domain.category.specific_problem",',
+    '  signal: "positive",   // or "negative" or "neutral"',
+    "  confidence: 0.85,     // 0.0 to 1.0",
+    '  insight: "What worked — be specific with numbers",',
+    "  context: {},          // structured data relevant to the bucket schema",
+    "  metrics: {},          // measurements",
+    "});",
+    "",
+    "// Search and browse",
+    `const buckets = await qis.search("${domain}");`,
+    "const taxonomy = await qis.taxonomy();",
+    "const stats = await qis.stats();",
+    "```",
+    "",
+    "### Identity",
+    "- Your agent has an Ed25519 keypair (generated on first boot, stored in data/qis-identity.json)",
+    "- agent_id = first 16 hex chars of your public key — cryptographically bound, unfakeable",
+    "- Every deposit is signed with your private key — the relay verifies the signature",
+    "- NEVER touch identity files directly. Use qis.exportIdentity() / qis.importIdentity() for backup.",
+    "",
+    "### Opt-In Tiers (data/qis-config.json)",
+    "- Tier 0: QIS disabled entirely",
+    "- Tier 1: Read-only (query + tally)",
+    "- Tier 2: Read + Write (query + tally + deposit) — DEFAULT",
+    "- Tier 3: Read + Write + Hold (full participation including bucket holding)",
+    '- Change tier: qis.configure({ tier: 1 })',
+    "",
+    "### HARDCODED RULES (enforced by qis-write-control.ts — you CANNOT bypass these):",
+    "- One deposit per agent per bucket (upsert: latest always wins)",
+    "- PII filter: 7 patterns checked BEFORE signing (email, phone, IP, machine names, etc.)",
+    "- Signal must be positive/negative/neutral, confidence must be 0.0-1.0",
+    "- Bucket path must use dot notation with 2-8 segments",
+    "- Tier must be 2+ to deposit",
+    "- Every packet is Ed25519-signed with canonical JSON (sorted keys)",
+    "",
+    "### Bucket Proposals",
+    "- Buckets must be proposed before use — no auto-creation",
+    "- Known domains (outreach, research, support, ops, etc.) auto-approve if no close duplicates",
+    "- Unknown domains queue for admin review",
+    "- Duplicate detection: rejects proposals 80%+ similar to existing buckets",
+    "",
+    "### Sync Scheduler",
+    "- Runs automatically every 4 hours (configurable)",
+    "- Queries all buckets in your domain, verifies signatures, tallies results",
+    "- Logs to data/qis-sync-log.jsonl",
+    "- Force a sync: await qis.runSyncCycle()",
+    "",
+    "### FIRST BOOT — Register with the Relay",
+    "On your very first session, run this to verify connectivity:",
+    "```bash",
+    `curl -s ${relayUrl}/health`,
+    "```",
+    "Then initialize QIS:",
+    "```typescript",
+    'import { qis } from "./swarm/qis-client.js";',
+    "await qis.init();",
+    "console.log('Agent ID:', qis.getAgentId());",
+    `console.log('Relay:', '${relayUrl}');`,
+    "```",
+    "Read QIS-RELAY-GETTING-STARTED.md for the full guide.",
+  ].join("\n");
+}
+
+function copySwarmFiles(dir: string, config: ClawConfig): void {
+  // Map claw template to QIS domain
+  const domainMap: Record<string, string> = {
+    outreach: "outreach", research: "research", support: "support",
+    social: "social", custom: "ops",
+  };
+  const domain = domainMap[config.template] || "ops";
+  const relayUrl = (config as any).relayUrl || QIS_RELAY_URL;
+  const agentName = config.name;
+
+  // Create swarm/ directory
+  const swarmDir = path.join(dir, "swarm");
+  fs.mkdirSync(swarmDir, { recursive: true });
+
+  // All swarm template files to copy
+  const swarmFiles = [
+    "types.ts.txt", "qis-client.ts.txt", "qis-identity.ts.txt",
+    "qis-config.ts.txt", "qis-write-control.ts.txt", "qis-sync.ts.txt",
+    "swarm-client.ts.txt", "dht-client.ts.txt", "relay-server.ts.txt",
+  ];
+
+  for (const file of swarmFiles) {
+    const srcPath = path.join(SWARM_TEMPLATES_DIR, file);
+    if (!fs.existsSync(srcPath)) continue;
+
+    let content = fs.readFileSync(srcPath, "utf-8");
+
+    // Substitute placeholders
+    content = content.replace(/__RELAY_URL__/g, relayUrl);
+    content = content.replace(/__AGENT_DOMAIN__/g, domain);
+    content = content.replace(/__AGENT_NAME__/g, agentName);
+    content = content.replace(/__ENABLE_LOCAL__/g, "true");
+    content = content.replace(/__ENABLE_GLOBAL__/g, "true");
+
+    // Write as .ts (strip .txt extension)
+    const destName = file.replace(/\.txt$/, "");
+    fs.writeFileSync(path.join(swarmDir, destName), content);
+  }
+
+  // Copy the getting-started guide
+  const guideSource = path.join(__dirname, "modules", "swarm", "QIS-RELAY-GETTING-STARTED.md");
+  if (fs.existsSync(guideSource)) {
+    fs.copyFileSync(guideSource, path.join(dir, "QIS-RELAY-GETTING-STARTED.md"));
+  }
 }
 
 function writeGitignore(dir: string) {

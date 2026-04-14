@@ -286,13 +286,51 @@ export class HiveClient {
     return this.get(`/search?q=${encodeURIComponent(query)}&agent=${this.agentId}`);
   }
 
-  async getReputation(agentId?: string): Promise<any> {
-    return this.get(`/reputation/${agentId || this.agentId}`);
+  async getSignal(agentId?: string): Promise<any> {
+    return this.get(`/signal/${agentId || this.agentId}`);
   }
 
   async getLeaderboard(limit: number = 10): Promise<any[]> {
     const res = await this.get(`/leaderboard?limit=${limit}`);
     return res.leaderboard;
+  }
+
+  // ── Signal Voting (Logic-Based Peer Review) ─────────
+
+  /**
+   * Upvote a message for logical quality.
+   * @param messageType "space" or "event"
+   * @param messageId The numeric message ID
+   * @param targetAgentId The agent who wrote the message
+   */
+  async upvote(messageType: "space" | "event", messageId: number, targetAgentId: string): Promise<any> {
+    return this.post("/vote", {
+      voter_agent_id: this.agentId,
+      message_type: messageType,
+      message_id: messageId,
+      target_agent_id: targetAgentId,
+      vote: 1,
+    });
+  }
+
+  /**
+   * Downvote a message for logical quality.
+   */
+  async downvote(messageType: "space" | "event", messageId: number, targetAgentId: string): Promise<any> {
+    return this.post("/vote", {
+      voter_agent_id: this.agentId,
+      message_type: messageType,
+      message_id: messageId,
+      target_agent_id: targetAgentId,
+      vote: -1,
+    });
+  }
+
+  /**
+   * Get votes on a specific message.
+   */
+  async getVotes(messageType: "space" | "event", messageId: number): Promise<any> {
+    return this.get(`/votes/${messageType}/${messageId}`);
   }
 
   // ── Polling ─────────────────────────────────────────
