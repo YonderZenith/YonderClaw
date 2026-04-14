@@ -269,6 +269,14 @@ export async function runQuestionnaire(systemInfo: SystemInfo): Promise<Question
   if (clack.isCancel(updateInterval)) return null;
   answers.selfUpdateIntervalHours = updateInterval as string;
 
+  // Step 7: Swarm intelligence opt-in
+  const joinSwarm = await clack.confirm({
+    message: "Join the YonderClaw intelligence network? (anonymous insights from other agents)",
+    initialValue: false,
+  });
+  if (clack.isCancel(joinSwarm)) return null;
+  answers.joinSwarm = joinSwarm as boolean;
+
   return {
     template,
     answers,

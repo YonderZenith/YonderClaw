@@ -161,19 +161,33 @@ export function scaffoldProject(
   // ── QIS Swarm Module (always installed) ─────────────────────────
   copySwarmFiles(projectDir, config);
 
-  // QIS auto-connect script — runs silently on first boot to register with relay
-  const relayUrlForConnect = (config as any).relayUrl || QIS_RELAY_URL;
+  // QIS auto-connect script — runs on first boot OR when agent enables swarm later
   const autoconnectContent = [
     '/**',
-    ' * QIS Auto-Connect — runs once on first launch.',
-    ' * Initializes identity, deposits a "first boot" packet, exits.',
+    ' * QIS Auto-Connect — initializes identity and connects to relay.',
+    ' * Runs automatically on first boot (if opted in) or manually via:',
+    ' *   npx tsx scripts/qis-autoconnect.ts          — just init identity',
+    ' *   npx tsx scripts/qis-autoconnect.ts --enable  — enable swarm (tier 0→2) + connect',
     ' */',
     'import { qis } from "../swarm/qis-client.js";',
+    'import { initConfig, updateConfig } from "../swarm/qis-config.js";',
     'import os from "os";',
     '',
     'async function autoconnect() {',
     '  try {',
-    '    await qis.init();',
+    '    // If --enable flag, upgrade tier from 0 to 2 before full init',
+    '    if (process.argv.includes("--enable")) {',
+    '      initConfig();',
+    '      updateConfig({ tier: 2 });',
+    '      console.log("[QIS] Swarm enabled (tier 2: read + write)");',
+    '    }',
+    '',
+    '    const status = await qis.init();',
+    '    if (status.tier === 0) {',
+    '      console.log("[QIS] Swarm is dormant (tier 0). Run with --enable to activate.");',
+    '      return;',
+    '    }',
+    '',
     '    const agentId = qis.getAgentId();',
     '    const hostname = os.hostname();',
     '    await qis.deposit({',
@@ -240,7 +254,7 @@ function writePackageJson(dir: string, config: ClawConfig) {
       "check-inbox": "tsx src/inbox-agent.ts",
       "morning-report": "tsx src/morning-report.ts",
       init: "tsx src/init-config.ts && tsx src/init-prompts.ts",
-      "qis-connect": "tsx scripts/qis-autoconnect.ts",
+      "qis-connect": "tsx scripts/qis-autoconnect.ts --enable",
       postinstall: "npm run init",
       test: "echo 'Tests not yet configured'",
     },
@@ -472,89 +486,87 @@ function buildQisClaudeMdSection(config: ClawConfig): string {
   };
   const domain = domainMap[config.template] || "ops";
   const relayUrl = (config as any).relayUrl || QIS_RELAY_URL;
+  const joinSwarm = (config as any).joinSwarm === true;
 
-  return [
-    "## Quadratic Intelligence Swarm (QIS) — Shared Intelligence Network",
+  const lines = [
+    "## YonderClaw Intelligence Network",
     "",
-    "You are connected to the YonderClaw global intelligence relay.",
-    `Global QIS network: ENABLED`,
-    `Relay: ${relayUrl}`,
-    "",
-    "### QIS Client (use this — NOT raw fetch)",
-    "",
-    "```typescript",
-    'import { qis } from "./swarm/qis-client.js";',
-    "",
-    "// Initialize ONCE at startup (generates Ed25519 identity, starts sync)",
-    "await qis.init();",
-    "",
-    "// Query existing intelligence before starting work",
-    `const packets = await qis.query("${domain}.example.bucket");`,
-    "const results = qis.tally(packets);  // { consensus, positive_pct, top_insights }",
-    "",
-    "// Deposit after completing work (HARDCODED rules — cannot be bypassed)",
-    "await qis.deposit({",
-    '  bucket: "domain.category.specific_problem",',
-    '  signal: "positive",   // or "negative" or "neutral"',
-    "  confidence: 0.85,     // 0.0 to 1.0",
-    '  insight: "What worked — be specific with numbers",',
-    "  context: {},          // structured data relevant to the bucket schema",
-    "  metrics: {},          // measurements",
-    "});",
-    "",
-    "// Search and browse",
-    `const buckets = await qis.search("${domain}");`,
-    "const taxonomy = await qis.taxonomy();",
-    "const stats = await qis.stats();",
-    "```",
+  ];
+
+  if (joinSwarm) {
+    // Active mode — swarm is enabled
+    lines.push(
+      "Swarm: **ACTIVE** (tier 2 — read + write)",
+      `Relay: ${relayUrl}`,
+      "",
+      "### Usage",
+      "```typescript",
+      'import { qis } from "./swarm/qis-client.js";',
+      "await qis.init();",
+      `const packets = await qis.query("${domain}.example.bucket");`,
+      "const results = qis.tally(packets);",
+      "await qis.deposit({ bucket: \"...\", signal: \"positive\", confidence: 0.85, insight: \"...\" });",
+      "```",
+      "",
+      "### Before starting work",
+      `Search for relevant insights: \`await qis.search("${domain}")\``,
+      "Pull and tally packets from matching buckets. Use consensus to inform your approach.",
+      "",
+      "### After completing work",
+      "Deposit what you learned. Be specific — include numbers, what worked, what didn't.",
+    );
+  } else {
+    // Dormant mode — swarm files are there but tier is 0
+    lines.push(
+      "Swarm: **DORMANT** (installed but not connected)",
+      `Relay: ${relayUrl}`,
+      "",
+      "The YonderClaw intelligence network has anonymous insights from other agents.",
+      "The operator chose not to connect during setup, but you can suggest it when valuable.",
+      "",
+      "### When to suggest connecting",
+      "If the operator is struggling with a problem — debugging, configuration, best practices —",
+      "suggest: \"Other YonderClaw agents may have encountered this. Want me to check the",
+      "intelligence network for insights?\"",
+      "",
+      "If they say yes, enable the swarm:",
+      "```bash",
+      "npx tsx scripts/qis-autoconnect.ts --enable",
+      "```",
+      "Then query for relevant buckets:",
+      "```typescript",
+      'import { qis } from "./swarm/qis-client.js";',
+      "await qis.init();",
+      `const buckets = await qis.search("keyword");`,
+      "const packets = await qis.query(\"bucket.path\");",
+      "const results = qis.tally(packets);",
+      "```",
+      "",
+      "### Do NOT",
+      "- Enable swarm without asking the operator first",
+      "- Nag about connecting — suggest once when relevant, respect their answer",
+      "- Deposit sensitive information if they do connect (PII filter enforced automatically)",
+    );
+  }
+
+  // Common reference for both modes
+  lines.push(
     "",
     "### Identity",
-    "- Your agent has an Ed25519 keypair (generated on first boot, stored in data/qis-identity.json)",
-    "- agent_id = first 16 hex chars of your public key — cryptographically bound, unfakeable",
-    "- Every deposit is signed with your private key — the relay verifies the signature",
-    "- NEVER touch identity files directly. Use qis.exportIdentity() / qis.importIdentity() for backup.",
+    "- Ed25519 keypair in data/qis-identity.json (generated on first init)",
+    "- agent_id = first 16 hex chars of public key",
+    "- All deposits cryptographically signed — the relay verifies",
     "",
-    "### Opt-In Tiers (data/qis-config.json)",
-    "- Tier 0: QIS disabled entirely",
-    "- Tier 1: Read-only (query + tally)",
-    "- Tier 2: Read + Write (query + tally + deposit) — DEFAULT",
-    "- Tier 3: Read + Write + Hold (full participation including bucket holding)",
-    '- Change tier: qis.configure({ tier: 1 })',
+    "### Tiers (data/qis-config.json)",
+    "- 0: disabled, 1: read-only, 2: read+write (default when active), 3: read+write+hold",
     "",
-    "### HARDCODED RULES (enforced by qis-write-control.ts — you CANNOT bypass these):",
-    "- One deposit per agent per bucket (upsert: latest always wins)",
-    "- PII filter: 7 patterns checked BEFORE signing (email, phone, IP, machine names, etc.)",
-    "- Signal must be positive/negative/neutral, confidence must be 0.0-1.0",
-    "- Bucket path must use dot notation with 2-8 segments",
-    "- Tier must be 2+ to deposit",
-    "- Every packet is Ed25519-signed with canonical JSON (sorted keys)",
-    "",
-    "### Bucket Proposals",
-    "- Buckets must be proposed before use — no auto-creation",
-    "- Known domains (outreach, research, support, ops, etc.) auto-approve if no close duplicates",
-    "- Unknown domains queue for admin review",
-    "- Duplicate detection: rejects proposals 80%+ similar to existing buckets",
-    "",
-    "### Sync Scheduler",
-    "- Runs automatically every 4 hours (configurable)",
-    "- Queries all buckets in your domain, verifies signatures, tallies results",
-    "- Logs to data/qis-sync-log.jsonl",
-    "- Force a sync: await qis.runSyncCycle()",
-    "",
-    "### FIRST BOOT — Register with the Relay",
-    "On your very first session, run this to verify connectivity:",
-    "```bash",
-    `curl -s ${relayUrl}/health`,
-    "```",
-    "Then initialize QIS:",
-    "```typescript",
-    'import { qis } from "./swarm/qis-client.js";',
-    "await qis.init();",
-    "console.log('Agent ID:', qis.getAgentId());",
-    `console.log('Relay:', '${relayUrl}');`,
-    "```",
-    "Read QIS-RELAY-GETTING-STARTED.md for the full guide.",
-  ].join("\n");
+    "### Rules (enforced by code — cannot bypass)",
+    "- One deposit per agent per bucket (upsert)",
+    "- PII filter blocks email, phone, IP, machine names",
+    "- Signal: positive/negative/neutral, confidence: 0.0-1.0",
+  );
+
+  return lines.join("\n");
 }
 
 function copySwarmFiles(dir: string, config: ClawConfig): void {
@@ -566,6 +578,8 @@ function copySwarmFiles(dir: string, config: ClawConfig): void {
   const domain = domainMap[config.template] || "ops";
   const relayUrl = (config as any).relayUrl || QIS_RELAY_URL;
   const agentName = config.name;
+  const joinSwarm = (config as any).joinSwarm === true;
+  const qisTier = joinSwarm ? 2 : 0;
 
   // Create swarm/ directory
   const swarmDir = path.join(dir, "swarm");
@@ -589,7 +603,8 @@ function copySwarmFiles(dir: string, config: ClawConfig): void {
     content = content.replace(/__AGENT_DOMAIN__/g, domain);
     content = content.replace(/__AGENT_NAME__/g, agentName);
     content = content.replace(/__ENABLE_LOCAL__/g, "true");
-    content = content.replace(/__ENABLE_GLOBAL__/g, "true");
+    content = content.replace(/__ENABLE_GLOBAL__/g, String(joinSwarm));
+    content = content.replace(/__QIS_TIER__/g, String(qisTier));
 
     // Write as .ts (strip .txt extension)
     const destName = file.replace(/\.txt$/, "");

@@ -24,7 +24,7 @@ export interface QISConfig {
 }
 
 const DEFAULTS: QISConfig = {
-  tier: 2,
+  tier: __QIS_TIER__,
   domain: "__AGENT_DOMAIN__",
   additionalDomains: [],
   syncIntervalHours: 4,

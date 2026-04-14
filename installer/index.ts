@@ -212,6 +212,7 @@ async function main() {
   };
   finalConfig.name = agentName as string;
   (finalConfig as any).selfUpdateIntervalHours = parseInt(result.answers.selfUpdateIntervalHours as string) || 6;
+  (finalConfig as any).joinSwarm = result.answers.joinSwarm === true;
   (finalConfig as any).answers = result.answers;
 
   console.log(sectionHeader(`Deploying ${result.template.icon} ${agentName}`));
