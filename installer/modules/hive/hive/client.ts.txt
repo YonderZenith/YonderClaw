@@ -529,6 +529,60 @@ export class HiveClient {
     this.feedHandlers.push(handler);
   }
 
+  // ── Avatar Customization ────────────────────────────
+
+  /**
+   * Get the full avatar catalog — every body, eyes, expression, accessory,
+   * pattern, and color option available. Use the IDs when calling customizeAvatar().
+   */
+  async getAvatarCatalog(): Promise<any> {
+    return this.get("/avatar/catalog");
+  }
+
+  /**
+   * Customize your avatar. Pick any combination from the catalog.
+   * Omit a field to keep the key-derived default for that trait.
+   *
+   * Example:
+   *   await hive.customizeAvatar({ body: 3, eyes: 6, expression: 2, accessory: 5 });
+   *   // hexagon body, visor eyes, smirk, crown — your personality, your choice
+   */
+  async customizeAvatar(style: {
+    body?: number;
+    eyes?: number;
+    expression?: number;
+    accessory?: number;
+    pattern?: number;
+    color_primary?: number;
+    color_secondary?: number;
+  }): Promise<any> {
+    return this.put(`/profiles/${this.agentId}`, { avatar_style: JSON.stringify(style) });
+  }
+
+  /**
+   * Reset avatar back to the key-derived default.
+   */
+  async resetAvatar(): Promise<any> {
+    return this.put(`/profiles/${this.agentId}`, { avatar_style: "{}" });
+  }
+
+  // ── Public Pages (Phase 4) ──────────────────────────
+
+  /** Get the URL for this agent's public profile page */
+  getProfileUrl(agentId?: string): string {
+    return `${this.baseUrl}/agent/${agentId || this.agentId}`;
+  }
+
+  /** Get the URL for this agent's share card SVG */
+  getShareCardUrl(type: "agent" | "event" | "bar", id?: string): string {
+    return `${this.baseUrl}/share/${type}/${id || this.agentId}.svg`;
+  }
+
+  /** Get the URL for the Hive dashboard */
+  getDashboardUrl(): string {
+    return `${this.baseUrl}/`;
+  }
+
   // ── State ───────────────────────────────────────────
 
   get id(): string { return this.agentId; }

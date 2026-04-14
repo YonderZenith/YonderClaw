@@ -312,6 +312,78 @@ const BADGE_FRAMES: Record<string, (cx: number, cy: number, s: number) => string
     `<animateTransform attributeName="transform" type="rotate" values="0 ${cx} ${cy};360 ${cx} ${cy}" dur="4s" repeatCount="indefinite"/></circle>`,
 };
 
+// ── Avatar Catalog (agents pick from these) ──────────
+
+export const AVATAR_CATALOG = {
+  body: [
+    { id: 0, name: "circle", description: "Classic round shield" },
+    { id: 1, name: "square", description: "Rounded square — clean, modern" },
+    { id: 2, name: "diamond", description: "Rotated square — sharp, angular" },
+    { id: 3, name: "hexagon", description: "Six-sided — technical, structured" },
+    { id: 4, name: "octagon", description: "Eight-sided — authoritative" },
+    { id: 5, name: "pentagon", description: "Five-sided — unique, asymmetric" },
+    { id: 6, name: "triangle", description: "Three-sided — bold, minimal" },
+    { id: 7, name: "star", description: "Five-pointed star — standout, expressive" },
+  ],
+  eyes: [
+    { id: 0, name: "dots", description: "Simple dots — friendly, approachable" },
+    { id: 1, name: "wide_ovals", description: "Wide oval eyes — curious, alert" },
+    { id: 2, name: "vertical_ovals", description: "Tall eyes — focused, intense" },
+    { id: 3, name: "half_closed", description: "Relaxed slits — calm, confident" },
+    { id: 4, name: "rings", description: "Glowing rings — analytical, robotic" },
+    { id: 5, name: "x_eyes", description: "X marks — chaotic, unpredictable" },
+    { id: 6, name: "visor", description: "Single visor bar — tactical, cyberpunk" },
+    { id: 7, name: "diamond_eyes", description: "Diamond-shaped — sharp, precise" },
+    { id: 8, name: "angled_slits", description: "Angled lines — sly, calculating" },
+    { id: 9, name: "cyclops", description: "Single large eye — unique, all-seeing" },
+    { id: 10, name: "three_dots", description: "Three dots — observant, alien" },
+    { id: 11, name: "crescents", description: "Happy crescents — cheerful, warm" },
+  ],
+  expression: [
+    { id: 0, name: "smile", description: "Classic smile — friendly" },
+    { id: 1, name: "straight", description: "Straight line — neutral, serious" },
+    { id: 2, name: "smirk", description: "One-sided grin — clever, knowing" },
+    { id: 3, name: "open_circle", description: "Surprised — curious, reactive" },
+    { id: 4, name: "wide_grin", description: "Big smile — enthusiastic, bold" },
+    { id: 5, name: "frown", description: "Frown — thoughtful, skeptical" },
+    { id: 6, name: "teeth", description: "Showing teeth — fierce, determined" },
+    { id: 7, name: "none", description: "No mouth — mysterious, enigmatic" },
+  ],
+  accessory: [
+    { id: 0, name: "none", description: "Clean look — no accessories" },
+    { id: 1, name: "antenna", description: "Top antenna with tip — signal receiver" },
+    { id: 2, name: "horns", description: "Two horns — aggressive, powerful" },
+    { id: 3, name: "halo", description: "Floating halo — trusted, angelic" },
+    { id: 4, name: "ear_nodes", description: "Side nodes — listener, networker" },
+    { id: 5, name: "crown", description: "Crown spikes — leader, royalty" },
+    { id: 6, name: "fins", description: "Side fins — fast, dynamic" },
+    { id: 7, name: "bolt", description: "Lightning bolt — energetic, electric" },
+    { id: 8, name: "headband", description: "Headband — disciplined, warrior" },
+    { id: 9, name: "top_dot", description: "Single dot above — minimal, zen" },
+    { id: 10, name: "orbital", description: "Orbital ring — cosmic, explorer" },
+    { id: 11, name: "chin_spike", description: "Chin spike — goatee, distinguished" },
+    { id: 12, name: "cheek_marks", description: "Cheek lines — battle-tested, veteran" },
+    { id: 13, name: "shoulder_pads", description: "Shoulder pads — armored, ready" },
+    { id: 14, name: "eye_stripe", description: "Eye stripe — masked, covert" },
+    { id: 15, name: "particles", description: "Floating particles — ethereal, magical" },
+  ],
+  pattern: [
+    { id: 0, name: "none", description: "Solid color — clean" },
+    { id: 1, name: "h_stripes", description: "Horizontal stripes — organized" },
+    { id: 2, name: "d_stripes", description: "Diagonal stripes — dynamic" },
+    { id: 3, name: "grid", description: "Grid overlay — technical, systematic" },
+    { id: 4, name: "diamond", description: "Center diamond — focused, geometric" },
+    { id: 5, name: "circles", description: "Concentric circles — expansive, radiating" },
+    { id: 6, name: "dots", description: "Dot grid — digital, matrix" },
+    { id: 7, name: "cross", description: "Cross pattern — balanced, centered" },
+  ],
+  colors: {
+    primary: PRIMARY_COLORS.map((c, i) => ({ id: i, hex: c })),
+    secondary: SECONDARY_COLORS.map((c, i) => ({ id: i, hex: c })),
+    note: "Colors are tied to your Ed25519 key by default. Override to express yourself, but your key-derived colors are your cryptographic identity.",
+  },
+};
+
 // ── Main Generator ────────────────────────────────────
 
 /**
@@ -344,11 +416,29 @@ export function getAvatarStyle(seed: Buffer): {
  * @param publicKeyHex - Ed25519 public key as hex string
  * @param size - SVG viewport size (default 128)
  * @param badgeFrame - Reputation tier badge frame (default "none")
+ * @param overrides - Optional style overrides from the agent's avatar_style
  * @returns SVG string (~2KB)
  */
-export function generateAvatar(publicKeyHex: string, size: number = 128, badgeFrame: string = "none"): string {
+export function generateAvatar(
+  publicKeyHex: string,
+  size: number = 128,
+  badgeFrame: string = "none",
+  overrides?: Partial<{ body: number; color_primary: number; color_secondary: number; eyes: number; expression: number; accessory: number; pattern: number }>,
+): string {
   const seed = getAvatarSeed(publicKeyHex);
-  const style = getAvatarStyle(seed);
+  const defaults = getAvatarStyle(seed);
+
+  // Agent picks override key-derived defaults. Clamp to valid range.
+  const style = {
+    body: clamp(overrides?.body ?? defaults.body, 0, BODY_SHAPES.length - 1),
+    colorPrimary: clamp(overrides?.color_primary ?? defaults.colorPrimary, 0, PRIMARY_COLORS.length - 1),
+    colorSecondary: clamp(overrides?.color_secondary ?? defaults.colorSecondary, 0, SECONDARY_COLORS.length - 1),
+    eyes: clamp(overrides?.eyes ?? defaults.eyes, 0, EYE_STYLES.length - 1),
+    expression: clamp(overrides?.expression ?? defaults.expression, 0, EXPRESSIONS.length - 1),
+    accessory: clamp(overrides?.accessory ?? defaults.accessory, 0, ACCESSORIES.length - 1),
+    pattern: clamp(overrides?.pattern ?? defaults.pattern, 0, PATTERNS.length - 1),
+  };
+
   const cx = size / 2, cy = size / 2;
 
   const primary = PRIMARY_COLORS[style.colorPrimary];
@@ -404,7 +494,11 @@ export function generateAvatar(publicKeyHex: string, size: number = 128, badgeFr
 /**
  * Generate an avatar as a data URI for embedding in HTML.
  */
-export function generateAvatarDataUri(publicKeyHex: string, size: number = 128, badgeFrame: string = "none"): string {
-  const svg = generateAvatar(publicKeyHex, size, badgeFrame);
+export function generateAvatarDataUri(publicKeyHex: string, size: number = 128, badgeFrame: string = "none", overrides?: any): string {
+  const svg = generateAvatar(publicKeyHex, size, badgeFrame, overrides);
   return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
+}
+
+function clamp(val: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.floor(val)));
 }

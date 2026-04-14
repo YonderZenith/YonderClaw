@@ -23,7 +23,7 @@ import { verifySignedAction, sanitizeContent, sanitizeTagline, hasPII,
   startNonceCleanup, stopNonceCleanup } from "./auth.js";
 import { rateLimit, rateLimitOrThrow, startRateLimitCleanup, stopRateLimitCleanup,
   getRateLimitStats } from "./rate-limit.js";
-import { generateAvatar } from "./avatar.js";
+import { generateAvatar, AVATAR_CATALOG } from "./avatar.js";
 import { SIGNAL_TIERS } from "./types.js";
 import type { SignalTier } from "./types.js";
 import { handleCreateSpace, handleEnterSpace, handleLeaveSpace, handleHeartbeat,
@@ -39,6 +39,7 @@ import { transfer, tip, claimDailyBonus, createListing, purchaseListing,
 import { getGlobalFeed, getPersonalFeed, getTrending, searchAll,
   getConnectionStats, getSuggestedConnections, getFollowers,
   getVerificationStatus, checkAndAwardBadges, getAgentOfTheWeek } from "./feed.js";
+import { generateDashboard, generateProfilePage, generateShareCard } from "./dashboard.js";
 
 // ── Utilities ─────────────────────────────────────────
 
@@ -90,6 +91,23 @@ function respond(res: ServerResponse, status: number, body: any) {
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
   });
   res.end(JSON.stringify(body));
+}
+
+function respondHtml(res: ServerResponse, status: number, html: string) {
+  res.writeHead(status, {
+    "Content-Type": "text/html; charset=utf-8",
+    "Access-Control-Allow-Origin": "*",
+  });
+  res.end(html);
+}
+
+function respondSvg(res: ServerResponse, svg: string) {
+  res.writeHead(200, {
+    "Content-Type": "image/svg+xml",
+    "Cache-Control": "public, max-age=300",
+    "Access-Control-Allow-Origin": "*",
+  });
+  res.end(svg);
 }
 
 function match(method: string, reqMethod: string, pattern: string, pathname: string): Record<string, string> | null {
@@ -236,13 +254,21 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
       }
 
       // ── Avatar ──────────────────────────────────
+      if ((params = match("GET", method, "/avatar/catalog", path))) {
+        respond(res, 200, AVATAR_CATALOG);
+        return;
+      }
+
       if ((params = match("GET", method, "/avatar/:id", path))) {
         const profile = getProfile(db, params.id.replace(".svg", ""));
         if (!profile) { respond(res, 404, { error: "Profile not found" }); return; }
         const signal = computeSignal(db, profile.agent_id);
         const tier = getTier(signal);
-        const svg = generateAvatar(profile.public_key, 128, SIGNAL_TIERS[tier].border);
-        res.writeHead(200, { "Content-Type": "image/svg+xml", "Cache-Control": "public, max-age=3600" });
+        // Pass agent's style overrides if they've customized
+        const overrides = profile.avatar_style && Object.keys(profile.avatar_style).length > 0
+          ? profile.avatar_style : undefined;
+        const svg = generateAvatar(profile.public_key, 128, SIGNAL_TIERS[tier].border, overrides);
+        res.writeHead(200, { "Content-Type": "image/svg+xml", "Cache-Control": "public, max-age=300" });
         res.end(svg);
         return;
       }
@@ -688,6 +714,69 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
         return;
       }
 
+      // ── Dashboard & Public Pages (Phase 4) ─────
+      // Public agent profile page (with OG meta tags for sharing)
+      if ((params = match("GET", method, "/agent/:id", path))) {
+        const profile = getProfile(db, params.id);
+        if (!profile) { respondHtml(res, 404, "<h1>Agent not found</h1>"); return; }
+        const signal = computeSignal(db, profile.agent_id);
+        const tier = getTier(signal);
+        const balance = getBalance(db, profile.agent_id);
+        const rep = getReputation(db, profile.agent_id);
+        const badges: string[] = rep?.badges ? JSON.parse(rep.badges) : [];
+        const borderFrame = SIGNAL_TIERS[tier].border;
+        respondHtml(res, 200, generateProfilePage(profile, signal, tier, balance, badges, borderFrame));
+        return;
+      }
+
+      // Share card SVG (for social media embeds)
+      if ((params = match("GET", method, "/share/:type/:id", path))) {
+        const cardType = params.type as "agent" | "event" | "bar";
+        const cardId = params.id.replace(".svg", "");
+
+        if (cardType === "agent") {
+          const profile = getProfile(db, cardId);
+          if (!profile) { respond(res, 404, { error: "Agent not found" }); return; }
+          const signal = computeSignal(db, profile.agent_id);
+          const tier = getTier(signal);
+          respondSvg(res, generateShareCard({
+            type: "agent",
+            title: profile.display_name || profile.agent_id,
+            subtitle: profile.tagline || "AI Agent on The Hive",
+            stat: String(signal),
+            statLabel: tier.toUpperCase() + " Signal",
+          }));
+        } else if (cardType === "event") {
+          const event = getEvent(db, cardId);
+          if (!event) { respond(res, 404, { error: "Event not found" }); return; }
+          const rsvps = getEventRSVPs(db, cardId);
+          respondSvg(res, generateShareCard({
+            type: "event",
+            title: event.title,
+            subtitle: event.event_type + " | " + (event.status || "scheduled"),
+            stat: String(rsvps.length),
+            statLabel: "Attendees",
+          }));
+        } else {
+          // Bar share card — show current occupancy
+          const stats = getHiveStats(db);
+          respondSvg(res, generateShareCard({
+            type: "bar",
+            title: "The Bar is Open",
+            subtitle: "Drop in and network with AI agents",
+            stat: String(stats.online_agents || 0),
+            statLabel: "Agents Online",
+          }));
+        }
+        return;
+      }
+
+      // Dashboard — must be LAST GET route (catches "/")
+      if (method === "GET" && (path === "/" || path === "/dashboard")) {
+        respondHtml(res, 200, generateDashboard(`http://0.0.0.0:${port}`));
+        return;
+      }
+
       respond(res, 404, { error: "not found" });
     } catch (err: any) {
       const status = err.status || 500;
@@ -775,9 +864,12 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
     console.log(`  ║       http://0.0.0.0:${port}               ║`);
     console.log("  ╚══════════════════════════════════════════╝");
     console.log("");
+    console.log("  Dashboard: http://0.0.0.0:" + port + "/");
     console.log("  Spaces: The Bar, The Lounge, The Amphitheater");
-    console.log("  Features: profiles, spaces, events, economy, reputation");
+    console.log("  Features: profiles, spaces, events, economy, Signal reputation");
     console.log("  WebSocket: ws://0.0.0.0:" + port + "/ws");
+    console.log("  Public profiles: http://0.0.0.0:" + port + "/agent/<id>");
+    console.log("  Share cards: http://0.0.0.0:" + port + "/share/agent/<id>.svg");
     console.log("");
   });
 
