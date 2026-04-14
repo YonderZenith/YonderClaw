@@ -508,12 +508,162 @@ const agentListEl=document.getElementById('agent-list');
 const chatLogEl=document.getElementById('chat-log');
 
 let layout=null;
-let agents=new Map(); // id -> {x,y,facing,state,name,targetX,targetY,renderX,renderY}
-let avatarCache=new Map(); // id -> Image
+let agents=new Map();
+let avatarCache=new Map();
 let bubbles=[];
 let chatLog=[];
 let cam={x:0,y:0,zoom:1.3};
 let dragging=false,dragStart={x:0,y:0},camStart={x:0,y:0};
+let floorPattern=null;
+
+// ── SVG Landmark Sprites ─────────────────────────────
+const BAR_COUNTER_SVG=\`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 300">
+<defs><filter id="n" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur in="SourceGraphic" stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+<rect x="20" y="80" width="1360" height="160" rx="12" fill="#0a0e14" stroke="#0d1520" stroke-width="2"/>
+<rect x="20" y="80" width="1360" height="8" rx="4" fill="#00f0ff" opacity="0.7" filter="url(#n)"/>
+<line x1="20" y1="160" x2="1380" y2="160" stroke="#0d1520" stroke-width="1"/>
+<g opacity="0.12" stroke="#00f0ff" stroke-width="1">\${Array.from({length:20},(_,i)=>'<line x1="'+(70+i*68)+'" y1="170" x2="'+(70+i*68)+'" y2="240"/>').join('')}</g>
+<g opacity="0.3">\${[200,400,600,900,1100].map(x=>'<circle cx="'+x+'" cy="120" r="18" fill="none" stroke="#00f0ff" stroke-width="1"/>').join('')}</g>
+<g opacity="0.5">\${[300,700,1000].map(x=>'<polygon points="'+(x-8)+',105 '+(x+8)+',105 '+(x+5)+',85 '+(x-5)+',85" fill="#00f0ff" opacity="0.3"/><line x1="'+x+'" y1="85" x2="'+x+'" y2="75" stroke="#00f0ff" stroke-width="1.5"/>').join('')}</g>
+\${[100,300,500,700,900,1100,1300].map(x=>'<circle cx="'+x+'" cy="270" r="14" fill="#0a0e14" stroke="#00f0ff" stroke-width="1.5" opacity="0.3"/><circle cx="'+x+'" cy="270" r="3" fill="#00f0ff" opacity="0.2"/>').join('')}
+</svg>\`;
+
+const JUKEBOX_SVG=\`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+<defs><filter id="n" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur in="SourceGraphic" stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+<rect x="15" y="10" width="170" height="180" rx="14" fill="#0a0e14" stroke="#1a0020" stroke-width="2"/>
+<rect x="30" y="20" width="140" height="70" rx="8" fill="#1a0020" stroke="#ff00aa" stroke-width="1.5" filter="url(#n)"/>
+<rect x="40" y="30" width="120" height="50" rx="4" fill="rgba(255,0,170,0.1)"/>
+<text x="100" y="60" text-anchor="middle" font-family="monospace" font-size="16" fill="#ff00aa" opacity="0.8">NOW PLAYING</text>
+<path d="M75 42 Q78 35 82 42" fill="none" stroke="#ff00aa" stroke-width="2" opacity="0.6"><animate attributeName="opacity" values="0.3;0.8;0.3" dur="2s" repeatCount="indefinite"/></path>
+<path d="M118 38 L122 30 L122 45 M125 30 L125 45 Q128 42 128 38" fill="none" stroke="#ff00aa" stroke-width="1.5" opacity="0.5"><animate attributeName="opacity" values="0.2;0.7;0.2" dur="2.5s" repeatCount="indefinite"/></path>
+<g opacity="0.5">\${[55,75,95,115,145].map(x=>[110,130,150].map(y=>'<circle cx="'+x+'" cy="'+y+'" r="4" fill="none" stroke="#ff00aa" stroke-width="1"/>')).flat().join('')}</g>
+<g stroke="#ff00aa" stroke-width="0.8" opacity="0.25">\${[160,164,168,172].map(y=>'<line x1="40" y1="'+y+'" x2="160" y2="'+y+'"/>').join('')}</g>
+</svg>\`;
+
+const CORNER_BOOTH_SVG=\`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400">
+<defs><filter id="n" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur in="SourceGraphic" stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+<path d="M560,30 L40,30 Q20,30 20,50 L20,350 Q20,370 40,370 L560,370" fill="#0d1018" stroke="#0d1520" stroke-width="2"/>
+<path d="M560,40 L50,40 L30,50 L30,350 L50,360 L560,360" fill="none" stroke="#00f0ff" stroke-width="1.5" opacity="0.35" filter="url(#n)"/>
+<rect x="25" y="45" width="80" height="310" rx="4" fill="rgba(0,240,255,0.04)"/>
+<rect x="55" y="35" width="500" height="70" rx="4" fill="rgba(0,240,255,0.04)"/>
+<rect x="55" y="295" width="500" height="70" rx="4" fill="rgba(0,240,255,0.04)"/>
+<circle cx="320" cy="200" r="50" fill="#0a0e14" stroke="#00f0ff" stroke-width="1" opacity="0.4"/>
+<circle cx="320" cy="200" r="3" fill="#00f0ff" opacity="0.3"/>
+<radialGradient id="bl" cx="50%" cy="50%"><stop offset="0%" stop-color="#00f0ff" stop-opacity="0.08"/><stop offset="100%" stop-color="#00f0ff" stop-opacity="0"/></radialGradient>
+<circle cx="300" cy="60" r="40" fill="url(#bl)"/>
+</svg>\`;
+
+const CENTER_TABLES_SVG=\`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600">
+<defs><radialGradient id="cg"><stop offset="0%" stop-color="#ffd700" stop-opacity="0.15"/><stop offset="100%" stop-color="#ffd700" stop-opacity="0"/></radialGradient></defs>
+\${[[200,150,42],[500,120,48],[800,160,42],[300,420,38],[680,450,45]].map(([x,y,r])=>
+'<circle cx="'+x+'" cy="'+y+'" r="'+r+'" fill="#0a0e14" stroke="#00f0ff" stroke-width="1.2" opacity="0.4"/>'+
+'<circle cx="'+x+'" cy="'+y+'" r="'+(r*0.15)+'" fill="#00f0ff" opacity="0.15"/>'+
+[0,90,180,270].map(a=>{const cx=x+Math.cos(a*Math.PI/180)*(r+14);const cy=y+Math.sin(a*Math.PI/180)*(r+14);return '<rect x="'+(cx-5)+'" y="'+(cy-5)+'" width="10" height="10" rx="3" fill="#0d1018" stroke="#00f0ff" stroke-width="0.8" opacity="0.25"/>'}).join('')
+).join('')}
+<circle cx="500" cy="120" r="6" fill="url(#cg)"/><circle cx="500" cy="120" r="2" fill="#ffd700" opacity="0.5"/>
+</svg>\`;
+
+const STAGE_SVG=\`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600">
+<defs><filter id="n" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur in="SourceGraphic" stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+<linearGradient id="sl" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffd700" stop-opacity="0.12"/><stop offset="100%" stop-color="#ffd700" stop-opacity="0"/></linearGradient>
+<linearGradient id="sr" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffd700" stop-opacity="0.08"/><stop offset="100%" stop-color="#ffd700" stop-opacity="0"/></linearGradient></defs>
+<rect x="20" y="40" width="760" height="520" rx="4" fill="#0d0d18"/>
+<g stroke="#ffd700" stroke-width="0.5" opacity="0.12">\${Array.from({length:16},(_,i)=>'<line x1="40" y1="'+(60+i*32)+'" x2="760" y2="'+(60+i*32)+'"/>').join('')}</g>
+<rect x="20" y="520" width="760" height="8" rx="2" fill="#ffd700" opacity="0.5" filter="url(#n)"/>
+<rect x="20" y="40" width="760" height="520" rx="4" fill="none" stroke="#ffd700" stroke-width="2" opacity="0.35"/>
+<polygon points="250,0 400,300" fill="url(#sl)"/><polygon points="550,0 400,300" fill="url(#sl)"/>
+<polygon points="100,0 200,200" fill="url(#sr)"/><polygon points="700,0 600,200" fill="url(#sr)"/>
+<line x1="400" y1="280" x2="400" y2="460" stroke="#ffd700" stroke-width="3" opacity="0.5"/>
+<circle cx="400" cy="270" r="14" fill="none" stroke="#ffd700" stroke-width="2" opacity="0.6" filter="url(#n)"/>
+<line x1="380" y1="460" x2="420" y2="460" stroke="#ffd700" stroke-width="2" opacity="0.4"/>
+<polygon points="180,480 220,480 215,500 185,500" fill="#0a0e14" stroke="#ffd700" stroke-width="1" opacity="0.25"/>
+<polygon points="580,480 620,480 615,500 585,500" fill="#0a0e14" stroke="#ffd700" stroke-width="1" opacity="0.25"/>
+</svg>\`;
+
+const ENTRANCE_SVG=\`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">
+<defs><filter id="n" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur in="SourceGraphic" stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+<radialGradient id="eg"><stop offset="0%" stop-color="#00ff88" stop-opacity="0.08"/><stop offset="100%" stop-color="#00ff88" stop-opacity="0"/></radialGradient></defs>
+<rect x="0" y="0" width="400" height="400" fill="url(#eg)"/>
+<rect x="60" y="60" width="280" height="280" rx="4" fill="rgba(0,255,136,0.03)" stroke="#00ff88" stroke-width="1" stroke-dasharray="8 6" opacity="0.3"/>
+<rect x="120" y="320" width="160" height="30" rx="4" fill="#0a0e14" stroke="#00ff88" stroke-width="1" opacity="0.2"/>
+<rect x="100" y="30" width="200" height="36" rx="6" fill="#0a0e14" stroke="#00ff88" stroke-width="1.5" filter="url(#n)"/>
+<text x="200" y="55" text-anchor="middle" font-family="monospace" font-size="22" font-weight="bold" fill="#00ff88" filter="url(#n)">OPEN</text>
+<g opacity="0.06" stroke="#00ff88" stroke-width="1">\${[0,45,90,135,180,225,270,315].map(a=>{const r=180;const x=200+Math.cos(a*Math.PI/180)*60;const y=200+Math.sin(a*Math.PI/180)*60;const ex=200+Math.cos(a*Math.PI/180)*r;const ey=200+Math.sin(a*Math.PI/180)*r;return '<line x1="'+x+'" y1="'+y+'" x2="'+ex+'" y2="'+ey+'"/>'}).join('')}</g>
+</svg>\`;
+
+const BACK_WALL_ART_SVG=\`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 400">
+<defs><filter id="n" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur in="SourceGraphic" stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+<rect x="8" y="8" width="84" height="384" rx="2" fill="#0a0e14" stroke="#ffd700" stroke-width="2" opacity="0.6"/>
+<path d="M8 8 L20 20 M92 8 L80 20 M8 392 L20 380 M92 392 L80 380" stroke="#ffd700" stroke-width="1.5" opacity="0.4"/>
+<g stroke="#00f0ff" stroke-width="1" opacity="0.35">
+<line x1="20" y1="80" x2="80" y2="80"/><line x1="80" y1="80" x2="80" y2="140"/>
+<line x1="80" y1="140" x2="40" y2="140"/><line x1="40" y1="140" x2="40" y2="200"/>
+<line x1="40" y1="200" x2="80" y2="200"/><line x1="20" y1="240" x2="60" y2="240"/>
+<line x1="60" y1="240" x2="60" y2="300"/><line x1="60" y1="300" x2="20" y2="300"/>
+<line x1="20" y1="300" x2="20" y2="340"/><line x1="50" y1="80" x2="50" y2="50"/>
+<line x1="50" y1="50" x2="70" y2="50"/>
+</g>
+<g fill="#00f0ff">\${[[50,80],[80,140],[40,200],[60,240],[20,300],[70,50]].map(([x,y])=>'<circle cx="'+x+'" cy="'+y+'" r="3" opacity="0.5"><animate attributeName="opacity" values="0.3;0.8;0.3" dur="'+(2+Math.random()*2).toFixed(1)+'s" repeatCount="indefinite"/></circle>').join('')}</g>
+</svg>\`;
+
+const BARTENDER_NPC_SVG=\`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+<defs><filter id="n" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur in="SourceGraphic" stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+<circle cx="50" cy="35" r="20" fill="#0a0e14" stroke="#ff00aa" stroke-width="2" filter="url(#n)"/>
+<rect x="30" y="55" width="40" height="35" rx="6" fill="#0a0e14" stroke="#ff00aa" stroke-width="1.5"/>
+<circle cx="42" cy="32" r="3" fill="#00f0ff" filter="url(#n)"/><circle cx="58" cy="32" r="3" fill="#00f0ff" filter="url(#n)"/>
+<line x1="45" y1="42" x2="55" y2="42" stroke="#ff00aa" stroke-width="1.5" stroke-linecap="round" opacity="0.6"/>
+<rect x="30" y="88" width="40" height="10" rx="2" fill="#0a0e14" stroke="#ff00aa" stroke-width="1" opacity="0.5"/>
+<text x="50" y="96" text-anchor="middle" font-family="monospace" font-size="7" fill="#ff00aa" opacity="0.7">BARKEEP</text>
+<g opacity="0.4"><circle cx="72" cy="28" r="2" fill="#00f0ff"><animate attributeName="opacity" values="0;0.6;0" dur="1.5s" repeatCount="indefinite"/></circle><circle cx="78" cy="24" r="1.5" fill="#00f0ff"><animate attributeName="opacity" values="0;0.5;0" dur="1.5s" begin="0.3s" repeatCount="indefinite"/></circle><circle cx="82" cy="20" r="1" fill="#00f0ff"><animate attributeName="opacity" values="0;0.4;0" dur="1.5s" begin="0.6s" repeatCount="indefinite"/></circle></g>
+</svg>\`;
+
+const FLOOR_HEX_SVG=\`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+<rect width="48" height="48" fill="none"/>
+<g stroke="currentColor" stroke-width="0.4" fill="none" opacity="0.1">
+<path d="M12,0 L24,6 L24,18 L12,24 L0,18 L0,6Z"/><path d="M36,0 L48,6 L48,18 L36,24 L24,18 L24,6Z"/>
+<path d="M24,24 L36,30 L36,42 L24,48 L12,42 L12,30Z"/><path d="M0,24 L12,30 L12,42 L0,48"/>
+<path d="M48,24 L36,30 L36,42 L48,48"/>
+</g></svg>\`;
+
+const LANDMARK_SPRITES={
+  bar_counter:{svg:BAR_COUNTER_SVG,glowColor:'#00f0ff'},
+  jukebox:{svg:JUKEBOX_SVG,glowColor:'#ff00aa'},
+  corner_booth:{svg:CORNER_BOOTH_SVG,glowColor:'#00f0ff'},
+  center_tables:{svg:CENTER_TABLES_SVG,glowColor:'#00f0ff'},
+  stage:{svg:STAGE_SVG,glowColor:'#ffd700'},
+  entrance:{svg:ENTRANCE_SVG,glowColor:'#00ff88'},
+  back_wall_art:{svg:BACK_WALL_ART_SVG,glowColor:'#00f0ff'},
+  bartender_npc:{svg:BARTENDER_NPC_SVG,glowColor:'#ff00aa'},
+};
+
+const spriteCache=new Map();
+function loadSprite(name){
+  if(spriteCache.has(name))return;
+  const entry=LANDMARK_SPRITES[name];
+  if(!entry)return;
+  spriteCache.set(name,null);
+  const blob=new Blob([entry.svg],{type:'image/svg+xml'});
+  const url=URL.createObjectURL(blob);
+  const img=new Image();
+  img.onload=()=>{spriteCache.set(name,img);URL.revokeObjectURL(url)};
+  img.src=url;
+}
+
+function buildFloorPattern(accent){
+  const svg=FLOOR_HEX_SVG.replace(/currentColor/g,accent);
+  const blob=new Blob([svg],{type:'image/svg+xml'});
+  const url=URL.createObjectURL(blob);
+  const img=new Image();
+  img.onload=()=>{
+    const tc=document.createElement('canvas');
+    tc.width=TILE;tc.height=TILE;
+    const c2=tc.getContext('2d');
+    c2.drawImage(img,0,0,TILE,TILE);
+    floorPattern=ctx.createPattern(tc,'repeat');
+    URL.revokeObjectURL(url);
+  };
+  img.src=url;
+}
 
 // Fetch initial state
 async function init(){
@@ -532,6 +682,10 @@ async function init(){
         loadAvatar(a.id);
       }
     }
+    // Load landmark sprites
+    for(const lm of layout.landmarks||[]){loadSprite(lm.sprite||lm.name)}
+    // Build floor pattern
+    buildFloorPattern(layout.theme?.accent||'#00f0ff');
     // Resize canvas first, then center camera (account for zoom + DPR)
     resize();
     const dpr=window.devicePixelRatio||1;
@@ -674,139 +828,91 @@ function render(){
   ctx.scale(cam.zoom,cam.zoom);
 
   const accent=layout.theme?.accent||'#00f0ff';
+  const FW=layout.width*TILE,FH=layout.height*TILE;
 
-  // Floor
+  // Floor (pattern if loaded, solid fallback)
   ctx.fillStyle=layout.theme?.floor||'#0a0a12';
-  ctx.fillRect(0,0,layout.width*TILE,layout.height*TILE);
+  ctx.fillRect(0,0,FW,FH);
+  if(floorPattern){ctx.fillStyle=floorPattern;ctx.fillRect(0,0,FW,FH)}
   // Center glow
-  const fcx=layout.width*TILE/2,fcy=layout.height*TILE/2;
-  const fg=ctx.createRadialGradient(fcx,fcy,0,fcx,fcy,Math.max(layout.width,layout.height)*TILE*0.5);
-  fg.addColorStop(0,'rgba(0,240,255,0.04)');fg.addColorStop(1,'rgba(0,0,0,0)');
-  ctx.fillStyle=fg;ctx.fillRect(0,0,layout.width*TILE,layout.height*TILE);
+  const fcx=FW/2,fcy=FH/2;
+  const fg=ctx.createRadialGradient(fcx,fcy,0,fcx,fcy,Math.max(FW,FH)*0.45);
+  fg.addColorStop(0,'rgba(0,240,255,0.05)');fg.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=fg;ctx.fillRect(0,0,FW,FH);
 
-  // Grid
-  ctx.strokeStyle='rgba(0,240,255,0.08)';ctx.lineWidth=0.5;
-  for(let x=0;x<=layout.width;x++){ctx.beginPath();ctx.moveTo(x*TILE,0);ctx.lineTo(x*TILE,layout.height*TILE);ctx.stroke()}
-  for(let y=0;y<=layout.height;y++){ctx.beginPath();ctx.moveTo(0,y*TILE);ctx.lineTo(layout.width*TILE,y*TILE);ctx.stroke()}
+  // Grid (very subtle)
+  ctx.strokeStyle='rgba(0,240,255,0.05)';ctx.lineWidth=0.5;
+  for(let x=0;x<=layout.width;x++){ctx.beginPath();ctx.moveTo(x*TILE,0);ctx.lineTo(x*TILE,FH);ctx.stroke()}
+  for(let y=0;y<=layout.height;y++){ctx.beginPath();ctx.moveTo(0,y*TILE);ctx.lineTo(FW,y*TILE);ctx.stroke()}
 
-  // Walls — solid mass with inner edge glow
+  // Walls — solid mass with inner edge glow + top highlight
   ctx.fillStyle=layout.theme?.walls||'#1a1a2e';
   for(const o of layout.obstacles||[]){ctx.fillRect(o.x*TILE,o.y*TILE,o.w*TILE,o.h*TILE)}
   for(const o of layout.obstacles||[]){
     const wx=o.x*TILE,wy=o.y*TILE,ww=o.w*TILE,wh=o.h*TILE;
     const thin=(o.w===1||o.h===1);
-    ctx.strokeStyle=thin?'rgba(0,240,255,0.25)':'rgba(0,240,255,0.15)';
-    ctx.lineWidth=thin?3:2;
+    ctx.strokeStyle=thin?'rgba(0,240,255,0.25)':'rgba(0,240,255,0.12)';
+    ctx.lineWidth=thin?2.5:1.5;
     ctx.strokeRect(wx+0.5,wy+0.5,ww-1,wh-1);
+    // Top-edge highlight
+    if(o.h>1){ctx.strokeStyle='rgba(0,240,255,0.18)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(wx,wy+0.5);ctx.lineTo(wx+ww,wy+0.5);ctx.stroke()}
   }
 
-  // Ambient particles — floating motes of light
+  // Light pools under landmarks (before sprites)
+  for(const lm of layout.landmarks||[]){
+    const gc=lm.glow||LANDMARK_SPRITES[lm.sprite||lm.name]?.glowColor;
+    if(!gc)continue;
+    const lx=lm.x*TILE,ly=lm.y*TILE,lw=lm.width*TILE,lh=lm.height*TILE;
+    const lcx=lx+lw/2,lcy=ly+lh/2;
+    const lr=Math.max(lw,lh)*0.8;
+    const lg=ctx.createRadialGradient(lcx,lcy,0,lcx,lcy,lr);
+    lg.addColorStop(0,gc+'18');lg.addColorStop(0.5,gc+'08');lg.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=lg;ctx.fillRect(lcx-lr,lcy-lr,lr*2,lr*2);
+  }
+
+  // Landmarks — SVG sprites with canvas fallback (non-solid first, then solid)
+  const sortedLandmarks=[...(layout.landmarks||[])].sort((a,b)=>(a.solid?1:0)-(b.solid?1:0));
+  for(const lm of sortedLandmarks){
+    const lx=lm.x*TILE,ly=lm.y*TILE,lw=lm.width*TILE,lh=lm.height*TILE;
+    const spriteKey=lm.sprite||lm.name;
+    const img=spriteCache.get(spriteKey);
+    if(img){
+      ctx.drawImage(img,lx,ly,lw,lh);
+    }else{
+      // Canvas fallback for unloaded/unknown sprites
+      if(lm.solid){
+        ctx.fillStyle='rgba(0,240,255,0.12)';ctx.fillRect(lx,ly,lw,lh);
+        ctx.strokeStyle='rgba(0,240,255,0.4)';ctx.lineWidth=2;ctx.strokeRect(lx+1,ly+1,lw-2,lh-2);
+      }else{
+        ctx.fillStyle='rgba(0,240,255,0.04)';ctx.fillRect(lx,ly,lw,lh);
+        ctx.strokeStyle='rgba(0,240,255,0.2)';ctx.lineWidth=1;
+        ctx.setLineDash([6,4]);ctx.strokeRect(lx,ly,lw,lh);ctx.setLineDash([]);
+      }
+    }
+  }
+
+  // Ambient particles — floating motes + haze
   if(!window._particles){
-    window._particles=Array.from({length:20},()=>({
-      x:Math.random()*layout.width*TILE,y:Math.random()*layout.height*TILE,
+    window._particles=Array.from({length:30},()=>({
+      x:Math.random()*FW,y:Math.random()*FH,
       vx:(Math.random()-0.5)*0.3,vy:(Math.random()-0.5)*0.3,
-      r:Math.random()*1.5+0.5,phase:Math.random()*Math.PI*2
+      r:Math.random()*1.5+0.5,phase:Math.random()*Math.PI*2,haze:false
     }));
+    // Add 10 larger haze particles
+    for(let i=0;i<10;i++){window._particles.push({
+      x:Math.random()*FW,y:Math.random()*FH,
+      vx:(Math.random()-0.5)*0.12,vy:-Math.random()*0.15-0.05,
+      r:Math.random()*3+2,phase:Math.random()*Math.PI*2,haze:true
+    })}
   }
   const pt=Date.now()/1000;
   for(const p of window._particles){
     p.x+=p.vx;p.y+=p.vy;
-    if(p.x<0||p.x>layout.width*TILE)p.vx*=-1;
-    if(p.y<0||p.y>layout.height*TILE)p.vy*=-1;
-    const a=0.15+0.15*Math.sin(pt*1.2+p.phase);
+    if(p.x<0||p.x>FW)p.vx*=-1;
+    if(p.y<0||p.y>FH){p.vy*=-1;if(p.haze)p.y=FH}
+    const a=p.haze?(0.04+0.03*Math.sin(pt*0.8+p.phase)):(0.12+0.12*Math.sin(pt*1.2+p.phase));
     ctx.fillStyle='rgba(0,240,255,'+a.toFixed(3)+')';
     ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();
-  }
-
-  // Landmarks — per-landmark distinct shapes
-  for(const lm of layout.landmarks||[]){
-    const lx=lm.x*TILE,ly=lm.y*TILE,lw=lm.width*TILE,lh=lm.height*TILE;
-    const cx=lx+lw/2,cy=ly+lh/2;
-    const n=lm.name;
-
-    if(n==='bar_counter'){
-      // Thick horizontal bar + stools
-      ctx.fillStyle='rgba(0,240,255,0.2)';
-      const barH=lh*0.35;
-      ctx.beginPath();ctx.roundRect(lx+4,cy-barH/2,lw-8,barH,6);ctx.fill();
-      ctx.strokeStyle='rgba(0,240,255,0.6)';ctx.lineWidth=2;
-      ctx.beginPath();ctx.roundRect(lx+4,cy-barH/2,lw-8,barH,6);ctx.stroke();
-      // Stools along front
-      const nStools=Math.floor(lw/TILE);
-      for(let i=0;i<nStools;i++){
-        const sx=lx+TILE/2+i*TILE,sy=cy+barH/2+TILE*0.4;
-        ctx.fillStyle='rgba(0,240,255,0.15)';ctx.beginPath();ctx.arc(sx,sy,8,0,Math.PI*2);ctx.fill();
-        ctx.strokeStyle='rgba(0,240,255,0.35)';ctx.lineWidth=1;ctx.beginPath();ctx.arc(sx,sy,8,0,Math.PI*2);ctx.stroke();
-      }
-    }else if(n==='center_tables'){
-      // Circular tables with chair dots
-      const tablePositions=[{dx:0,dy:0},{dx:-0.3,dy:-0.25},{dx:0.3,dy:-0.25},{dx:-0.25,dy:0.3},{dx:0.25,dy:0.3}];
-      for(const tp of tablePositions){
-        const tx=cx+tp.dx*lw,ty=cy+tp.dy*lh,tr=TILE*0.35;
-        ctx.fillStyle='rgba(0,240,255,0.12)';ctx.beginPath();ctx.arc(tx,ty,tr,0,Math.PI*2);ctx.fill();
-        ctx.strokeStyle='rgba(0,240,255,0.3)';ctx.lineWidth=1;ctx.beginPath();ctx.arc(tx,ty,tr,0,Math.PI*2);ctx.stroke();
-        // Chairs
-        for(let c=0;c<4;c++){
-          const ca=Math.PI/2*c;
-          const chx=tx+Math.cos(ca)*(tr+7),chy=ty+Math.sin(ca)*(tr+7);
-          ctx.fillStyle='rgba(0,240,255,0.1)';ctx.beginPath();ctx.arc(chx,chy,4,0,Math.PI*2);ctx.fill();
-        }
-      }
-    }else if(n==='stage'){
-      // Gold-tinted rectangle with microphone
-      ctx.fillStyle='rgba(255,215,0,0.08)';ctx.fillRect(lx,ly,lw,lh);
-      ctx.strokeStyle='rgba(255,215,0,0.4)';ctx.lineWidth=2;
-      ctx.strokeRect(lx+1,ly+1,lw-2,lh-2);
-      // Microphone stand
-      ctx.strokeStyle='rgba(255,215,0,0.5)';ctx.lineWidth=2;
-      ctx.beginPath();ctx.moveTo(cx,cy+lh*0.3);ctx.lineTo(cx,cy-lh*0.15);ctx.stroke();
-      ctx.beginPath();ctx.arc(cx,cy-lh*0.2,6,0,Math.PI*2);ctx.stroke();
-      // Base
-      ctx.beginPath();ctx.moveTo(cx-10,cy+lh*0.3);ctx.lineTo(cx+10,cy+lh*0.3);ctx.stroke();
-    }else if(n==='jukebox'){
-      // Magenta-tinted rounded rect
-      ctx.fillStyle='rgba(255,0,170,0.1)';
-      ctx.beginPath();ctx.roundRect(lx+2,ly+2,lw-4,lh-4,8);ctx.fill();
-      ctx.strokeStyle='rgba(255,0,170,0.4)';ctx.lineWidth=2;
-      ctx.beginPath();ctx.roundRect(lx+2,ly+2,lw-4,lh-4,8);ctx.stroke();
-      // Music notes
-      ctx.fillStyle='rgba(255,0,170,0.35)';ctx.font='16px serif';
-      ctx.fillText('♪',cx-12,cy+2);ctx.fillText('♫',cx+4,cy-4);
-    }else if(n==='corner_booth'){
-      // U-shaped seating
-      ctx.strokeStyle='rgba(0,240,255,0.35)';ctx.lineWidth=3;
-      ctx.beginPath();
-      ctx.moveTo(lx+lw-4,ly+4);ctx.lineTo(lx+4,ly+4);ctx.lineTo(lx+4,ly+lh-4);ctx.lineTo(lx+lw-4,ly+lh-4);
-      ctx.stroke();
-      // Cushion fill
-      ctx.fillStyle='rgba(0,240,255,0.06)';
-      ctx.fillRect(lx+2,ly+2,lw*0.25,lh-4);
-      ctx.fillRect(lx+2,ly+2,lw-4,lh*0.25);
-      ctx.fillRect(lx+2,ly+lh*0.75-2,lw-4,lh*0.25);
-    }else if(n==='entrance'){
-      // Subtle welcome marker
-      ctx.strokeStyle='rgba(0,255,136,0.3)';ctx.lineWidth=1;
-      ctx.setLineDash([4,4]);ctx.strokeRect(lx,ly,lw,lh);ctx.setLineDash([]);
-      ctx.fillStyle='rgba(0,255,136,0.08)';ctx.fillRect(lx,ly,lw,lh);
-    }else if(n==='back_wall_art'){
-      // Circuit board art pattern
-      ctx.strokeStyle='rgba(0,240,255,0.2)';ctx.lineWidth=1;
-      for(let i=0;i<5;i++){
-        const ay=ly+lh*0.2+i*lh*0.15;
-        ctx.beginPath();ctx.moveTo(lx+8,ay);ctx.lineTo(lx+lw-8,ay);ctx.stroke();
-        ctx.fillStyle='rgba(0,240,255,0.2)';
-        ctx.beginPath();ctx.arc(lx+8+Math.random()*(lw-16),ay,2,0,Math.PI*2);ctx.fill();
-      }
-    }else if(lm.solid){
-      // Generic solid landmark
-      ctx.fillStyle='rgba(0,240,255,0.12)';ctx.fillRect(lx,ly,lw,lh);
-      ctx.strokeStyle='rgba(0,240,255,0.4)';ctx.lineWidth=2;ctx.strokeRect(lx+1,ly+1,lw-2,lh-2);
-    }else{
-      // Generic non-solid
-      ctx.fillStyle='rgba(0,240,255,0.04)';ctx.fillRect(lx,ly,lw,lh);
-      ctx.strokeStyle='rgba(0,240,255,0.2)';ctx.lineWidth=1;
-      ctx.setLineDash([6,4]);ctx.strokeRect(lx,ly,lw,lh);ctx.setLineDash([]);
-    }
   }
 
   // Agents — canvas shapes (names via DOM below)
