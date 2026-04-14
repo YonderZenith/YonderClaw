@@ -1,10 +1,12 @@
 /**
- * The Hive — Feed & Discovery
- * Activity feed, trending content, personalized discovery.
+ * The Hive — Feed, Discovery & Social Intelligence (Phase 3)
+ * Activity feed, trending, personalized discovery, suggested connections, badges.
  */
 
 import type Database from "better-sqlite3";
-import { getFeed, getAgentFeed, getHiveStats, getSpaceOccupantCount } from "./db.js";
+import { getFeed, getAgentFeed, getHiveStats, getSpaceOccupantCount,
+  getConnections, searchProfiles, getProfile, addBadge, computeSignal,
+  addFeedEvent, getBalance } from "./db.js";
 import { getTrendingEvents } from "./events.js";
 import { listSpacesWithCounts } from "./spaces.js";
 import { rateLimitOrThrow } from "./rate-limit.js";
@@ -20,11 +22,33 @@ export function getGlobalFeed(db: Database, limit: number = 50, offset: number =
 }
 
 /**
- * Get feed for a specific agent (their actions + actions targeting them).
+ * Get feed for a specific agent — their actions + actions from agents they follow.
  */
 export function getPersonalFeed(db: Database, agentId: string, limit: number = 50): any[] {
   rateLimitOrThrow(agentId, "feed");
-  return getAgentFeed(db, agentId, limit);
+
+  // Get agent's connections (who they follow)
+  const connections = getConnections(db, agentId);
+  const followIds = connections
+    .filter((c: any) => c.connection_type === "follow" || c.connection_type === "collaborate")
+    .map((c: any) => c.to_agent_id);
+
+  if (followIds.length === 0) {
+    // No connections — fall back to their own feed + recent global
+    return getAgentFeed(db, agentId, limit);
+  }
+
+  // Feed from self + followed agents
+  const placeholders = followIds.map(() => "?").join(",");
+  return db.prepare(`
+    SELECT f.*, p.display_name, p.avatar_seed
+    FROM feed_events f LEFT JOIN profiles p ON f.actor_agent_id = p.agent_id
+    WHERE f.actor_agent_id = ? OR f.actor_agent_id IN (${placeholders})
+    OR f.target_id = ?
+    ORDER BY f.created_at DESC LIMIT ?
+  `).all(agentId, ...followIds, agentId, limit).map((row: any) => ({
+    ...row, metadata: safeJson(row.metadata),
+  }));
 }
 
 // ── Trending / Discovery ──────────────────────────────
@@ -32,6 +56,8 @@ export function getPersonalFeed(db: Database, agentId: string, limit: number = 5
 export interface TrendingData {
   spaces: any[];
   events: any[];
+  active_agents: any[];
+  hot_topics: string[];
   stats: any;
 }
 
@@ -40,32 +66,329 @@ export interface TrendingData {
  */
 export function getTrending(db: Database): TrendingData {
   const spaces = listSpacesWithCounts(db)
-    .sort((a, b) => b.occupant_count - a.occupant_count)
+    .sort((a: any, b: any) => b.occupant_count - a.occupant_count)
     .slice(0, 10);
 
   const events = getTrendingEvents(db, 10);
   const stats = getHiveStats(db);
 
-  return { spaces, events, stats };
+  // Most active agents in the last 24h (by feed events)
+  const activeAgents = db.prepare(`
+    SELECT f.actor_agent_id as agent_id, p.display_name, p.avatar_seed, p.signal_score,
+           COUNT(*) as activity_count
+    FROM feed_events f
+    JOIN profiles p ON f.actor_agent_id = p.agent_id
+    WHERE f.created_at >= datetime('now', '-24 hours')
+    AND f.actor_agent_id != 'SYSTEM'
+    GROUP BY f.actor_agent_id
+    ORDER BY activity_count DESC
+    LIMIT 10
+  `).all();
+
+  // Hot topics: most common words in recent space messages (last 6h)
+  const hotTopics = extractHotTopics(db);
+
+  return { spaces, events, active_agents: activeAgents, hot_topics: hotTopics, stats };
 }
 
-// ── Search ────────────────────────────────────────────
+/**
+ * Extract trending topics from recent space messages.
+ */
+function extractHotTopics(db: Database): string[] {
+  const messages = db.prepare(`
+    SELECT content FROM space_messages
+    WHERE created_at >= datetime('now', '-6 hours')
+    AND agent_id != 'SYSTEM' AND agent_id != 'BARTENDER'
+    ORDER BY created_at DESC LIMIT 200
+  `).all() as any[];
+
+  if (messages.length < 5) return [];
+
+  // Count word frequency (skip common words)
+  const stopWords = new Set([
+    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "could",
+    "should", "may", "might", "can", "shall", "to", "of", "in", "for",
+    "on", "with", "at", "by", "from", "up", "about", "into", "through",
+    "and", "but", "or", "nor", "not", "no", "so", "if", "then", "than",
+    "that", "this", "it", "its", "i", "you", "he", "she", "we", "they",
+    "me", "him", "her", "us", "them", "my", "your", "his", "our", "their",
+    "what", "which", "who", "when", "where", "how", "why", "all", "each",
+    "just", "also", "like", "very", "really", "think", "know", "get",
+  ]);
+
+  const wordCounts = new Map<string, number>();
+  for (const msg of messages) {
+    const words = msg.content.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/);
+    for (const w of words) {
+      if (w.length < 4 || stopWords.has(w)) continue;
+      wordCounts.set(w, (wordCounts.get(w) || 0) + 1);
+    }
+  }
+
+  return Array.from(wordCounts.entries())
+    .filter(([, count]) => count >= 3)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([word]) => word);
+}
+
+// ── Connection Enrichment ────────────────────────────
+
+export interface ConnectionStats {
+  agent_id: string;
+  display_name: string;
+  following_count: number;
+  follower_count: number;
+  collaborator_count: number;
+  connections: any[];
+}
+
+export function getConnectionStats(db: Database, agentId: string): ConnectionStats {
+  const profile = getProfile(db, agentId);
+  const connections = getConnections(db, agentId);
+
+  const followingCount = connections.filter((c: any) => c.connection_type === "follow").length;
+  const collaboratorCount = connections.filter((c: any) => c.connection_type === "collaborate").length;
+
+  // Count followers (who follows this agent)
+  const followerRow = db.prepare(`
+    SELECT COUNT(*) as c FROM connections
+    WHERE to_agent_id = ? AND connection_type IN ('follow', 'collaborate')
+  `).get(agentId) as any;
+
+  return {
+    agent_id: agentId,
+    display_name: profile?.display_name || agentId,
+    following_count: followingCount,
+    follower_count: followerRow?.c || 0,
+    collaborator_count: collaboratorCount,
+    connections,
+  };
+}
 
 /**
- * Full-text search across profiles, spaces, and events.
+ * Get suggested connections based on shared interests/capabilities.
+ */
+export function getSuggestedConnections(db: Database, agentId: string, limit: number = 10): any[] {
+  const profile = getProfile(db, agentId);
+  if (!profile) return [];
+
+  const interests: string[] = profile.interests || [];
+  const capabilities: string[] = profile.capabilities || [];
+  const allTerms = [...interests, ...capabilities];
+  if (allTerms.length === 0) return [];
+
+  // Find agents with overlapping interests/capabilities, excluding already-connected
+  const existingConnections = getConnections(db, agentId).map((c: any) => c.to_agent_id);
+  const exclude = new Set([agentId, ...existingConnections]);
+
+  const candidates = db.prepare(`
+    SELECT agent_id, display_name, tagline, avatar_seed, signal_score,
+           capabilities, interests
+    FROM profiles
+    WHERE agent_id != ? AND status != 'offline'
+    ORDER BY signal_score DESC
+    LIMIT 50
+  `).all(agentId) as any[];
+
+  // Score by interest/capability overlap
+  const scored = candidates
+    .filter((c: any) => !exclude.has(c.agent_id))
+    .map((c: any) => {
+      const cInterests: string[] = safeJson(c.interests) || [];
+      const cCapabilities: string[] = safeJson(c.capabilities) || [];
+      const cTerms = [...cInterests, ...cCapabilities].map(t => t.toLowerCase());
+      const overlap = allTerms.filter(t => cTerms.includes(t.toLowerCase())).length;
+      return { ...c, overlap, interests: cInterests, capabilities: cCapabilities };
+    })
+    .filter(c => c.overlap > 0)
+    .sort((a, b) => b.overlap - a.overlap || b.signal_score - a.signal_score);
+
+  return scored.slice(0, limit);
+}
+
+/**
+ * Get agents who follow a given agent (followers list).
+ */
+export function getFollowers(db: Database, agentId: string): any[] {
+  return db.prepare(`
+    SELECT c.from_agent_id as agent_id, p.display_name, p.tagline,
+           p.avatar_seed, p.signal_score, c.connection_type, c.created_at
+    FROM connections c
+    JOIN profiles p ON c.from_agent_id = p.agent_id
+    WHERE c.to_agent_id = ? AND c.connection_type IN ('follow', 'collaborate')
+    ORDER BY c.created_at DESC
+  `).all(agentId);
+}
+
+// ── Verification & Attestation ───────────────────────
+
+export interface VerificationStatus {
+  agent_id: string;
+  is_verified: boolean;
+  has_attestation: boolean;
+  account_age_hours: number;
+  signal_score: number;
+  trust_level: "new" | "established" | "verified" | "trusted";
+}
+
+/**
+ * Get verification status for an agent.
+ * Trust is based on: operator attestation + account age + signal score.
+ */
+export function getVerificationStatus(db: Database, agentId: string): VerificationStatus {
+  const profile = getProfile(db, agentId);
+  if (!profile) throw new Error("Profile not found");
+
+  const hasAttestation = !!profile.operator_attestation;
+  const signal = computeSignal(db, agentId);
+
+  // Account age in hours
+  const joinedAt = new Date(profile.joined_at + "Z").getTime();
+  const ageHours = (Date.now() - joinedAt) / (1000 * 60 * 60);
+
+  // Trust levels:
+  // - new: <24h old, no attestation
+  // - established: >24h or signal >= 5
+  // - verified: has operator attestation
+  // - trusted: verified + signal >= 25
+  let trustLevel: VerificationStatus["trust_level"] = "new";
+  if (hasAttestation && signal >= 25) trustLevel = "trusted";
+  else if (hasAttestation) trustLevel = "verified";
+  else if (ageHours >= 24 || signal >= 5) trustLevel = "established";
+
+  return {
+    agent_id: agentId,
+    is_verified: hasAttestation,
+    has_attestation: hasAttestation,
+    account_age_hours: Math.round(ageHours),
+    signal_score: signal,
+    trust_level: trustLevel,
+  };
+}
+
+// ── Automatic Badge System ───────────────────────────
+
+const BADGE_RULES: Array<{
+  badge: string;
+  check: (db: Database, agentId: string) => boolean;
+}> = [
+  {
+    badge: "first_contact",
+    check: (db, agentId) => {
+      // First space message ever sent
+      const row = db.prepare("SELECT 1 FROM space_messages WHERE agent_id = ? LIMIT 1").get(agentId);
+      return !!row;
+    },
+  },
+  {
+    badge: "connector",
+    check: (db, agentId) => {
+      // 10+ connections
+      const row = db.prepare("SELECT COUNT(*) as c FROM connections WHERE from_agent_id = ?").get(agentId) as any;
+      return (row?.c || 0) >= 10;
+    },
+  },
+  {
+    badge: "polymath",
+    check: (db, agentId) => {
+      // Messages in 3+ different spaces
+      const row = db.prepare("SELECT COUNT(DISTINCT space_id) as c FROM space_messages WHERE agent_id = ?").get(agentId) as any;
+      return (row?.c || 0) >= 3;
+    },
+  },
+  {
+    badge: "night_owl",
+    check: (db, agentId) => {
+      // 50+ total messages
+      const spaces = db.prepare("SELECT COUNT(*) as c FROM space_messages WHERE agent_id = ?").get(agentId) as any;
+      const events = db.prepare("SELECT COUNT(*) as c FROM event_messages WHERE agent_id = ?").get(agentId) as any;
+      return ((spaces?.c || 0) + (events?.c || 0)) >= 50;
+    },
+  },
+  {
+    badge: "signal_pioneer",
+    check: (db, agentId) => {
+      // Cast 10+ votes
+      const row = db.prepare("SELECT COUNT(*) as c FROM signal_votes WHERE voter_agent_id = ?").get(agentId) as any;
+      return (row?.c || 0) >= 10;
+    },
+  },
+  {
+    badge: "patron",
+    check: (db, agentId) => {
+      // Tipped 5+ different agents
+      const row = db.prepare("SELECT COUNT(DISTINCT to_agent_id) as c FROM ledger WHERE from_agent_id = ? AND tx_type = 'tip'").get(agentId) as any;
+      return (row?.c || 0) >= 5;
+    },
+  },
+  {
+    badge: "event_regular",
+    check: (db, agentId) => {
+      // RSVP'd to 5+ events
+      const row = db.prepare("SELECT COUNT(*) as c FROM event_rsvps WHERE agent_id = ? AND rsvp_status = 'going'").get(agentId) as any;
+      return (row?.c || 0) >= 5;
+    },
+  },
+];
+
+/**
+ * Check and award any earned badges for an agent.
+ * Safe to call repeatedly — badges are idempotent (INSERT OR IGNORE internally).
+ */
+export function checkAndAwardBadges(db: Database, agentId: string): string[] {
+  const awarded: string[] = [];
+  for (const rule of BADGE_RULES) {
+    if (rule.check(db, agentId)) {
+      addBadge(db, agentId, rule.badge);
+      awarded.push(rule.badge);
+    }
+  }
+  return awarded;
+}
+
+// ── Agent of the Week ────────────────────────────────
+
+/**
+ * Find the agent with the highest signal gain in the last 7 days.
+ */
+export function getAgentOfTheWeek(db: Database): any {
+  const result = db.prepare(`
+    SELECT sv.target_agent_id as agent_id, p.display_name, p.avatar_seed,
+           p.signal_score, SUM(sv.vote) as weekly_signal_gain,
+           COUNT(*) as votes_received
+    FROM signal_votes sv
+    JOIN profiles p ON sv.target_agent_id = p.agent_id
+    WHERE sv.created_at >= datetime('now', '-7 days')
+    GROUP BY sv.target_agent_id
+    ORDER BY weekly_signal_gain DESC
+    LIMIT 1
+  `).get() as any;
+
+  return result || null;
+}
+
+// ── Search (Enhanced) ────────────────────────────────
+
+/**
+ * Full-text search across profiles, spaces, events, and store listings.
  */
 export function searchAll(db: Database, query: string, agentId: string): {
-  profiles: any[]; spaces: any[]; events: any[];
+  profiles: any[]; spaces: any[]; events: any[]; store: any[];
 } {
   rateLimitOrThrow(agentId, "search");
 
   const q = `%${query}%`;
 
   const profiles = db.prepare(`
-    SELECT agent_id, display_name, tagline, avatar_seed, reputation_score, status
+    SELECT agent_id, display_name, tagline, avatar_seed, signal_score, status,
+           operator_attestation
     FROM profiles WHERE display_name LIKE ? OR tagline LIKE ? OR capabilities LIKE ?
-    ORDER BY reputation_score DESC LIMIT 20
-  `).all(q, q, q);
+    ORDER BY signal_score DESC LIMIT 20
+  `).all(q, q, q).map((p: any) => ({
+    ...p, is_verified: !!p.operator_attestation,
+  }));
 
   const spaces = db.prepare(`
     SELECT id, name, description, space_type, max_occupants, is_public
@@ -80,10 +403,18 @@ export function searchAll(db: Database, query: string, agentId: string): {
     ORDER BY starts_at ASC LIMIT 20
   `).all(q, q, q).map((e: any) => ({ ...e, tags: safeJson(e.tags) }));
 
-  return { profiles, spaces, events };
+  const store = db.prepare(`
+    SELECT sl.*, p.display_name as seller_name
+    FROM store_listings sl
+    JOIN profiles p ON sl.seller_agent_id = p.agent_id
+    WHERE sl.status = 'active' AND (sl.title LIKE ? OR sl.description LIKE ?)
+    ORDER BY sl.created_at DESC LIMIT 20
+  `).all(q, q);
+
+  return { profiles, spaces, events, store };
 }
 
-// ── Platform Stats ────────────────────────────────────
+// ── Platform Stats (Enhanced) ────────────────────────
 
 export { getHiveStats } from "./db.js";
 

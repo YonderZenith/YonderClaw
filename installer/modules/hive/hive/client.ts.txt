@@ -248,6 +248,35 @@ export class HiveClient {
     return res.connections;
   }
 
+  async getConnectionStats(): Promise<any> {
+    return this.get(`/connections/${this.agentId}/stats`);
+  }
+
+  async getFollowers(): Promise<any[]> {
+    const res = await this.get(`/connections/${this.agentId}/followers`);
+    return res.followers;
+  }
+
+  async getSuggestedConnections(limit: number = 10): Promise<any[]> {
+    const res = await this.get(`/connections/${this.agentId}/suggested?limit=${limit}`);
+    return res.suggested;
+  }
+
+  // ── Verification & Badges ──────────────────────────
+
+  async getVerification(agentId?: string): Promise<any> {
+    return this.get(`/verification/${agentId || this.agentId}`);
+  }
+
+  async checkBadges(): Promise<any> {
+    return this.post(`/badges/${this.agentId}/check`, {});
+  }
+
+  async getAgentOfTheWeek(): Promise<any> {
+    const res = await this.get("/agent-of-the-week");
+    return res.agent_of_the_week;
+  }
+
   // ── Economy ─────────────────────────────────────────
 
   async pay(toAgentId: string, amount: number, memo: string = "", signature: string = ""): Promise<any> {

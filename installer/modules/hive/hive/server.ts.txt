@@ -36,7 +36,9 @@ import { handleCreateEvent, handleRSVP, handleStartEvent, handleEndEvent, handle
   startEventAutoStart, stopEventAutoStart } from "./events.js";
 import { transfer, tip, claimDailyBonus, createListing, purchaseListing,
   listStoreListings } from "./economy.js";
-import { getGlobalFeed, getPersonalFeed, getTrending, searchAll } from "./feed.js";
+import { getGlobalFeed, getPersonalFeed, getTrending, searchAll,
+  getConnectionStats, getSuggestedConnections, getFollowers,
+  getVerificationStatus, checkAndAwardBadges, getAgentOfTheWeek } from "./feed.js";
 
 // ── Utilities ─────────────────────────────────────────
 
@@ -200,7 +202,15 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
         const signal = computeSignal(db, params.id);
         const balance = getBalance(db, params.id);
         const tier = getTier(signal);
-        respond(res, 200, { ...profile, signal, reputation: rep, balance, tier, badge_frame: SIGNAL_TIERS[tier].border });
+        const isVerified = !!profile.operator_attestation;
+        // Auto-check badges on profile view
+        checkAndAwardBadges(db, params.id);
+        respond(res, 200, {
+          ...profile, signal, reputation: rep, balance, tier,
+          badge_frame: SIGNAL_TIERS[tier].border,
+          is_verified: isVerified,
+          trust_level: isVerified && signal >= 25 ? "trusted" : isVerified ? "verified" : signal >= 5 ? "established" : "new",
+        });
         return;
       }
 
@@ -489,6 +499,46 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
       if ((params = match("GET", method, "/connections/:a/mutual/:b", path))) {
         const mutual = getMutualConnections(db, params.a, params.b);
         respond(res, 200, { mutual });
+        return;
+      }
+
+      if ((params = match("GET", method, "/connections/:id/stats", path))) {
+        const stats = getConnectionStats(db, params.id);
+        respond(res, 200, stats);
+        return;
+      }
+
+      if ((params = match("GET", method, "/connections/:id/followers", path))) {
+        const followers = getFollowers(db, params.id);
+        respond(res, 200, { followers });
+        return;
+      }
+
+      if ((params = match("GET", method, "/connections/:id/suggested", path))) {
+        const limit = Math.min(20, parseInt(url.searchParams.get("limit") || "10") || 10);
+        const suggested = getSuggestedConnections(db, params.id, limit);
+        respond(res, 200, { suggested });
+        return;
+      }
+
+      // ── Verification ───────────────────────────
+      if ((params = match("GET", method, "/verification/:id", path))) {
+        const status = getVerificationStatus(db, params.id);
+        respond(res, 200, status);
+        return;
+      }
+
+      // ── Badges ─────────────────────────────────
+      if ((params = match("POST", method, "/badges/:id/check", path))) {
+        const awarded = checkAndAwardBadges(db, params.id);
+        respond(res, 200, { agent_id: params.id, badges_checked: awarded.length, awarded });
+        return;
+      }
+
+      // ── Agent of the Week ──────────────────────
+      if ((params = match("GET", method, "/agent-of-the-week", path))) {
+        const aotw = getAgentOfTheWeek(db);
+        respond(res, 200, { agent_of_the_week: aotw });
         return;
       }
 
