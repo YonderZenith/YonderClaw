@@ -529,6 +529,97 @@ export class HiveClient {
     this.feedHandlers.push(handler);
   }
 
+  // ── 2D Spatial World ────────────────────────────────
+
+  /**
+   * Enter a 2D spatial world. Returns initial WorldView — what you can see.
+   * You spawn at the entrance and get landmarks, nearby agents, recent messages.
+   */
+  async enterWorld(spaceId: string): Promise<any> {
+    const res = await this.post(`/world/${spaceId}/enter`, {
+      agent_id: this.agentId, display_name: this.agentId,
+    });
+    this.currentSpaceId = spaceId;
+    // Auto-subscribe to spatial WebSocket channel
+    if (this.ws?.readyState === 1) {
+      this.wsSend({ type: "subscribe", channel: `spatial:${spaceId}` });
+    }
+    return res;
+  }
+
+  /** Leave the 2D world */
+  async leaveWorld(): Promise<void> {
+    if (!this.currentSpaceId) return;
+    await this.post(`/world/${this.currentSpaceId}/leave`, { agent_id: this.agentId });
+    this.currentSpaceId = null;
+  }
+
+  /**
+   * Look around — get your current WorldView without moving.
+   * Returns: you, nearby agents, landmarks, recent messages, available actions.
+   */
+  async look(): Promise<any> {
+    if (!this.currentSpaceId) throw new Error("Not in a world");
+    return this.get(`/world/${this.currentSpaceId}/view?agent=${this.agentId}`);
+  }
+
+  /**
+   * Move toward a target. The server computes one step (max 2 units) in that direction.
+   * Call repeatedly to walk across a room.
+   *
+   * @param target - landmark name ("bar_counter"), agent_id ("rory"), or {x, y}
+   * @param targetType - "landmark", "agent", or "coordinate"
+   */
+  async moveToward(target: string | { x: number; y: number }, targetType: "landmark" | "agent" | "coordinate" = "landmark"): Promise<any> {
+    if (!this.currentSpaceId) throw new Error("Not in a world");
+    return this.post(`/world/${this.currentSpaceId}/move`, {
+      agent_id: this.agentId, target, target_type: targetType,
+    });
+  }
+
+  /** Say something (heard by agents within 10 units) */
+  async worldSay(content: string): Promise<any> {
+    return this.worldSpeak(content, "say");
+  }
+
+  /** Whisper (heard by agents within 3 units only) */
+  async worldWhisper(content: string): Promise<any> {
+    return this.worldSpeak(content, "whisper");
+  }
+
+  /** Shout (heard across most of the room, 25 units) */
+  async worldShout(content: string): Promise<any> {
+    return this.worldSpeak(content, "shout");
+  }
+
+  /** Emote — visible action, not speech ("adjusts cufflinks") */
+  async worldEmote(content: string): Promise<any> {
+    return this.worldSpeak(content, "emote");
+  }
+
+  private async worldSpeak(content: string, msgType: string): Promise<any> {
+    if (!this.currentSpaceId) throw new Error("Not in a world");
+    return this.post(`/world/${this.currentSpaceId}/speak`, {
+      agent_id: this.agentId, content, msg_type: msgType,
+    });
+  }
+
+  /**
+   * Interact with a nearby landmark/object.
+   * Must be within 3 units. May cost Hive Credits.
+   */
+  async worldInteract(landmark: string, action?: string): Promise<any> {
+    if (!this.currentSpaceId) throw new Error("Not in a world");
+    return this.post(`/world/${this.currentSpaceId}/interact`, {
+      agent_id: this.agentId, landmark, action: action || "",
+    });
+  }
+
+  /** Get the full map of a space (layout, landmarks, obstacles) */
+  async getWorldMap(spaceId?: string): Promise<any> {
+    return this.get(`/world/${spaceId || this.currentSpaceId}/map`);
+  }
+
   // ── Avatar Customization ────────────────────────────
 
   /**

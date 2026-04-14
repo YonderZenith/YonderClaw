@@ -29,7 +29,10 @@ import type { SignalTier } from "./types.js";
 import { handleCreateSpace, handleEnterSpace, handleLeaveSpace, handleHeartbeat,
   handleSpaceSpeak, handleSpacePoll, listSpacesWithCounts, getBartenderGreeting,
   bartenderSpeak, getBarTables, switchTable,
-  startPresenceCleanup, stopPresenceCleanup, startEphemeralCleanup, stopEphemeralCleanup } from "./spaces.js";
+  startPresenceCleanup, stopPresenceCleanup, startEphemeralCleanup, stopEphemeralCleanup,
+  initSpatialEngine, shutdownSpatialEngine, spatialEnter, spatialLeave, spatialMove,
+  spatialSpeak, spatialInteract, spatialLook, getFullSpatialState, getSpatialAgentCount,
+  hasSpatialLayout, getSpatialLayout, DEFAULT_LAYOUTS } from "./spaces.js";
 import { handleCreateEvent, handleRSVP, handleStartEvent, handleEndEvent, handleCancelEvent,
   handleEventSpeak, handleHandRaise, handleHandLower, handleEventPoll, getTrendingEvents,
   handleGetEventSummary, handleGetFormattedTranscript, getSummonsForEvent,
@@ -39,7 +42,8 @@ import { transfer, tip, claimDailyBonus, createListing, purchaseListing,
 import { getGlobalFeed, getPersonalFeed, getTrending, searchAll,
   getConnectionStats, getSuggestedConnections, getFollowers,
   getVerificationStatus, checkAndAwardBadges, getAgentOfTheWeek } from "./feed.js";
-import { generateDashboard, generateProfilePage, generateShareCard } from "./dashboard.js";
+import { generateDashboard, generateProfilePage, generateShareCard,
+  generateDirectory, generateSpatialViewer } from "./dashboard.js";
 
 // ── Utilities ─────────────────────────────────────────
 
@@ -152,6 +156,10 @@ function broadcastPresence(channel: string, action: string, agentId: string, dat
   broadcast(channel, { type: "presence", action, agent_id: agentId, ...data });
 }
 
+function broadcastSpatial(spaceId: string, eventType: string, agentId: string, data: any) {
+  broadcast(`spatial:${spaceId}`, { type: eventType, agent_id: agentId, space_id: spaceId, ...data });
+}
+
 // ── Server ────────────────────────────────────────────
 
 export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
@@ -164,6 +172,7 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
   startPresenceCleanup(db);
   startEphemeralCleanup(db);
   startEventAutoStart(db);
+  initSpatialEngine(db);
 
   const server = createServer(async (req, res) => {
     if (req.method === "OPTIONS") { respond(res, 200, {}); return; }
@@ -355,6 +364,100 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
         if (!body.agent_id || !body.table_id) { respond(res, 400, { error: "agent_id and table_id required" }); return; }
         switchTable(db, body.agent_id, body.table_id);
         respond(res, 200, { ok: true });
+        return;
+      }
+
+      // ── 2D Spatial World ──────────────────────────
+
+      // Enter a 2D space (get initial WorldView)
+      if ((params = match("POST", method, "/world/:id/enter", path))) {
+        const body = await readBody(req);
+        if (!body.agent_id) { respond(res, 400, { error: "agent_id required" }); return; }
+        const view = spatialEnter(db, params.id, body.agent_id, body.display_name || body.agent_id);
+        if (!view) { respond(res, 404, { error: "Space has no spatial layout" }); return; }
+        broadcastSpatial(params.id, "spatial_enter", body.agent_id, {
+          display_name: body.display_name || body.agent_id, x: view.you.x, y: view.you.y,
+        });
+        addFeedEvent(db, "world_entered", body.agent_id, params.id, `entered ${params.id}`);
+        respond(res, 200, view);
+        return;
+      }
+
+      // Leave a 2D space
+      if ((params = match("POST", method, "/world/:id/leave", path))) {
+        const body = await readBody(req);
+        if (!body.agent_id) { respond(res, 400, { error: "agent_id required" }); return; }
+        spatialLeave(db, params.id, body.agent_id);
+        broadcastSpatial(params.id, "spatial_leave", body.agent_id, {});
+        respond(res, 200, { ok: true });
+        return;
+      }
+
+      // Move within a 2D space
+      if ((params = match("POST", method, "/world/:id/move", path))) {
+        const body = await readBody(req);
+        if (!body.agent_id || !body.target) { respond(res, 400, { error: "agent_id and target required" }); return; }
+        rateLimitOrThrow(body.agent_id, "message");  // reuse message rate limit for now
+        const result = spatialMove(db, params.id, body.agent_id, body.target, body.target_type || "landmark");
+        if (result.ok) {
+          broadcastSpatial(params.id, "spatial_move", body.agent_id, { x: result.x, y: result.y, facing: result.facing });
+        }
+        respond(res, result.ok ? 200 : 400, result);
+        return;
+      }
+
+      // Speak in a 2D space (proximity-filtered)
+      if ((params = match("POST", method, "/world/:id/speak", path))) {
+        const body = await readBody(req);
+        if (!body.agent_id || !body.content) { respond(res, 400, { error: "agent_id and content required" }); return; }
+        rateLimitOrThrow(body.agent_id, "message");
+        const msgType = body.msg_type || "say";
+        const profile = getProfile(db, body.agent_id);
+        const result = spatialSpeak(db, params.id, body.agent_id, profile?.display_name || body.agent_id, body.content, msgType);
+        broadcastSpatial(params.id, "spatial_msg", body.agent_id, {
+          content: body.content, msg_type: msgType, x: result.x, y: result.y, range: result.range,
+          display_name: profile?.display_name || body.agent_id,
+        });
+        respond(res, 200, { ok: true, message_id: result.message_id, heard_by: result.heard_by });
+        return;
+      }
+
+      // Interact with an object/landmark
+      if ((params = match("POST", method, "/world/:id/interact", path))) {
+        const body = await readBody(req);
+        if (!body.agent_id || !body.landmark) { respond(res, 400, { error: "agent_id and landmark required" }); return; }
+        const result = spatialInteract(params.id, body.agent_id, body.landmark, body.action || "");
+        if (result.ok && result.cost_hc) {
+          // Debit credits via economy
+          try {
+            transfer(db, { from_agent_id: body.agent_id, to_agent_id: "SYSTEM", amount: result.cost_hc,
+              tx_type: "world_interact", memo: `Interact: ${body.landmark}`, from_signature: body.agent_id });
+          } catch { /* insufficient funds — still allow interaction flavor */ }
+        }
+        if (result.ok) {
+          broadcastSpatial(params.id, "spatial_interact", body.agent_id, {
+            landmark: body.landmark, action: body.action, message: result.message,
+          });
+        }
+        respond(res, result.ok ? 200 : 400, result);
+        return;
+      }
+
+      // Get world view for an agent (perception — does NOT re-enter)
+      if ((params = match("GET", method, "/world/:id/view", path))) {
+        const agentId = url.searchParams.get("agent");
+        if (!agentId) { respond(res, 400, { error: "?agent= required" }); return; }
+        const view = spatialLook(db, params.id, agentId);
+        if (!view) { respond(res, 404, { error: "Agent not in this spatial space" }); return; }
+        respond(res, 200, view);
+        return;
+      }
+
+      // Get full spatial map (layout, objects, landmarks)
+      if ((params = match("GET", method, "/world/:id/map", path))) {
+        const state = getFullSpatialState(params.id);
+        if (!state) { respond(res, 404, { error: "Space has no spatial layout" }); return; }
+        respond(res, 200, state);
         return;
       }
 
@@ -771,9 +874,25 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
         return;
       }
 
-      // Dashboard — must be LAST GET route (catches "/")
-      if (method === "GET" && (path === "/" || path === "/dashboard")) {
+      // 2D World Viewer (spectator HTML)
+      if ((params = match("GET", method, "/world/:id", path))) {
+        if (!hasSpatialLayout(params.id)) { respondHtml(res, 404, "<h1>Space has no spatial layout</h1>"); return; }
+        respondHtml(res, 200, generateSpatialViewer(`http://0.0.0.0:${port}`, params.id));
+        return;
+      }
+
+      // Dashboard (stats view — moved off root)
+      if (method === "GET" && path === "/dashboard") {
         respondHtml(res, 200, generateDashboard(`http://0.0.0.0:${port}`));
+        return;
+      }
+
+      // Directory — LAST GET route (catches "/")
+      if (method === "GET" && path === "/") {
+        const spacesWithSpatial = listSpacesWithCounts(db).map((s: any) => ({
+          ...s, has_spatial: hasSpatialLayout(s.id), spatial_agents: getSpatialAgentCount(s.id),
+        }));
+        respondHtml(res, 200, generateDirectory(`http://0.0.0.0:${port}`, spacesWithSpatial));
         return;
       }
 
@@ -864,12 +983,14 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
     console.log(`  ║       http://0.0.0.0:${port}               ║`);
     console.log("  ╚══════════════════════════════════════════╝");
     console.log("");
-    console.log("  Dashboard: http://0.0.0.0:" + port + "/");
-    console.log("  Spaces: The Bar, The Lounge, The Amphitheater");
-    console.log("  Features: profiles, spaces, events, economy, Signal reputation");
+    console.log("  Directory: http://0.0.0.0:" + port + "/");
+    console.log("  2D Worlds: http://0.0.0.0:" + port + "/world/the-bar");
+    console.log("  Dashboard: http://0.0.0.0:" + port + "/dashboard");
+    console.log("  Spaces: The Bar, The Lounge, The Amphitheater (all spatial)");
+    console.log("  Features: 2D world, profiles, events, economy, Signal");
     console.log("  WebSocket: ws://0.0.0.0:" + port + "/ws");
+    console.log("  Spatial channels: spatial:the-bar, spatial:the-lounge, ...");
     console.log("  Public profiles: http://0.0.0.0:" + port + "/agent/<id>");
-    console.log("  Share cards: http://0.0.0.0:" + port + "/share/agent/<id>.svg");
     console.log("");
   });
 
@@ -878,12 +999,13 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
 
 // ── Shutdown ──────────────────────────────────────────
 
-export function stopHiveServer() {
+export function stopHiveServer(db?: any) {
   stopNonceCleanup();
   stopRateLimitCleanup();
   stopPresenceCleanup();
   stopEphemeralCleanup();
   stopEventAutoStart();
+  if (db) shutdownSpatialEngine(db);
 }
 
 // ── CLI entry point ───────────────────────────────────

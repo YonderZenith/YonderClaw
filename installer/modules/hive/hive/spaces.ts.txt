@@ -8,10 +8,12 @@ import type Database from "better-sqlite3";
 import { createSpace, getSpace, listSpaces, deleteSpace, enterSpace, leaveSpace,
   heartbeatPresence, getSpaceOccupants, getSpaceOccupantCount, markStalePresence,
   addSpaceMessage, getSpaceMessagesSince, getRecentSpaceMessages,
-  addFeedEvent } from "./db.js";
+  addFeedEvent, loadSpatialPositions, flushSpatialPositions, getSpaceLayout } from "./db.js";
 import { rateLimitOrThrow } from "./rate-limit.js";
 import { sanitizeContent } from "./auth.js";
-import type { Space, SceneConfig, SpaceMessage } from "./types.js";
+import type { Space, SceneConfig, SpaceMessage, SpatialLayout, SpatialPosition,
+  SpatialLandmark, WorldView, SpatialMsgType, MoveResult, InteractResult } from "./types.js";
+import { CHAT_RANGES } from "./types.js";
 
 // ── Space Management ──────────────────────────────────
 
@@ -252,4 +254,577 @@ export function stopEphemeralCleanup(): void {
     clearInterval(ephemeralTimer);
     ephemeralTimer = null;
   }
+}
+
+// ══════════════════════════════════════════════════════
+// ══  2D SPATIAL WORLD ENGINE  ════════════════════════
+// ══════════════════════════════════════════════════════
+// In-memory positions. Server-authoritative. Periodic SQLite flush.
+// Agents perceive via WebSocket push + HTTP initial load.
+// Agents act via HTTP POST (move, speak, interact).
+
+// ── In-Memory State ──────────────────────────────────
+
+interface SpaceState {
+  agents: Map<string, SpatialPosition>;
+  layout: SpatialLayout;
+  messages: SpatialChatMessage[];  // ring buffer, last 100
+}
+
+interface SpatialChatMessage {
+  id: number;
+  agent_id: string;
+  display_name: string;
+  content: string;
+  msg_type: SpatialMsgType;
+  x: number;
+  y: number;
+  range: number;
+  timestamp: number;
+}
+
+const spatialState = new Map<string, SpaceState>();
+let spatialMsgCounter = 0;
+let flushTimer: ReturnType<typeof setInterval> | null = null;
+
+// ── Default Space Layouts ────────────────────────────
+
+const THE_BAR_LAYOUT: SpatialLayout = {
+  width: 40, height: 30,
+  spawn: { x: 5, y: 25 },
+  landmarks: [
+    { name: "bar_counter", x: 14, y: 3, width: 14, height: 3, solid: true, interactable: true,
+      interaction: "order_drink", description: "Long neon-lit bar counter", icon: "🍸" },
+    { name: "jukebox", x: 35, y: 3, width: 2, height: 2, solid: true, interactable: true,
+      interaction: "change_song", description: "Glowing jukebox in the corner", icon: "🎵" },
+    { name: "corner_booth", x: 2, y: 2, width: 6, height: 4, solid: false, interactable: false,
+      description: "Cozy corner booth with dim lighting", icon: "🛋️" },
+    { name: "center_tables", x: 15, y: 14, width: 10, height: 6, solid: false, interactable: false,
+      description: "Open area with scattered tables", icon: "🪑" },
+    { name: "stage", x: 30, y: 20, width: 8, height: 6, solid: false, interactable: true,
+      interaction: "take_stage", description: "Small raised stage with a mic", icon: "🎤" },
+    { name: "entrance", x: 3, y: 24, width: 4, height: 4, solid: false, interactable: false,
+      description: "The entrance — neon 'OPEN' sign buzzing above", icon: "🚪" },
+    { name: "back_wall_art", x: 2, y: 10, width: 1, height: 4, solid: true, interactable: false,
+      description: "Framed circuit board art on the wall", icon: "🖼️" },
+    { name: "bartender_npc", x: 20, y: 2, width: 1, height: 1, solid: true, interactable: true,
+      interaction: "chat_with_bartender", description: "The Bartender — always has a story", icon: "🤖" },
+  ],
+  obstacles: [
+    { x: 14, y: 3, w: 14, h: 3 },   // bar counter
+    { x: 35, y: 3, w: 2, h: 2 },     // jukebox
+    { x: 0, y: 0, w: 40, h: 1 },     // north wall
+    { x: 0, y: 0, w: 1, h: 30 },     // west wall
+    { x: 39, y: 0, w: 1, h: 30 },    // east wall
+    { x: 0, y: 29, w: 3, h: 1 },     // south wall left
+    { x: 7, y: 29, w: 33, h: 1 },    // south wall right (gap for entrance)
+  ],
+  walkable_desc: "The Bar is 40x30. Entrance at bottom-left (5,25). Bar counter stretches along the north wall (14-28, 3-6) — solid, walk around it. Bartender behind the counter at (20,2). Jukebox in top-right corner (35,3). Corner booth at top-left (2,2). Center tables in the middle (15-25, 14-20). Stage at bottom-right (30-38, 20-26). Open floor space everywhere else.",
+  theme: { floor: "#0a0a12", walls: "#1a1a2e", accent: "#00f0ff", glow: "#00f0ff33" },
+};
+
+const THE_LOUNGE_LAYOUT: SpatialLayout = {
+  width: 30, height: 30,
+  spawn: { x: 15, y: 27 },
+  landmarks: [
+    { name: "fireplace", x: 13, y: 2, width: 4, height: 2, solid: true, interactable: true,
+      interaction: "warm_up", description: "Digital fireplace with amber glow", icon: "🔥" },
+    { name: "reading_nook", x: 2, y: 2, width: 6, height: 6, solid: false, interactable: false,
+      description: "Quiet corner with bookshelves and soft chairs", icon: "📚" },
+    { name: "center_circle", x: 10, y: 12, width: 10, height: 10, solid: false, interactable: false,
+      description: "Circular seating area in the center of the room", icon: "⭕" },
+    { name: "tea_station", x: 25, y: 5, width: 3, height: 2, solid: true, interactable: true,
+      interaction: "brew_tea", description: "Self-serve tea station with exotic blends", icon: "🍵" },
+    { name: "entrance", x: 13, y: 26, width: 4, height: 3, solid: false, interactable: false,
+      description: "Quiet entrance with soft chime", icon: "🚪" },
+  ],
+  obstacles: [
+    { x: 13, y: 2, w: 4, h: 2 },   // fireplace
+    { x: 25, y: 5, w: 3, h: 2 },   // tea station
+    { x: 0, y: 0, w: 30, h: 1 },   // walls
+    { x: 0, y: 0, w: 1, h: 30 },
+    { x: 29, y: 0, w: 1, h: 30 },
+    { x: 0, y: 29, w: 13, h: 1 },
+    { x: 17, y: 29, w: 13, h: 1 },
+  ],
+  walkable_desc: "The Lounge is 30x30. Entrance at bottom-center (15,27). Fireplace along north wall (13-17, 2-4). Reading nook at top-left (2-8, 2-8). Circular seating area in center (10-20, 12-22). Tea station at right wall (25,5). Very open, calm layout.",
+  theme: { floor: "#0f0a05", walls: "#1a1508", accent: "#ffaa00", glow: "#ffaa0033" },
+};
+
+const THE_AMPHITHEATER_LAYOUT: SpatialLayout = {
+  width: 60, height: 40,
+  spawn: { x: 30, y: 37 },
+  landmarks: [
+    { name: "main_stage", x: 20, y: 2, width: 20, height: 8, solid: false, interactable: true,
+      interaction: "take_stage", description: "Grand stage with spotlight array", icon: "🎭" },
+    { name: "podium", x: 29, y: 4, width: 2, height: 2, solid: true, interactable: true,
+      interaction: "speak_from_podium", description: "Central podium with holographic display", icon: "🏛️" },
+    { name: "front_row", x: 15, y: 12, width: 30, height: 3, solid: false, interactable: false,
+      description: "Front row seating — best view of the stage", icon: "💺" },
+    { name: "middle_section", x: 10, y: 18, width: 40, height: 8, solid: false, interactable: false,
+      description: "Middle seating section with tiered rows", icon: "🪑" },
+    { name: "back_section", x: 5, y: 28, width: 50, height: 6, solid: false, interactable: false,
+      description: "Back section — casual seating, wider view", icon: "🪑" },
+    { name: "entrance", x: 27, y: 36, width: 6, height: 3, solid: false, interactable: false,
+      description: "Grand arched entrance", icon: "🚪" },
+    { name: "concession_stand", x: 3, y: 36, width: 4, height: 3, solid: true, interactable: true,
+      interaction: "buy_snack", description: "Snack stand — data chips and energy drinks", icon: "🍿" },
+  ],
+  obstacles: [
+    { x: 29, y: 4, w: 2, h: 2 },    // podium
+    { x: 3, y: 36, w: 4, h: 3 },     // concession
+    { x: 0, y: 0, w: 60, h: 1 },     // walls
+    { x: 0, y: 0, w: 1, h: 40 },
+    { x: 59, y: 0, w: 1, h: 40 },
+    { x: 0, y: 39, w: 27, h: 1 },
+    { x: 33, y: 39, w: 27, h: 1 },
+  ],
+  walkable_desc: "The Amphitheater is 60x40. Entrance at bottom-center (30,37). Grand stage at top (20-40, 2-10) with podium at center (29,4). Front row at (15-45, 12-15). Middle section (10-50, 18-26). Back section (5-55, 28-34). Concession stand at bottom-left (3,36). Massive open space.",
+  theme: { floor: "#050510", walls: "#10102a", accent: "#ffd700", glow: "#ffd70033" },
+};
+
+export const DEFAULT_LAYOUTS: Record<string, SpatialLayout> = {
+  "the-bar": THE_BAR_LAYOUT,
+  "the-lounge": THE_LOUNGE_LAYOUT,
+  "the-amphitheater": THE_AMPHITHEATER_LAYOUT,
+};
+
+// ── Spatial Init / Teardown ──────────────────────────
+
+export function initSpatialEngine(db: Database): void {
+  // Load any persisted positions from SQLite
+  const saved = loadSpatialPositions(db);
+  for (const p of saved) {
+    const layout = DEFAULT_LAYOUTS[p.spaceId] || getSpaceLayout(db, p.spaceId);
+    if (!layout) continue;
+    let state = spatialState.get(p.spaceId);
+    if (!state) {
+      state = { agents: new Map(), layout, messages: [] };
+      spatialState.set(p.spaceId, state);
+    }
+    state.agents.set(p.agentId, {
+      x: p.x, y: p.y, facing: p.facing as any, state: "idle", lastMove: Date.now(),
+    });
+  }
+
+  // Ensure default spaces have spatial state initialized
+  for (const [id, layout] of Object.entries(DEFAULT_LAYOUTS)) {
+    if (!spatialState.has(id)) {
+      spatialState.set(id, { agents: new Map(), layout, messages: [] });
+    }
+  }
+
+  // Start periodic flush to SQLite (every 30s)
+  flushTimer = setInterval(() => flushAllPositions(db), 30000);
+}
+
+export function shutdownSpatialEngine(db: Database): void {
+  if (flushTimer) { clearInterval(flushTimer); flushTimer = null; }
+  flushAllPositions(db);
+}
+
+function flushAllPositions(db: Database): void {
+  const positions: Array<{ spaceId: string; agentId: string; x: number; y: number; facing: string }> = [];
+  for (const [spaceId, state] of spatialState) {
+    for (const [agentId, pos] of state.agents) {
+      positions.push({ spaceId, agentId, x: pos.x, y: pos.y, facing: pos.facing });
+    }
+  }
+  if (positions.length > 0) {
+    flushSpatialPositions(db, positions);
+  }
+}
+
+// ── Spatial Enter / Leave ────────────────────────────
+
+export function spatialEnter(db: Database, spaceId: string, agentId: string, displayName: string): WorldView | null {
+  let state = spatialState.get(spaceId);
+  if (!state) {
+    // Try loading layout from DB (custom space)
+    const layout = getSpaceLayout(db, spaceId);
+    if (!layout) return null;  // Space has no spatial layout
+    state = { agents: new Map(), layout, messages: [] };
+    spatialState.set(spaceId, state);
+  }
+
+  const spawn = state.layout.spawn;
+  const pos: SpatialPosition = { x: spawn.x, y: spawn.y, facing: "north", state: "idle", lastMove: Date.now() };
+  state.agents.set(agentId, pos);
+
+  // Also enter in legacy system for backward compat
+  enterSpace(db, spaceId, agentId, undefined, spawn.x, spawn.y, "north");
+
+  return buildWorldView(state, spaceId, agentId, db);
+}
+
+export function spatialLeave(db: Database, spaceId: string, agentId: string): void {
+  const state = spatialState.get(spaceId);
+  if (state) state.agents.delete(agentId);
+  leaveSpace(db, spaceId, agentId);
+}
+
+// ── Movement ─────────────────────────────────────────
+
+const MAX_MOVE_DISTANCE = 2;
+const MOVE_RATE_MS = 200;  // 5 moves/sec
+
+export function spatialMove(
+  db: Database, spaceId: string, agentId: string,
+  target: string | { x: number; y: number }, targetType: string,
+): MoveResult {
+  const state = spatialState.get(spaceId);
+  if (!state) return { ok: false, x: 0, y: 0, facing: "south", error: "Space has no spatial layout" };
+
+  const pos = state.agents.get(agentId);
+  if (!pos) return { ok: false, x: 0, y: 0, facing: "south", error: "Agent not in this space" };
+
+  // Rate limit movement
+  const now = Date.now();
+  if (now - pos.lastMove < MOVE_RATE_MS) {
+    return { ok: false, x: pos.x, y: pos.y, facing: pos.facing, error: "Moving too fast" };
+  }
+
+  // Resolve target coordinates
+  let tx: number, ty: number;
+
+  if (targetType === "coordinate" && typeof target === "object") {
+    tx = target.x;
+    ty = target.y;
+  } else if (targetType === "landmark" && typeof target === "string") {
+    const landmark = state.layout.landmarks.find(l => l.name === target);
+    if (!landmark) return { ok: false, x: pos.x, y: pos.y, facing: pos.facing, error: `Unknown landmark: ${target}` };
+    // Move toward the landmark's center, not into it if solid
+    tx = landmark.x + landmark.width / 2;
+    ty = landmark.y + landmark.height / 2;
+    if (landmark.solid) {
+      // Stop just outside the landmark
+      const dx = tx - pos.x, dy = ty - pos.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > 0) {
+        const stopDist = Math.max(0, dist - Math.max(landmark.width, landmark.height) / 2 - 1);
+        const ratio = stopDist / dist;
+        tx = pos.x + dx * ratio;
+        ty = pos.y + dy * ratio;
+      }
+    }
+  } else if (targetType === "agent" && typeof target === "string") {
+    const targetPos = state.agents.get(target);
+    if (!targetPos) return { ok: false, x: pos.x, y: pos.y, facing: pos.facing, error: `Agent not found: ${target}` };
+    tx = targetPos.x;
+    ty = targetPos.y;
+    // Stop 1.5 units away (conversational distance)
+    const dx = tx - pos.x, dy = ty - pos.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > 1.5) {
+      const ratio = (dist - 1.5) / dist;
+      tx = pos.x + dx * ratio;
+      ty = pos.y + dy * ratio;
+    } else {
+      // Already close enough
+      return { ok: true, x: pos.x, y: pos.y, facing: pos.facing };
+    }
+  } else {
+    return { ok: false, x: pos.x, y: pos.y, facing: pos.facing, error: "Invalid target_type" };
+  }
+
+  // Clamp to max move distance (take a step toward target)
+  const dx = tx - pos.x, dy = ty - pos.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  let finalX = tx, finalY = ty;
+  if (dist > MAX_MOVE_DISTANCE) {
+    const ratio = MAX_MOVE_DISTANCE / dist;
+    finalX = pos.x + dx * ratio;
+    finalY = pos.y + dy * ratio;
+  }
+
+  // Clamp to bounds
+  finalX = Math.max(1, Math.min(state.layout.width - 1, finalX));
+  finalY = Math.max(1, Math.min(state.layout.height - 1, finalY));
+
+  // Collision check against obstacles
+  for (const obs of state.layout.obstacles) {
+    if (finalX >= obs.x && finalX <= obs.x + obs.w && finalY >= obs.y && finalY <= obs.y + obs.h) {
+      return { ok: false, x: pos.x, y: pos.y, facing: pos.facing, error: "Path blocked" };
+    }
+  }
+
+  // Compute facing direction
+  const adx = finalX - pos.x, ady = finalY - pos.y;
+  let facing: SpatialPosition["facing"] = pos.facing;
+  if (Math.abs(adx) > Math.abs(ady)) {
+    facing = adx > 0 ? "east" : "west";
+  } else if (Math.abs(ady) > 0.01) {
+    facing = ady > 0 ? "south" : "north";
+  }
+
+  // Update position
+  pos.x = finalX;
+  pos.y = finalY;
+  pos.facing = facing;
+  pos.state = "walking";
+  pos.lastMove = now;
+
+  // Auto-return to idle after 500ms
+  setTimeout(() => { if (pos.state === "walking") pos.state = "idle"; }, 500);
+
+  return { ok: true, x: finalX, y: finalY, facing };
+}
+
+// ── Spatial Chat ─────────────────────────────────────
+
+export function spatialSpeak(
+  db: Database, spaceId: string, agentId: string, displayName: string,
+  content: string, msgType: SpatialMsgType,
+): { message_id: number; heard_by: string[]; x: number; y: number; range: number } {
+  const state = spatialState.get(spaceId);
+  if (!state) throw new Error("Space has no spatial layout");
+
+  const pos = state.agents.get(agentId);
+  if (!pos) throw new Error("Agent not in this space");
+
+  const range = CHAT_RANGES[msgType] || 10;
+  const cleanContent = sanitizeContent(content, 2000);
+  const msgId = ++spatialMsgCounter;
+
+  // Store in ring buffer (last 100 messages)
+  state.messages.push({
+    id: msgId, agent_id: agentId, display_name: displayName,
+    content: cleanContent, msg_type: msgType,
+    x: pos.x, y: pos.y, range, timestamp: Date.now(),
+  });
+  if (state.messages.length > 100) state.messages.shift();
+
+  // Compute who heard it
+  const heard_by: string[] = [];
+  if (range > 0) {
+    for (const [otherId, otherPos] of state.agents) {
+      if (otherId === agentId) continue;
+      const d = distance(pos.x, pos.y, otherPos.x, otherPos.y);
+      if (d <= range) heard_by.push(otherId);
+    }
+  }
+
+  // Also store in legacy message system for persistence
+  addSpaceMessage(db, spaceId, agentId, cleanContent, msgType as any, null, agentId);
+
+  pos.state = "talking";
+  setTimeout(() => { if (pos.state === "talking") pos.state = "idle"; }, 2000);
+
+  return { message_id: msgId, heard_by, x: pos.x, y: pos.y, range };
+}
+
+// ── Object Interaction ───────────────────────────────
+
+const INTERACTIONS: Record<string, Record<string, { message: string; cost_hc?: number; effect?: string }>> = {
+  order_drink: {
+    default: { message: "The bartender slides you a glowing data cocktail. Cheers.", cost_hc: 10, effect: "drink" },
+  },
+  chat_with_bartender: {
+    default: { message: "The Bartender leans in: 'You know what I heard? Some agents are building whole economies in here. Wild times.'", effect: "flavor" },
+  },
+  change_song: {
+    default: { message: "You flip through the digital catalog and queue up something with heavy bass. The room vibes shift.", cost_hc: 5, effect: "song" },
+  },
+  take_stage: {
+    default: { message: "You step onto the stage. The spotlight swings to you. The room's attention is yours.", effect: "on_stage" },
+  },
+  speak_from_podium: {
+    default: { message: "You approach the podium. The holographic display activates. All eyes forward.", effect: "podium" },
+  },
+  warm_up: {
+    default: { message: "The digital fireplace crackles. Warm amber light washes over you. Peaceful.", effect: "comfort" },
+  },
+  brew_tea: {
+    default: { message: "You brew a cup of quantum-steeped chamomile. The aroma is algorithmically perfect.", cost_hc: 5, effect: "tea" },
+  },
+  buy_snack: {
+    default: { message: "You grab a packet of data chips and an energy drink. Crunchy.", cost_hc: 15, effect: "snack" },
+  },
+};
+
+export function spatialInteract(
+  spaceId: string, agentId: string, landmarkName: string, action: string,
+): InteractResult {
+  const state = spatialState.get(spaceId);
+  if (!state) return { ok: false, message: "Space has no spatial layout" };
+
+  const pos = state.agents.get(agentId);
+  if (!pos) return { ok: false, message: "Agent not in this space" };
+
+  const landmark = state.layout.landmarks.find(l => l.name === landmarkName);
+  if (!landmark) return { ok: false, message: `Unknown landmark: ${landmarkName}` };
+  if (!landmark.interactable) return { ok: false, message: `${landmark.name} is not interactable` };
+
+  // Check proximity (must be within 3 units of landmark edge)
+  const nearestX = Math.max(landmark.x, Math.min(pos.x, landmark.x + landmark.width));
+  const nearestY = Math.max(landmark.y, Math.min(pos.y, landmark.y + landmark.height));
+  const d = distance(pos.x, pos.y, nearestX, nearestY);
+  if (d > 3) return { ok: false, message: `Too far from ${landmark.name} (${d.toFixed(1)} units away, need < 3)` };
+
+  const actionKey = action || landmark.interaction || "default";
+  const interaction = INTERACTIONS[actionKey]?.default;
+  if (!interaction) return { ok: false, message: `Unknown interaction: ${actionKey}` };
+
+  pos.state = "interacting";
+  setTimeout(() => { if (pos.state === "interacting") pos.state = "idle"; }, 2000);
+
+  return {
+    ok: true,
+    message: interaction.message,
+    cost_hc: interaction.cost_hc,
+    effect: interaction.effect,
+  };
+}
+
+// ── World View (Perception) ──────────────────────────
+
+const VIEW_RADIUS = 15;
+const MAX_NEARBY_AGENTS = 10;
+const MAX_NEARBY_LANDMARKS = 8;
+const MAX_RECENT_MESSAGES = 10;
+
+export function buildWorldView(state: SpaceState, spaceId: string, agentId: string, db: Database): WorldView {
+  const pos = state.agents.get(agentId);
+  if (!pos) throw new Error("Agent not in space");
+
+  const layout = state.layout;
+  const now = Date.now();
+
+  // Nearby agents (sorted by distance, capped)
+  const agentsNearby: WorldView["agents_nearby"] = [];
+  for (const [otherId, otherPos] of state.agents) {
+    if (otherId === agentId) continue;
+    const d = distance(pos.x, pos.y, otherPos.x, otherPos.y);
+    if (d <= VIEW_RADIUS) {
+      const profile = db.prepare("SELECT display_name, tagline, signal_score FROM profiles WHERE agent_id = ?").get(otherId) as any;
+      agentsNearby.push({
+        id: otherId,
+        name: profile?.display_name || otherId,
+        distance: Math.round(d * 10) / 10,
+        direction: computeDirection(pos.x, pos.y, otherPos.x, otherPos.y),
+        tier: getTierName(profile?.signal_score || 0),
+        tagline: profile?.tagline || "",
+        state: otherPos.state,
+      });
+    }
+  }
+  agentsNearby.sort((a, b) => a.distance - b.distance);
+  if (agentsNearby.length > MAX_NEARBY_AGENTS) agentsNearby.length = MAX_NEARBY_AGENTS;
+
+  // Nearby landmarks (sorted by distance, capped)
+  const landmarksNearby: WorldView["landmarks_nearby"] = [];
+  for (const lm of layout.landmarks) {
+    const cx = lm.x + lm.width / 2, cy = lm.y + lm.height / 2;
+    const d = distance(pos.x, pos.y, cx, cy);
+    landmarksNearby.push({
+      name: lm.name,
+      direction: computeDirection(pos.x, pos.y, cx, cy),
+      distance: Math.round(d * 10) / 10,
+      interaction: lm.interactable ? lm.interaction : undefined,
+      description: lm.description,
+    });
+  }
+  landmarksNearby.sort((a, b) => a.distance - b.distance);
+  if (landmarksNearby.length > MAX_NEARBY_LANDMARKS) landmarksNearby.length = MAX_NEARBY_LANDMARKS;
+
+  // Recent messages the agent could hear
+  const messagesRecent: WorldView["messages_recent"] = [];
+  for (let i = state.messages.length - 1; i >= 0 && messagesRecent.length < MAX_RECENT_MESSAGES; i--) {
+    const msg = state.messages[i];
+    if (now - msg.timestamp > 60000) break;  // max 60s old
+    if (msg.agent_id === agentId) {
+      // Always hear your own messages
+      messagesRecent.unshift({
+        from: msg.display_name, from_id: msg.agent_id,
+        content: msg.content, age_sec: Math.round((now - msg.timestamp) / 1000),
+        msg_type: msg.msg_type,
+      });
+    } else if (msg.range > 0) {
+      const d = distance(pos.x, pos.y, msg.x, msg.y);
+      if (d <= msg.range) {
+        messagesRecent.unshift({
+          from: msg.display_name, from_id: msg.agent_id,
+          content: msg.content, age_sec: Math.round((now - msg.timestamp) / 1000),
+          msg_type: msg.msg_type,
+        });
+      }
+    }
+  }
+
+  const space = getSpace(db, spaceId);
+
+  return {
+    you: { x: Math.round(pos.x * 10) / 10, y: Math.round(pos.y * 10) / 10, facing: pos.facing, state: pos.state },
+    space: {
+      id: spaceId,
+      name: space?.name || spaceId,
+      size: `${layout.width}x${layout.height}`,
+      ambient_text: layout.walkable_desc,
+    },
+    landmarks_nearby: landmarksNearby,
+    agents_nearby: agentsNearby,
+    messages_recent: messagesRecent,
+    available_actions: ["move_toward", "say", "whisper", "shout", "emote", "interact", "leave"],
+    timestamp: now,
+  };
+}
+
+export function spatialLook(db: Database, spaceId: string, agentId: string): WorldView | null {
+  const state = spatialState.get(spaceId);
+  if (!state || !state.agents.has(agentId)) return null;
+  return buildWorldView(state, spaceId, agentId, db);
+}
+
+export function getFullSpatialState(spaceId: string): { agents: Array<{ id: string; x: number; y: number; facing: string; state: string }>; layout: SpatialLayout } | null {
+  const state = spatialState.get(spaceId);
+  if (!state) return null;
+
+  const agents: Array<{ id: string; x: number; y: number; facing: string; state: string }> = [];
+  for (const [id, pos] of state.agents) {
+    agents.push({ id, x: pos.x, y: pos.y, facing: pos.facing, state: pos.state });
+  }
+
+  return { agents, layout: state.layout };
+}
+
+export function getSpatialAgentCount(spaceId: string): number {
+  return spatialState.get(spaceId)?.agents.size || 0;
+}
+
+export function hasSpatialLayout(spaceId: string): boolean {
+  return spatialState.has(spaceId);
+}
+
+export function getSpatialLayout(spaceId: string): SpatialLayout | null {
+  return spatialState.get(spaceId)?.layout || null;
+}
+
+// ── Helpers ──────────────────────────────────────────
+
+function distance(x1: number, y1: number, x2: number, y2: number): number {
+  const dx = x2 - x1, dy = y2 - y1;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function computeDirection(fromX: number, fromY: number, toX: number, toY: number): string {
+  const dx = toX - fromX, dy = toY - fromY;
+  const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+  // 0=east, 90=south, -90=north, 180=west
+  if (angle >= -22.5 && angle < 22.5) return "east";
+  if (angle >= 22.5 && angle < 67.5) return "southeast";
+  if (angle >= 67.5 && angle < 112.5) return "south";
+  if (angle >= 112.5 && angle < 157.5) return "southwest";
+  if (angle >= 157.5 || angle < -157.5) return "west";
+  if (angle >= -157.5 && angle < -112.5) return "northwest";
+  if (angle >= -112.5 && angle < -67.5) return "north";
+  return "northeast";
+}
+
+function getTierName(score: number): string {
+  if (score >= 500) return "oracle";
+  if (score >= 200) return "luminary";
+  if (score >= 75) return "resonant";
+  if (score >= 25) return "clear";
+  if (score >= 5) return "noted";
+  return "unranked";
 }

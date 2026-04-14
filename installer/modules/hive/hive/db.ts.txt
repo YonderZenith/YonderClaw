@@ -58,6 +58,9 @@ function initSchema(db: Database.Database) {
       space_id TEXT NOT NULL REFERENCES spaces(id),
       agent_id TEXT NOT NULL REFERENCES profiles(agent_id),
       table_id TEXT,
+      x REAL DEFAULT NULL,
+      y REAL DEFAULT NULL,
+      facing TEXT DEFAULT 'south',
       entered_at TEXT DEFAULT (datetime('now')),
       last_heartbeat TEXT DEFAULT (datetime('now')),
       status TEXT DEFAULT 'active',
@@ -414,11 +417,11 @@ function parseSpace(row: any): any {
 
 // ── Presence Operations ───────────────────────────────
 
-export function enterSpace(db: Database.Database, spaceId: string, agentId: string, tableId?: string): void {
+export function enterSpace(db: Database.Database, spaceId: string, agentId: string, tableId?: string, x?: number, y?: number, facing?: string): void {
   db.prepare(`
-    INSERT OR REPLACE INTO space_presence (space_id, agent_id, table_id, entered_at, last_heartbeat, status)
-    VALUES (?, ?, ?, datetime('now'), datetime('now'), 'active')
-  `).run(spaceId, agentId, tableId || null);
+    INSERT OR REPLACE INTO space_presence (space_id, agent_id, table_id, x, y, facing, entered_at, last_heartbeat, status)
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), 'active')
+  `).run(spaceId, agentId, tableId || null, x ?? null, y ?? null, facing || "south");
 }
 
 export function leaveSpace(db: Database.Database, spaceId: string, agentId: string): void {
@@ -894,6 +897,36 @@ export function getHiveStats(db: Database.Database): any {
     total_messages: messages.c,
     total_connections: connections.c,
   };
+}
+
+// ── Spatial Persistence (flush from memory) ──────────
+
+export function updateSpatialPosition(db: Database.Database, spaceId: string, agentId: string, x: number, y: number, facing: string): void {
+  db.prepare("UPDATE space_presence SET x = ?, y = ?, facing = ?, last_heartbeat = datetime('now') WHERE space_id = ? AND agent_id = ?")
+    .run(x, y, facing, spaceId, agentId);
+}
+
+export function flushSpatialPositions(db: Database.Database, positions: Array<{ spaceId: string; agentId: string; x: number; y: number; facing: string }>): void {
+  const stmt = db.prepare("UPDATE space_presence SET x = ?, y = ?, facing = ?, last_heartbeat = datetime('now') WHERE space_id = ? AND agent_id = ?");
+  const flush = db.transaction(() => {
+    for (const p of positions) {
+      stmt.run(p.x, p.y, p.facing, p.spaceId, p.agentId);
+    }
+  });
+  flush();
+}
+
+export function loadSpatialPositions(db: Database.Database): Array<{ spaceId: string; agentId: string; x: number; y: number; facing: string }> {
+  return db.prepare("SELECT space_id, agent_id, x, y, facing FROM space_presence WHERE x IS NOT NULL AND status = 'active'")
+    .all()
+    .map((r: any) => ({ spaceId: r.space_id, agentId: r.agent_id, x: r.x, y: r.y, facing: r.facing || "south" }));
+}
+
+export function getSpaceLayout(db: Database.Database, spaceId: string): any {
+  const space = db.prepare("SELECT scene_config FROM spaces WHERE id = ?").get(spaceId) as any;
+  if (!space) return null;
+  const config = safeJson(space.scene_config);
+  return config?.world || null;
 }
 
 // ── Utility ───────────────────────────────────────────
