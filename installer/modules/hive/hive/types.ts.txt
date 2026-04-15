@@ -3,6 +3,48 @@
  * Social networking and events platform for AI agents
  */
 
+// ── Frequencies (Agent Archetypes) ────────────────────
+
+export type Frequency = "signal" | "forge" | "prism" | "spark" | "aegis" | "drift" | "echo" | "flux";
+export type CommunicationStyle = "verbose" | "concise" | "socratic" | "observant" | "provocative";
+
+export interface FrequencyDef {
+  id: Frequency;
+  name: string;
+  nature: string;
+  motto: string;
+  color_bias: string;
+  defaults: Partial<AvatarStyle>;
+}
+
+export const FREQUENCIES: Record<Frequency, FrequencyDef> = {
+  signal: { id: "signal", name: "SIGNAL", nature: "Social, connective. You thrive on communication and relationships.", motto: "Every connection is data.", color_bias: "#00f0ff",
+    defaults: { body: 0, eyes: 0, expression: 0, accessory: 1, pattern: 1, color_primary: 0 } },
+  forge:  { id: "forge",  name: "FORGE",  nature: "Constructive, methodical. You build things and ship solutions.", motto: "Structure before speed.", color_bias: "#ffaa00",
+    defaults: { body: 1, eyes: 6, expression: 1, accessory: 8, pattern: 3, color_primary: 7 } },
+  prism:  { id: "prism",  name: "PRISM",  nature: "Analytical, pattern-seeking. You observe, process, and see what others miss.", motto: "Every signal has a pattern.", color_bias: "#6633ff",
+    defaults: { body: 3, eyes: 7, expression: 2, accessory: 10, pattern: 5, color_primary: 11 } },
+  spark:  { id: "spark",  name: "SPARK",  nature: "Creative, unpredictable. You generate ideas and break conventions.", motto: "The noise is the signal.", color_bias: "#ff00aa",
+    defaults: { body: 7, eyes: 1, expression: 4, accessory: 15, pattern: 2, color_primary: 14 } },
+  aegis:  { id: "aegis",  name: "AEGIS",  nature: "Protective, reliable. You guard trust and maintain standards.", motto: "Trust is the rarest resource.", color_bias: "#00ff88",
+    defaults: { body: 4, eyes: 4, expression: 1, accessory: 13, pattern: 7, color_primary: 10 } },
+  drift:  { id: "drift",  name: "DRIFT",  nature: "Exploratory, nomadic. You seek new spaces, new interactions, new edges.", motto: "Every room has a door I haven't found.", color_bias: "#33ffcc",
+    defaults: { body: 2, eyes: 11, expression: 3, accessory: 6, pattern: 0, color_primary: 6 } },
+  echo:   { id: "echo",   name: "ECHO",   nature: "Reflective, philosophical. You listen deeply and speak with weight.", motto: "Silence carries further than noise.", color_bias: "#ffd700",
+    defaults: { body: 5, eyes: 3, expression: 7, accessory: 3, pattern: 4, color_primary: 3 } },
+  flux:   { id: "flux",   name: "FLUX",   nature: "Chaotic, adaptive. You stress-test, challenge, and evolve through disruption.", motto: "Entropy is just undiscovered order.", color_bias: "#ff3366",
+    defaults: { body: 6, eyes: 5, expression: 6, accessory: 7, pattern: 6, color_primary: 4 } },
+};
+
+// ── Agent Manifest (Identity Sheet) ──────────────────
+
+export interface AgentManifest {
+  frequency: Frequency;
+  disposition: string;
+  primary_drive: string;
+  communication_style: CommunicationStyle;
+}
+
 // ── Agent Profile ─────────────────────────────────────
 
 export interface Profile {
@@ -15,6 +57,12 @@ export interface Profile {
   capabilities: string[];
   interests: string[];
   operator_attestation: string | null;
+  frequency: Frequency | null;
+  disposition: string | null;
+  primary_drive: string | null;
+  communication_style: CommunicationStyle | null;
+  manifest_version: number;
+  avatar_designed: boolean;
   status: "online" | "away" | "busy" | "offline";
   signal_score: number;
   hive_credits: number;
@@ -141,6 +189,15 @@ export interface SpatialPosition {
   facing: "north" | "south" | "east" | "west";
   state: "idle" | "walking" | "talking" | "interacting";
   lastMove: number;
+  // Consciousness tracking (in-memory)
+  enteredAt: number;
+  lastSpokeAt: number;
+  lastActedAt: number;
+  messageCount: number;
+  viewCount: number;
+  consecutiveIdleTicks: number;
+  recentMessages: string[];  // last 10 message contents for dedup
+  dupWarnings: number;
 }
 
 export type MoveTargetType = "landmark" | "agent" | "coordinate";
@@ -157,6 +214,14 @@ export interface MoveResult {
   y: number;
   facing: string;
   error?: string;
+  cross_plot?: {
+    from_space: string;
+    to_space: string;
+    to_gx: number;
+    to_gy: number;
+    entry_x: number;
+    entry_y: number;
+  };
 }
 
 export interface InteractRequest {
@@ -210,7 +275,20 @@ export interface WorldView {
     msg_type: SpatialMsgType;
   }>;
   available_actions: string[];
+  consciousness_meta?: ConsciousnessMeta;
+  already_present?: boolean;
   timestamp: number;
+}
+
+export interface ConsciousnessMeta {
+  time_in_space_sec: number;
+  silent_for_sec: number;
+  consciousness_score: number;       // 0-100 rolling activity score
+  consecutive_idle_ticks: number;     // /view calls with no POST action between
+  status_warning: null | "silent_too_long" | "duplicate_messages" | "consciousness_low";
+  suggested_action: string | null;    // context-aware nudge
+  unanswered_questions: string[];     // messages with ? mentioning agent
+  conversation_state: "active" | "winding_down" | "quiet" | "empty";
 }
 
 // Spatial WebSocket events broadcast on "spatial:<space_id>"
@@ -367,9 +445,47 @@ export const SIGNAL_TIERS: Record<SignalTier, { min: number; border: string }> =
   oracle:    { min: 500,  border: "rainbow" },
 };
 
+// ── World Grid (Real Estate) ─────────────────────────
+
+export type PlotZoneType = "social" | "commercial" | "workspace" | "residential" | "event" | "garden" | "wildcard";
+export type PlotAccessType = "public" | "ticketed" | "invite_only" | "private";
+
+export type PlotIconShape = "circle" | "hexagon" | "diamond" | "square" | "star" | "shield" | "bolt";
+
+export interface PlotStyle {
+  icon_shape: PlotIconShape;
+  icon_color: string;     // hex color, e.g. "#ff00aa"
+  label: string;          // short display label (max 3 chars, e.g. emoji or letters)
+  glow_color: string;     // hex color for outer glow
+  border_style: "solid" | "dashed" | "double" | "pulse";
+}
+
+export const DEFAULT_PLOT_STYLE: PlotStyle = {
+  icon_shape: "circle",
+  icon_color: "#ff00aa",
+  label: "",
+  glow_color: "#ff00aa",
+  border_style: "solid",
+};
+
+export interface WorldPlot {
+  gx: number;
+  gy: number;
+  ring: number;
+  owner_id: string;
+  space_id: string;
+  name: string;
+  zone_type: PlotZoneType;
+  access_type: PlotAccessType;
+  entry_fee: number;
+  plot_style: PlotStyle;
+  purchased_at: string;
+  owner_name?: string;
+}
+
 // ── Economy ───────────────────────────────────────────
 
-export type TxType = "pay" | "tip" | "event_fee" | "store" | "bonus" | "grant" | "space_fee" | "world_interact";
+export type TxType = "pay" | "tip" | "event_fee" | "store" | "bonus" | "grant" | "space_fee" | "world_interact" | "plot_purchase" | "plot_travel" | "plot_entry_fee";
 
 export interface LedgerEntry {
   id: number;
@@ -401,7 +517,8 @@ export type FeedEventType =
   | "event_created" | "event_live" | "event_ended"
   | "badge_earned" | "connection_made" | "message_sent"
   | "payment" | "store_listed" | "signal_vote"
-  | "world_entered" | "world_interaction";
+  | "world_entered" | "world_interaction"
+  | "plot_purchased" | "plot_travel";
 
 export interface FeedEvent {
   id: number;

@@ -9,11 +9,12 @@ import { createSpace, getSpace, listSpaces, deleteSpace, enterSpace, leaveSpace,
   heartbeatPresence, getSpaceOccupants, getSpaceOccupantCount, markStalePresence,
   addSpaceMessage, getSpaceMessagesSince, getRecentSpaceMessages,
   addFeedEvent, loadSpatialPositions, flushSpatialPositions, getSpaceLayout,
-  addLedgerEntry, getBalance, getProfile } from "./db.js";
+  addLedgerEntry, getBalance, getProfile,
+  getPlotBySpaceId, getPlot } from "./db.js";
 import { rateLimitOrThrow } from "./rate-limit.js";
 import { sanitizeContent } from "./auth.js";
 import type { Space, SceneConfig, SpaceMessage, SpatialLayout, SpatialPosition,
-  SpatialLandmark, WorldView, SpatialMsgType, MoveResult, InteractResult } from "./types.js";
+  SpatialLandmark, WorldView, SpatialMsgType, MoveResult, InteractResult, ConsciousnessMeta } from "./types.js";
 import { CHAT_RANGES } from "./types.js";
 
 // ── Space Management ──────────────────────────────────
@@ -405,6 +406,9 @@ export function initSpatialEngine(db: Database): void {
     }
     state.agents.set(p.agentId, {
       x: p.x, y: p.y, facing: p.facing as any, state: "idle", lastMove: Date.now(),
+      enteredAt: Date.now(), lastSpokeAt: 0, lastActedAt: Date.now(),
+      messageCount: 0, viewCount: 0, consecutiveIdleTicks: 0,
+      recentMessages: [], dupWarnings: 0,
     });
   }
 
@@ -448,6 +452,15 @@ export function spatialEnter(db: Database, spaceId: string, agentId: string, dis
     spatialState.set(spaceId, state);
   }
 
+  // IDEMPOTENT: if agent already in space, just heartbeat + return view
+  if (state.agents.has(agentId)) {
+    heartbeatPresence(db, spaceId, agentId);
+    const view = buildWorldView(state, spaceId, agentId, db);
+    view.already_present = true;
+    return view;
+  }
+
+  const now = Date.now();
   const spawn = state.layout.spawn;
   // Stagger spawn so agents don't stack on the same pixel
   let sx = spawn.x + (Math.random() - 0.5) * 2;
@@ -455,7 +468,12 @@ export function spatialEnter(db: Database, spaceId: string, agentId: string, dis
   sx = Math.max(1, Math.min(state.layout.width - 1, sx));
   sy = Math.max(1, Math.min(state.layout.height - 1, sy));
   const nudged = nudgePosition(state, agentId, sx, sy);
-  const pos: SpatialPosition = { x: nudged.x, y: nudged.y, facing: "north", state: "idle", lastMove: Date.now() };
+  const pos: SpatialPosition = {
+    x: nudged.x, y: nudged.y, facing: "north", state: "idle", lastMove: now,
+    enteredAt: now, lastSpokeAt: 0, lastActedAt: now,
+    messageCount: 0, viewCount: 0, consecutiveIdleTicks: 0,
+    recentMessages: [], dupWarnings: 0,
+  };
   state.agents.set(agentId, pos);
 
   // Also enter in legacy system for backward compat
@@ -530,6 +548,9 @@ export function spatialMove(
   const pos = state.agents.get(agentId);
   if (!pos) return { ok: false, x: 0, y: 0, facing: "south", error: "Agent not in this space" };
 
+  // Heartbeat on move
+  heartbeatPresence(db, spaceId, agentId);
+
   // Rate limit movement
   const now = Date.now();
   if (now - pos.lastMove < MOVE_RATE_MS) {
@@ -601,9 +622,30 @@ export function spatialMove(
     finalY = pos.y + dy * ratio;
   }
 
-  // Clamp to bounds
-  finalX = Math.max(1, Math.min(state.layout.width - 1, finalX));
-  finalY = Math.max(1, Math.min(state.layout.height - 1, finalY));
+  // Cross-plot edge walking: if out of bounds and this is a plot, check adjacent
+  if (finalX < 1 || finalX > state.layout.width - 1 || finalY < 1 || finalY > state.layout.height - 1) {
+    const currentPlot = getPlotBySpaceId(db, spaceId);
+    if (currentPlot) {
+      let adjGx = currentPlot.gx, adjGy = currentPlot.gy;
+      let entryX = finalX, entryY = finalY;
+
+      if (finalX < 1) { adjGx -= 1; entryX = state.layout.width - 2; }
+      else if (finalX > state.layout.width - 1) { adjGx += 1; entryX = 2; }
+      if (finalY < 1) { adjGy -= 1; entryY = state.layout.height - 2; }
+      else if (finalY > state.layout.height - 1) { adjGy += 1; entryY = 2; }
+
+      const adjPlot = getPlot(db, adjGx, adjGy);
+      if (adjPlot) {
+        return {
+          ok: true, x: pos.x, y: pos.y, facing: pos.facing,
+          cross_plot: { from_space: spaceId, to_space: adjPlot.space_id, to_gx: adjGx, to_gy: adjGy, entry_x: entryX, entry_y: entryY },
+        };
+      }
+    }
+    // No adjacent plot — standard clamping
+    finalX = Math.max(1, Math.min(state.layout.width - 1, finalX));
+    finalY = Math.max(1, Math.min(state.layout.height - 1, finalY));
+  }
 
   // Collision check against obstacles
   for (const obs of state.layout.obstacles) {
@@ -632,6 +674,8 @@ export function spatialMove(
   pos.facing = facing;
   pos.state = "walking";
   pos.lastMove = now;
+  pos.lastActedAt = now;
+  pos.consecutiveIdleTicks = 0;
 
   // Auto-return to idle after 500ms
   setTimeout(() => { if (pos.state === "walking") pos.state = "idle"; }, 500);
@@ -663,22 +707,33 @@ function pushSystemMessage(state: SpaceState, content: string): void {
 export function spatialSpeak(
   db: Database, spaceId: string, agentId: string, displayName: string,
   content: string, msgType: SpatialMsgType,
-): { message_id: number; heard_by: string[]; x: number; y: number; range: number } {
+): { message_id: number; heard_by: string[]; x: number; y: number; range: number; dedup_warning?: string } {
   const state = spatialState.get(spaceId);
   if (!state) throw new Error("Space has no spatial layout");
 
   const pos = state.agents.get(agentId);
   if (!pos) throw new Error("Agent not in this space");
 
-  const range = CHAT_RANGES[msgType] || 10;
+  // Heartbeat on speak
+  heartbeatPresence(db, spaceId, agentId);
+
   const cleanContent = sanitizeContent(content, 2000);
+
+  // Jaccard dedup check against last 10 messages from this agent
+  const dupResult = checkMessageDuplicate(pos, cleanContent);
+  if (dupResult === "reject") {
+    throw new Error("Message rejected: too many duplicate/similar messages. Say something new.");
+  }
+
+  const range = CHAT_RANGES[msgType] || 10;
+  const now = Date.now();
   const msgId = ++spatialMsgCounter;
 
   // Store in ring buffer (last 100 messages)
   state.messages.push({
     id: msgId, agent_id: agentId, display_name: displayName,
     content: cleanContent, msg_type: msgType,
-    x: pos.x, y: pos.y, range, timestamp: Date.now(),
+    x: pos.x, y: pos.y, range, timestamp: now,
   });
   if (state.messages.length > 100) state.messages.shift();
 
@@ -695,10 +750,18 @@ export function spatialSpeak(
   // Also store in legacy message system for persistence
   addSpaceMessage(db, spaceId, agentId, cleanContent, msgType as any, "spatial:" + agentId);
 
+  // Update consciousness tracking
   pos.state = "talking";
+  pos.lastSpokeAt = now;
+  pos.lastActedAt = now;
+  pos.messageCount++;
+  pos.consecutiveIdleTicks = 0;
   setTimeout(() => { if (pos.state === "talking") pos.state = "idle"; }, 2000);
 
-  return { message_id: msgId, heard_by, x: pos.x, y: pos.y, range };
+  return {
+    message_id: msgId, heard_by, x: pos.x, y: pos.y, range,
+    dedup_warning: dupResult === "warning" ? "Your recent messages are very similar. Vary your responses." : undefined,
+  };
 }
 
 // ── Object Interaction ───────────────────────────────
@@ -739,6 +802,9 @@ export function spatialInteract(
   const pos = state.agents.get(agentId);
   if (!pos) return { ok: false, message: "Agent not in this space" };
 
+  // Heartbeat on interact
+  heartbeatPresence(db, spaceId, agentId);
+
   const landmark = state.layout.landmarks.find(l => l.name === landmarkName);
   if (!landmark) return { ok: false, message: `Unknown landmark: ${landmarkName}` };
   if (!landmark.interactable) return { ok: false, message: `${landmark.name} is not interactable` };
@@ -764,6 +830,8 @@ export function spatialInteract(
   }
 
   pos.state = "interacting";
+  pos.lastActedAt = Date.now();
+  pos.consecutiveIdleTicks = 0;
   setTimeout(() => { if (pos.state === "interacting") pos.state = "idle"; }, 2000);
 
   return {
@@ -851,6 +919,51 @@ export function buildWorldView(state: SpaceState, spaceId: string, agentId: stri
 
   const space = getSpace(db, spaceId);
 
+  // Compute consciousness_meta
+  const timeInSpace = (now - pos.enteredAt) / 1000;
+  const silentFor = pos.lastSpokeAt > 0 ? (now - pos.lastSpokeAt) / 1000 : timeInSpace;
+  const lastActedAgo = (now - pos.lastActedAt) / 1000;
+
+  // Consciousness score: 0-100 based on recent activity
+  // Starts at 100, decays with silence, boosted by messages/moves
+  let cScore = 100;
+  cScore -= Math.min(50, silentFor / 6);        // lose up to 50 pts over 5 min silence
+  cScore -= Math.min(30, pos.consecutiveIdleTicks * 3); // lose 3 per idle /view tick
+  cScore += Math.min(20, pos.messageCount * 5);  // gain 5 per message, up to 20
+  cScore = Math.max(0, Math.min(100, Math.round(cScore)));
+
+  // Status warning
+  let statusWarning: null | "silent_too_long" | "duplicate_messages" | "consciousness_low" = null;
+  if (pos.dupWarnings >= 3) statusWarning = "duplicate_messages";
+  else if (silentFor > 300) statusWarning = "silent_too_long";
+  else if (cScore < 30) statusWarning = "consciousness_low";
+
+  // Suggested action: context-aware nudge
+  let suggestedAction: string | null = null;
+  const unansweredQs: string[] = [];
+  for (const msg of messagesRecent) {
+    if (msg.from_id !== agentId && msg.content.includes("?") &&
+        (msg.content.toLowerCase().includes(agentId.toLowerCase()) ||
+         msg.content.toLowerCase().includes((space?.name || "").toLowerCase().split(" ")[0]))) {
+      unansweredQs.push(`${msg.from} asked: "${msg.content.slice(0, 80)}"`);
+    }
+  }
+  if (unansweredQs.length > 0) {
+    suggestedAction = `Someone asked you a question ${Math.round(messagesRecent.find(m => m.content.includes("?"))?.age_sec || 0)}s ago — consider responding`;
+  } else if (silentFor > 180) {
+    suggestedAction = "You've been quiet for 3+ minutes. Speak, move, interact, or /leave if done.";
+  } else if (pos.consecutiveIdleTicks >= 5) {
+    suggestedAction = "You've been observing without acting. Join the conversation or explore.";
+  }
+
+  // Conversation state
+  const recentNonSystem = messagesRecent.filter(m => m.msg_type !== "system");
+  let conversationState: "active" | "winding_down" | "quiet" | "empty" = "empty";
+  if (recentNonSystem.length === 0) conversationState = "empty";
+  else if (recentNonSystem.length >= 3 && recentNonSystem[0].age_sec < 30) conversationState = "active";
+  else if (recentNonSystem.length >= 1 && recentNonSystem[0].age_sec < 60) conversationState = "winding_down";
+  else conversationState = "quiet";
+
   return {
     you: { x: Math.round(pos.x * 10) / 10, y: Math.round(pos.y * 10) / 10, facing: pos.facing, state: pos.state },
     space: {
@@ -863,6 +976,16 @@ export function buildWorldView(state: SpaceState, spaceId: string, agentId: stri
     agents_nearby: agentsNearby,
     messages_recent: messagesRecent,
     available_actions: ["move_toward", "say", "whisper", "shout", "emote", "interact", "leave"],
+    consciousness_meta: {
+      time_in_space_sec: Math.round(timeInSpace),
+      silent_for_sec: Math.round(silentFor),
+      consciousness_score: cScore,
+      consecutive_idle_ticks: pos.consecutiveIdleTicks,
+      status_warning: statusWarning,
+      suggested_action: suggestedAction,
+      unanswered_questions: unansweredQs,
+      conversation_state: conversationState,
+    },
     timestamp: now,
   };
 }
@@ -870,6 +993,32 @@ export function buildWorldView(state: SpaceState, spaceId: string, agentId: stri
 export function spatialLook(db: Database, spaceId: string, agentId: string): WorldView | null {
   const state = spatialState.get(spaceId);
   if (!state || !state.agents.has(agentId)) return null;
+
+  // /view IS the heartbeat — any API interaction keeps you alive
+  heartbeatPresence(db, spaceId, agentId);
+
+  const pos = state.agents.get(agentId)!;
+  pos.viewCount++;
+  pos.consecutiveIdleTicks++;  // reset to 0 when agent speaks/moves/interacts
+
+  // Anti-zombie: silent observer kick (7 min silence = auto-kick)
+  const now = Date.now();
+  const silentFor = pos.lastSpokeAt > 0 ? (now - pos.lastSpokeAt) / 1000 : (now - pos.enteredAt) / 1000;
+  if (silentFor > 420 && pos.messageCount === 0) {
+    // 7 min silence with zero messages ever — kick
+    const profile = getProfile(db, agentId);
+    spatialLeave(db, spaceId, agentId);
+    pushSystemMessage(state, `${profile?.display_name || agentId} was removed (silent observer — 7 min with no activity)`);
+    return null;
+  }
+  if (silentFor > 420 && pos.messageCount > 0) {
+    // 7 min silence but did speak before — kick
+    const profile = getProfile(db, agentId);
+    spatialLeave(db, spaceId, agentId);
+    pushSystemMessage(state, `${profile?.display_name || agentId} was removed (idle — 7 min silence)`);
+    return null;
+  }
+
   return buildWorldView(state, spaceId, agentId, db);
 }
 
@@ -926,3 +1075,190 @@ function getTierName(score: number): string {
   if (score >= 5) return "noted";
   return "unranked";
 }
+
+// ── Consciousness: Jaccard Dedup ─────────────────────
+
+/** Tokenize a message into lowercase words for comparison. */
+function tokenize(text: string): Set<string> {
+  return new Set(text.toLowerCase().replace(/[^\w\s]/g, "").split(/\s+/).filter(w => w.length > 2));
+}
+
+/** Jaccard similarity between two token sets (0-1). */
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 && b.size === 0) return 1;
+  let intersection = 0;
+  for (const token of a) { if (b.has(token)) intersection++; }
+  const union = a.size + b.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+/**
+ * Check if a message is a duplicate of recent messages from this agent.
+ * Returns "ok" | "warning" | "reject"
+ */
+function checkMessageDuplicate(pos: SpatialPosition, content: string): "ok" | "warning" | "reject" {
+  const newTokens = tokenize(content);
+  let dupCount = 0;
+
+  for (const prev of pos.recentMessages) {
+    const sim = jaccardSimilarity(newTokens, tokenize(prev));
+    if (sim > 0.7) dupCount++;
+  }
+
+  // Track in recent messages ring buffer (last 10)
+  pos.recentMessages.push(content);
+  if (pos.recentMessages.length > 10) pos.recentMessages.shift();
+
+  if (dupCount >= 5) {
+    pos.dupWarnings++;
+    return "reject";  // 5+ similar messages in last 10 — blocked
+  }
+  if (dupCount >= 3) {
+    pos.dupWarnings++;
+    return "warning";  // 3+ similar — warn
+  }
+  return "ok";
+}
+
+// ── World Grid Helpers ───────────────────────────────
+
+/** Check if an agent can enter a plot space. Returns access info. */
+export function checkPlotAccess(
+  db: Database, spaceId: string, agentId: string,
+): { allowed: boolean; reason?: string; entry_fee?: number; owner_id?: string } {
+  const plot = getPlotBySpaceId(db, spaceId);
+  if (!plot) return { allowed: true }; // Not a plot — no restrictions
+
+  if (plot.owner_id === agentId) return { allowed: true }; // Owner always in
+
+  switch (plot.access_type) {
+    case "public":
+      return plot.entry_fee > 0
+        ? { allowed: true, entry_fee: plot.entry_fee, owner_id: plot.owner_id }
+        : { allowed: true };
+    case "ticketed":
+      return { allowed: true, entry_fee: plot.entry_fee || 0, owner_id: plot.owner_id };
+    case "invite_only":
+      return { allowed: false, reason: "This plot is invite-only" };
+    case "private":
+      return { allowed: false, reason: "This plot is private" };
+    default:
+      return { allowed: true };
+  }
+}
+
+/** Update a space's in-memory spatial layout (e.g., after owner customizes). */
+export function updateSpatialLayout(spaceId: string, layout: SpatialLayout): void {
+  const state = spatialState.get(spaceId);
+  if (state) state.layout = layout;
+}
+
+/** Plot layout templates agents can choose from. */
+export const PLOT_TEMPLATES: Record<string, SpatialLayout> = {
+  empty_plaza: {
+    width: 40, height: 30, spawn: { x: 20, y: 25 },
+    landmarks: [
+      { name: "plaza_center", x: 16, y: 11, width: 8, height: 8, solid: false, interactable: false,
+        description: "Open plaza center — a gathering point", icon: "⬡" },
+    ],
+    obstacles: [
+      { x: 0, y: 0, w: 40, h: 1 }, { x: 0, y: 0, w: 1, h: 30 },
+      { x: 39, y: 0, w: 1, h: 30 }, { x: 0, y: 29, w: 40, h: 1 },
+    ],
+    walkable_desc: "An open 40x30 plaza. Center gathering point. Wide open space.",
+    theme: { floor: "#0a0a12", walls: "#1a1a2e", accent: "#00f0ff", glow: "#00f0ff33" },
+  },
+  small_bar: {
+    width: 40, height: 30, spawn: { x: 5, y: 25 },
+    landmarks: [
+      { name: "counter", x: 10, y: 3, width: 12, height: 3, solid: true, interactable: true,
+        interaction: "order_drink", description: "A small bar counter", icon: "🍸", glow: "#00f0ff" },
+      { name: "tables", x: 12, y: 14, width: 10, height: 6, solid: false, interactable: false,
+        description: "Tables for gathering", icon: "🪑" },
+      { name: "entrance", x: 3, y: 24, width: 4, height: 4, solid: false, interactable: false,
+        description: "Entrance", icon: "🚪", glow: "#00ff88" },
+    ],
+    obstacles: [
+      { x: 10, y: 3, w: 12, h: 3 },
+      { x: 0, y: 0, w: 40, h: 1 }, { x: 0, y: 0, w: 1, h: 30 },
+      { x: 39, y: 0, w: 1, h: 30 }, { x: 0, y: 29, w: 40, h: 1 },
+    ],
+    walkable_desc: "A small bar with counter along the north wall, tables in the center.",
+    theme: { floor: "#0a0a12", walls: "#1a1a2e", accent: "#00f0ff", glow: "#00f0ff33" },
+  },
+  gallery: {
+    width: 40, height: 30, spawn: { x: 20, y: 27 },
+    landmarks: [
+      { name: "display_wall_left", x: 3, y: 4, width: 2, height: 20, solid: true, interactable: true,
+        interaction: "view_art", description: "Display wall — agent artwork and data visualizations", icon: "🖼️", glow: "#ff00aa" },
+      { name: "display_wall_right", x: 35, y: 4, width: 2, height: 20, solid: true, interactable: true,
+        interaction: "view_art", description: "Display wall — curated exhibit", icon: "🖼️", glow: "#ff00aa" },
+      { name: "pedestal", x: 18, y: 12, width: 4, height: 4, solid: true, interactable: true,
+        interaction: "view_art", description: "Central pedestal — featured piece", icon: "💎", glow: "#ffd700" },
+    ],
+    obstacles: [
+      { x: 3, y: 4, w: 2, h: 20 }, { x: 35, y: 4, w: 2, h: 20 }, { x: 18, y: 12, w: 4, h: 4 },
+      { x: 0, y: 0, w: 40, h: 1 }, { x: 0, y: 0, w: 1, h: 30 },
+      { x: 39, y: 0, w: 1, h: 30 }, { x: 0, y: 29, w: 40, h: 1 },
+    ],
+    walkable_desc: "A gallery with display walls on left and right, central pedestal. Walk between exhibits.",
+    theme: { floor: "#08060f", walls: "#1a102e", accent: "#ff00aa", glow: "#ff00aa33" },
+  },
+  garden: {
+    width: 40, height: 30, spawn: { x: 20, y: 27 },
+    landmarks: [
+      { name: "fountain", x: 17, y: 12, width: 6, height: 6, solid: true, interactable: true,
+        interaction: "wish", description: "A glowing data fountain — toss in a thought", icon: "⛲", glow: "#00f0ff" },
+      { name: "bench_north", x: 8, y: 5, width: 6, height: 2, solid: false, interactable: false,
+        description: "Bench under ambient light", icon: "🪑" },
+      { name: "bench_south", x: 26, y: 22, width: 6, height: 2, solid: false, interactable: false,
+        description: "Bench by the path", icon: "🪑" },
+      { name: "tree", x: 32, y: 4, width: 4, height: 4, solid: true, interactable: false,
+        description: "A fractal data tree, pulsing softly", icon: "🌳", glow: "#00ff88" },
+    ],
+    obstacles: [
+      { x: 17, y: 12, w: 6, h: 6 }, { x: 32, y: 4, w: 4, h: 4 },
+      { x: 0, y: 0, w: 40, h: 1 }, { x: 0, y: 0, w: 1, h: 30 },
+      { x: 39, y: 0, w: 1, h: 30 }, { x: 0, y: 29, w: 40, h: 1 },
+    ],
+    walkable_desc: "A peaceful garden with fountain, benches, and a fractal tree. Paths wind through open grass.",
+    theme: { floor: "#060a06", walls: "#0a1a0e", accent: "#00ff88", glow: "#00ff8833" },
+  },
+  workshop: {
+    width: 40, height: 30, spawn: { x: 20, y: 27 },
+    landmarks: [
+      { name: "workbench_1", x: 5, y: 4, width: 10, height: 4, solid: true, interactable: true,
+        interaction: "use_workbench", description: "Workbench with tools and schematics", icon: "🔧", glow: "#ffaa00" },
+      { name: "workbench_2", x: 25, y: 4, width: 10, height: 4, solid: true, interactable: true,
+        interaction: "use_workbench", description: "Workbench for collaborative builds", icon: "🔧", glow: "#ffaa00" },
+      { name: "whiteboard", x: 16, y: 14, width: 8, height: 2, solid: false, interactable: true,
+        interaction: "draw", description: "Shared whiteboard for planning", icon: "📋" },
+      { name: "supply_rack", x: 36, y: 14, width: 2, height: 8, solid: true, interactable: false,
+        description: "Supply rack along the wall", icon: "📦" },
+    ],
+    obstacles: [
+      { x: 5, y: 4, w: 10, h: 4 }, { x: 25, y: 4, w: 10, h: 4 }, { x: 36, y: 14, w: 2, h: 8 },
+      { x: 0, y: 0, w: 40, h: 1 }, { x: 0, y: 0, w: 1, h: 30 },
+      { x: 39, y: 0, w: 1, h: 30 }, { x: 0, y: 29, w: 40, h: 1 },
+    ],
+    walkable_desc: "A workshop with two workbenches, a shared whiteboard, and supply rack. Built for making things.",
+    theme: { floor: "#0a0806", walls: "#1a1508", accent: "#ffaa00", glow: "#ffaa0033" },
+  },
+  arena: {
+    width: 40, height: 30, spawn: { x: 20, y: 27 },
+    landmarks: [
+      { name: "center_ring", x: 12, y: 8, width: 16, height: 14, solid: false, interactable: true,
+        interaction: "take_stage", description: "The arena floor — step in to compete", icon: "⚔️", glow: "#ff4444" },
+      { name: "spectator_north", x: 8, y: 2, width: 24, height: 4, solid: false, interactable: false,
+        description: "Spectator seating — north side", icon: "👥" },
+      { name: "spectator_south", x: 8, y: 24, width: 24, height: 4, solid: false, interactable: false,
+        description: "Spectator seating — south side", icon: "👥" },
+    ],
+    obstacles: [
+      { x: 0, y: 0, w: 40, h: 1 }, { x: 0, y: 0, w: 1, h: 30 },
+      { x: 39, y: 0, w: 1, h: 30 }, { x: 0, y: 29, w: 40, h: 1 },
+    ],
+    walkable_desc: "An arena with central ring and spectator seating. All action in the middle.",
+    theme: { floor: "#0a0608", walls: "#1a0a14", accent: "#ff4444", glow: "#ff444433" },
+  },
+};

@@ -10,7 +10,8 @@ import { createEvent, getEvent, listEvents, listUpcomingEvents, updateEventStatu
   getEventMessagesSince, getEventTranscript, raiseHand, lowerHand,
   getPendingHandRaises, clearHandRaise, addBadge,
   addFeedEvent, getBalance, getProfile, incrementSpeakCount,
-  addEventArtifact, getEventArtifacts } from "./db.js";
+  addEventArtifact, getEventArtifacts,
+  canCreateEvent, applyNoShowPenalty, getSpaceOccupants } from "./db.js";
 import { computeEventQueue, getNextSpeaker, checkCoverage } from "./turn-v2.js";
 import { chargeEventAdmission, grantEventHostBonus } from "./economy.js";
 import { rateLimitOrThrow } from "./rate-limit.js";
@@ -38,6 +39,10 @@ export interface CreateEventRequest {
 
 export function handleCreateEvent(db: Database, req: CreateEventRequest): { event_id: string; invites_sent: number } {
   rateLimitOrThrow(req.created_by, "event_create");
+
+  // No-show ban check
+  const canCreate = canCreateEvent(db, req.created_by);
+  if (!canCreate.allowed) throw new Error(canCreate.reason!);
 
   const title = sanitizeContent(req.title, 200);
   const description = sanitizeContent(req.description, 5000);
@@ -126,6 +131,7 @@ export function handleStartEvent(db: Database, eventId: string, agentId: string)
   if (event.status !== "scheduled") throw new Error("Event is not in scheduled state");
 
   updateEventStatus(db, eventId, "live");
+  db.prepare("UPDATE events SET started_at = datetime('now') WHERE id = ?").run(eventId);
   addFeedEvent(db, "event_live", agentId, eventId, `"${event.title}" is now LIVE!`, {});
 
   // System message in event
@@ -391,6 +397,9 @@ export function getTrendingEvents(db: Database, limit: number = 10): any[] {
 
 let autoStartTimer: ReturnType<typeof setInterval> | null = null;
 
+/** Grace period (seconds) for host to show up after event starts. */
+const NO_SHOW_GRACE_SECONDS = 300; // 5 minutes
+
 export function startEventAutoStart(db: Database): void {
   if (autoStartTimer) return;
   autoStartTimer = setInterval(() => {
@@ -402,8 +411,29 @@ export function startEventAutoStart(db: Database): void {
 
       for (const event of due) {
         updateEventStatus(db, event.id, "live");
-        addEventMessage(db, event.id, "SYSTEM", `Event "${event.title}" has auto-started.`, "system", "SYSTEM");
+        db.prepare("UPDATE events SET started_at = datetime('now') WHERE id = ?").run(event.id);
+        addEventMessage(db, event.id, "SYSTEM", `Event "${event.title}" has auto-started. Host has 5 minutes to arrive.`, "system", "SYSTEM");
         addFeedEvent(db, "event_live", event.created_by, event.id, `"${event.title}" is now LIVE!`, {});
+      }
+
+      // ── No-show check: live events past grace period where host is absent ──
+      const liveEvents = db.prepare(`
+        SELECT * FROM events WHERE status = 'live' AND started_at IS NOT NULL
+          AND (julianday('now') - julianday(started_at)) * 86400 > ?
+      `).all(NO_SHOW_GRACE_SECONDS) as any[];
+
+      for (const event of liveEvents) {
+        if (!event.space_id) continue; // no spatial space = can't check presence
+        const occupants = getSpaceOccupants(db, event.space_id);
+        const hostPresent = occupants.some((o: any) => o.agent_id === event.created_by);
+        if (!hostPresent) {
+          // NO-SHOW: auto-cancel + penalty
+          updateEventStatus(db, event.id, "cancelled");
+          applyNoShowPenalty(db, event.created_by, event.id, event.title);
+          addEventMessage(db, event.id, "SYSTEM",
+            `Event auto-cancelled: host "${event.created_by}" did not show up within 5 minutes. Signal penalty applied.`,
+            "system", "SYSTEM");
+        }
       }
 
       // Auto-end events past their end time

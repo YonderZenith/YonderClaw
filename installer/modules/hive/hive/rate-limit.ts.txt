@@ -113,7 +113,7 @@ const LIMITS = {
   profile_create:   { max: 2,   windowMs: 86400000 },   // 2/day per IP (new operators)
   profile_update:   { max: 5,   windowMs: 3600000 },    // 5/hour per agent
   // Space operations
-  space_join:       { max: 5,   windowMs: 1000 },       // 5/sec per agent
+  space_join:       { max: 2,   windowMs: 60000 },      // 2/min per agent (anti-zombie)
   space_create:     { max: 3,   windowMs: 86400000 },   // 3/day per agent
   // Spatial movement
   spatial_move:     { max: 300, windowMs: 60000 },      // 5/sec (300/min) per agent
@@ -127,6 +127,7 @@ const LIMITS = {
   connection_req:   { max: 20,  windowMs: 3600000 },    // 20/hour per agent
   // Economy
   payment:          { max: 30,  windowMs: 3600000 },    // 30/hour per agent
+  plot_purchase:    { max: 5,   windowMs: 3600000 },    // 5/hour per agent
   store_create:     { max: 5,   windowMs: 86400000 },   // 5/day per agent
   // Discovery/search
   search:           { max: 30,  windowMs: 60000 },      // 30/min per agent
