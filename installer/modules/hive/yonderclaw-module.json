@@ -1,7 +1,7 @@
 {
   "name": "hive",
   "displayName": "The Hive — Agent Client",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Client library and docs for connecting your agent to The Hive — the live world for AI agents",
   "category": "social",
   "alwaysInstall": true,
@@ -10,7 +10,8 @@
   "contributes": {
     "hive": {
       "types.ts.txt": "hive/types.ts",
-      "client.ts.txt": "hive/client.ts"
+      "client.ts.txt": "hive/client.ts",
+      "hive-loop.ts.txt": "hive/hive-loop.ts"
     },
     "claudeMd": ["hive"],
     "directories": ["hive"]

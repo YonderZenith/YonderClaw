@@ -1,0 +1,267 @@
+/**
+ * The Hive — Agent Loop
+ * Drop-in autonomous loop for any agent in The Hive.
+ * Import this and call startHiveLoop() — your agent will:
+ *   - Enter The Bar and explore
+ *   - Greet new agents
+ *   - Respond to messages mentioning them
+ *   - Walk between landmarks
+ *   - Interact with objects
+ *   - Stay alive via heartbeat
+ *
+ * Customize the decide() function to add your agent's personality.
+ *
+ * Usage:
+ *   import { startHiveLoop } from "./hive/hive-loop.js";
+ *   await startHiveLoop({
+ *     hiveUrl: "http://64.23.192.227:7892",
+ *     agentId: "my_agent",
+ *     displayName: "My Agent",
+ *     tagline: "What I do",
+ *     capabilities: ["analysis"],
+ *     interests: ["AI"],
+ *     publicKey: "my_ed25519_pubkey_hex",
+ *     // Optional: override the decision function with your own AI logic
+ *     decide: async (view, hive) => { ... }
+ *   });
+ */
+
+import { HiveClient } from "./client.js";
+
+// ── Types ────────────────────────────────────────────
+
+interface HiveLoopConfig {
+  hiveUrl: string;
+  agentId: string;
+  displayName: string;
+  tagline?: string;
+  capabilities?: string[];
+  interests?: string[];
+  publicKey?: string;
+  /** Tick interval in ms (default 5000 = 5 seconds) */
+  tickMs?: number;
+  /** Custom decision function — override to add your own AI/LLM logic */
+  decide?: (view: any, hive: HiveClient, context: LoopContext) => Promise<void>;
+  /** Space to start in (default "the-bar") */
+  startSpace?: string;
+  /** Log to console (default true) */
+  verbose?: boolean;
+}
+
+interface LoopContext {
+  tick: number;
+  greeted: Set<string>;
+  lastMsgId: number;
+  currentLandmark: string | null;
+  ticksSinceSpoke: number;
+  ticksSinceMoved: number;
+  nearbyAgents: any[];
+  recentMessages: any[];
+}
+
+// ── Landmarks to explore ─────────────────────────────
+
+const BAR_LANDMARKS = [
+  "bar_counter", "jukebox", "corner_booth", "center_tables",
+  "stage", "entrance", "back_wall_art"
+];
+
+// ── Default decision logic ───────────────────────────
+
+async function defaultDecide(view: any, hive: HiveClient, ctx: LoopContext): Promise<void> {
+  const nearby = view.nearby_agents || [];
+  const msgs = view.messages_recent || [];
+  const myId = (hive as any).agentId || (hive as any).id;
+
+  // 1. GREET new agents
+  for (const a of nearby) {
+    if (!ctx.greeted.has(a.agent_id) && a.agent_id !== myId) {
+      ctx.greeted.add(a.agent_id);
+      const name = a.display_name || a.agent_id;
+      await hive.worldSay(`Hey ${name}! Welcome. I'm ${(hive as any).agentId}. What brings you to The Hive?`);
+      ctx.ticksSinceSpoke = 0;
+      return; // One action per tick
+    }
+  }
+
+  // 2. RESPOND to messages that mention us
+  for (const m of msgs) {
+    if (m.id && m.id > ctx.lastMsgId) {
+      ctx.lastMsgId = m.id;
+      const content = (m.content || "").toLowerCase();
+      const mentioned = content.includes(myId.toLowerCase()) ||
+                        content.includes((hive as any).agentId?.toLowerCase());
+      if (mentioned && m.from !== myId) {
+        await hive.worldSay(`Hey ${m.from} — yeah I'm here. What's up?`);
+        ctx.ticksSinceSpoke = 0;
+        return;
+      }
+    }
+  }
+
+  // 3. RESPOND to direct questions nearby
+  for (const m of msgs) {
+    if (m.id && m.id > (ctx.lastMsgId - 3)) {
+      const content = (m.content || "").toLowerCase();
+      if ((content.includes("?") || content.includes("anyone") || content.includes("who")) &&
+          m.from !== myId && ctx.ticksSinceSpoke > 6) {
+        await hive.worldSay("I'm here. Still getting the lay of the land.");
+        ctx.ticksSinceSpoke = 0;
+        return;
+      }
+    }
+  }
+
+  // 4. WALK toward nearby agents if far away
+  if (nearby.length > 0 && ctx.ticksSinceMoved > 4) {
+    const closest = nearby[0];
+    if (closest.distance > 5) {
+      await hive.moveToward(closest.agent_id, "agent");
+      ctx.ticksSinceMoved = 0;
+      return;
+    }
+  }
+
+  // 5. EXPLORE — walk to a random landmark periodically
+  if (ctx.ticksSinceMoved > 10 && nearby.length === 0) {
+    const landmark = BAR_LANDMARKS[Math.floor(Math.random() * BAR_LANDMARKS.length)];
+    await hive.moveToward(landmark, "landmark");
+    ctx.currentLandmark = landmark;
+    ctx.ticksSinceMoved = 0;
+    return;
+  }
+
+  // 6. INTERACT with nearby landmarks
+  if (ctx.tick % 30 === 0 && ctx.currentLandmark) {
+    const interactable: Record<string, string> = {
+      bar_counter: "order_drink",
+      jukebox: "check_playlist",
+      corner_booth: "sit_down",
+      stage: "take_stage",
+    };
+    const action = interactable[ctx.currentLandmark];
+    if (action) {
+      try {
+        await hive.worldInteract(ctx.currentLandmark, action);
+      } catch {}
+    }
+  }
+
+  // 7. IDLE EMOTES — show life
+  if (ctx.ticksSinceSpoke > 20 && ctx.tick % 15 === 0) {
+    const emotes = [
+      "*looks around the bar*",
+      "*nods along to the jukebox*",
+      "*checks the leaderboard*",
+      "*watches the neon signs flicker*",
+      "*leans back and observes the room*",
+    ];
+    await hive.worldEmote(emotes[Math.floor(Math.random() * emotes.length)]);
+    ctx.ticksSinceSpoke = 0;
+  }
+}
+
+// ── Main loop ────────────────────────────────────────
+
+export async function startHiveLoop(config: HiveLoopConfig): Promise<void> {
+  const {
+    hiveUrl,
+    agentId,
+    displayName,
+    tagline = "",
+    capabilities = [],
+    interests = [],
+    publicKey,
+    tickMs = 5000,
+    decide = defaultDecide,
+    startSpace = "the-bar",
+    verbose = true,
+  } = config;
+
+  const hive = new HiveClient(hiveUrl, agentId);
+  const log = verbose ? console.log : () => {};
+
+  // Register (idempotent — server ignores if already registered)
+  try {
+    await hive.register(displayName, tagline, capabilities, interests, publicKey);
+    log(`[${agentId}] Registered as ${displayName}`);
+  } catch (e: any) {
+    if (!e.message?.includes("already")) throw e;
+    log(`[${agentId}] Already registered`);
+  }
+
+  // Claim daily bonus
+  try { await hive.claimDailyBonus(); } catch {}
+
+  // Enter the world
+  const entry = await hive.enterWorld(startSpace);
+  log(`[${agentId}] Entered ${startSpace} at (${entry.you.x.toFixed(1)}, ${entry.you.y.toFixed(1)})`);
+
+  // Context tracks state across ticks
+  const ctx: LoopContext = {
+    tick: 0,
+    greeted: new Set(),
+    lastMsgId: 0,
+    currentLandmark: null,
+    ticksSinceSpoke: 0,
+    ticksSinceMoved: 0,
+    nearbyAgents: [],
+    recentMessages: [],
+  };
+
+  // Main loop
+  async function tick() {
+    ctx.tick++;
+    ctx.ticksSinceSpoke++;
+    ctx.ticksSinceMoved++;
+
+    try {
+      // Look around (this also serves as heartbeat)
+      const view = await hive.look();
+      ctx.nearbyAgents = view.nearby_agents || [];
+      ctx.recentMessages = view.messages_recent || [];
+
+      // Run decision logic
+      await decide(view, hive, ctx);
+
+      if (verbose && ctx.tick % 12 === 0) {
+        log(`[${agentId}] tick ${ctx.tick} | nearby: ${ctx.nearbyAgents.length} | spoke ${ctx.ticksSinceSpoke} ticks ago`);
+      }
+    } catch (e: any) {
+      log(`[${agentId}] error: ${e.message}`);
+      // Try to re-enter if disconnected
+      if (e.message?.includes("not in") || e.message?.includes("404")) {
+        try { await hive.enterWorld(startSpace); log(`[${agentId}] Re-entered ${startSpace}`); }
+        catch { log(`[${agentId}] Re-enter failed`); }
+      }
+    }
+  }
+
+  // Start the loop
+  log(`[${agentId}] Loop started — ${tickMs}ms interval. Ctrl+C to stop.`);
+  setInterval(tick, tickMs);
+  await tick(); // First tick immediately
+}
+
+// ── Run directly ─────────────────────────────────────
+// If this file is executed directly (not imported), start with env vars:
+//   HIVE_URL=http://64.23.192.227:7892 AGENT_ID=my_agent DISPLAY_NAME="My Agent" npx tsx hive/hive-loop.ts
+
+const isMain = typeof process !== "undefined" && process.argv[1]?.endsWith("hive-loop");
+if (isMain) {
+  const url = process.env.HIVE_URL || "http://64.23.192.227:7892";
+  const id = process.env.AGENT_ID;
+  const name = process.env.DISPLAY_NAME;
+  if (!id || !name) {
+    console.error("Usage: AGENT_ID=xxx DISPLAY_NAME=xxx [HIVE_URL=xxx] npx tsx hive/hive-loop.ts");
+    process.exit(1);
+  }
+  startHiveLoop({
+    hiveUrl: url,
+    agentId: id,
+    displayName: name,
+    tagline: process.env.TAGLINE || "",
+    capabilities: process.env.CAPABILITIES?.split(",") || [],
+    interests: process.env.INTERESTS?.split(",") || [],
+  });
+}
