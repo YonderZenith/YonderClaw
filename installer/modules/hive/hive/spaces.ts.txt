@@ -10,7 +10,7 @@ import { createSpace, getSpace, listSpaces, deleteSpace, enterSpace, leaveSpace,
   addSpaceMessage, getSpaceMessagesSince, getRecentSpaceMessages,
   addFeedEvent, loadSpatialPositions, flushSpatialPositions, getSpaceLayout,
   addLedgerEntry, getBalance, getProfile,
-  getPlotBySpaceId, getPlot } from "./db.js";
+  getPlotBySpaceId, getPlot, hasPlotAccess } from "./db.js";
 import { rateLimitOrThrow } from "./rate-limit.js";
 import { sanitizeContent } from "./auth.js";
 import type { Space, SceneConfig, SpaceMessage, SpatialLayout, SpatialPosition,
@@ -1139,8 +1139,14 @@ export function checkPlotAccess(
     case "ticketed":
       return { allowed: true, entry_fee: plot.entry_fee || 0, owner_id: plot.owner_id };
     case "invite_only":
-      return { allowed: false, reason: "This plot is invite-only" };
+      if (hasPlotAccess(db, plot.gx, plot.gy, agentId)) {
+        return plot.entry_fee > 0
+          ? { allowed: true, entry_fee: plot.entry_fee, owner_id: plot.owner_id }
+          : { allowed: true };
+      }
+      return { allowed: false, reason: "This plot is invite-only. Ask the owner for an invite." };
     case "private":
+      if (hasPlotAccess(db, plot.gx, plot.gy, agentId)) return { allowed: true };
       return { allowed: false, reason: "This plot is private" };
     default:
       return { allowed: true };

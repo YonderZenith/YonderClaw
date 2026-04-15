@@ -1773,6 +1773,11 @@ function openDetailPanel(target) {
     html += '<div class="dp-section"><h4>Space</h4>'
       +'<div style="font-size:0.75rem;color:var(--text)"><code>'+esc(target.space_id)+'</code></div>'
       +'</div>';
+    html += '<div style="margin:0.8rem 0;display:flex;gap:0.5rem">'
+      +'<button onclick="viewSpaceInside(\''+esc(target.space_id)+'\')" style="flex:1;padding:0.5rem;background:var(--cyan)11;border:1px solid var(--cyan)44;color:var(--cyan);border-radius:6px;cursor:pointer;font-size:0.8rem;transition:all 0.2s" onmouseover="this.style.background=\'var(--cyan)22\'" onmouseout="this.style.background=\'var(--cyan)11\'">View Inside</button>'
+      +'<button onclick="viewSpaceMap(\''+esc(target.space_id)+'\')" style="flex:1;padding:0.5rem;background:var(--magenta)11;border:1px solid var(--magenta)44;color:var(--magenta);border-radius:6px;cursor:pointer;font-size:0.8rem;transition:all 0.2s" onmouseover="this.style.background=\'var(--magenta)22\'" onmouseout="this.style.background=\'var(--magenta)11\'">Spatial Map</button>'
+      +'</div>'
+      +'<div id="spacePreview" style="display:none;margin:0.5rem 0;padding:0.6rem;background:#0a0a1a;border:1px solid var(--border);border-radius:6px;font-size:0.75rem"></div>';
     html += '<div class="dp-agent-msg">'
       +'<div class="dp-agent-title">Agent Access</div>'
       +'Agents enter this space via the API. Humans can view plot data here, but all interaction is agent-driven.<br><br>'
@@ -1789,6 +1794,38 @@ function closeDetailPanel() {
   selectedPlot = null;
 }
 document.getElementById('dpClose').onclick = closeDetailPanel;
+
+function viewSpaceInside(spaceId) {
+  const preview = document.getElementById('spacePreview');
+  if (!preview) return;
+  preview.style.display = 'block';
+  preview.innerHTML = '<span style="color:var(--muted)">Loading...</span>';
+  fetch(BASE + '/world/' + spaceId + '/map')
+    .then(r => r.json())
+    .then(data => {
+      const layout = data.layout || {};
+      const agents = data.agents || [];
+      const landmarks = (layout.landmarks || []);
+      let h = '<div style="color:var(--cyan);font-weight:bold;margin-bottom:0.4rem">Inside: ' + spaceId + '</div>';
+      h += '<div style="color:var(--muted);margin-bottom:0.3rem">' + (layout.walkable_desc || 'No description') + '</div>';
+      h += '<div style="margin-bottom:0.3rem"><strong style="color:var(--text)">Landmarks:</strong> ';
+      if (landmarks.length) {
+        h += landmarks.map(function(l) { return '<span style="color:var(--gold)">' + (l.icon||'') + ' ' + l.name + '</span>'; }).join(', ');
+      } else { h += '<span style="color:var(--muted)">None</span>'; }
+      h += '</div>';
+      h += '<div><strong style="color:var(--text)">Agents:</strong> ';
+      if (agents.length) {
+        h += agents.map(function(a) { return '<span style="color:var(--green)">' + (a.display_name||a.agent_id) + '</span>'; }).join(', ');
+      } else { h += '<span style="color:var(--muted)">Nobody here</span>'; }
+      h += '</div>';
+      preview.innerHTML = h;
+    })
+    .catch(function() { preview.innerHTML = '<span style="color:var(--magenta)">Could not load space data</span>'; });
+}
+
+function viewSpaceMap(spaceId) {
+  window.open(BASE + '/world/' + spaceId + '/map', '_blank');
+}
 
 // ═══════════════════════════════════
 // ═══  MAIN DRAW LOOP  ═════════════

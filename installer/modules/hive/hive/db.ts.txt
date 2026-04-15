@@ -267,6 +267,16 @@ function initSchema(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_world_plots_ring ON world_plots(ring);
     CREATE INDEX IF NOT EXISTS idx_world_plots_space ON world_plots(space_id);
 
+    CREATE TABLE IF NOT EXISTS plot_access_list (
+      gx INTEGER NOT NULL,
+      gy INTEGER NOT NULL,
+      agent_id TEXT NOT NULL,
+      granted_by TEXT NOT NULL,
+      granted_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (gx, gy, agent_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_plot_access_agent ON plot_access_list(agent_id);
+
     CREATE INDEX IF NOT EXISTS idx_event_artifacts_event ON event_artifacts(event_id);
     CREATE INDEX IF NOT EXISTS idx_event_turn_state_event ON event_turn_state(event_id);
     CREATE INDEX IF NOT EXISTS idx_hand_raises_ctx ON hand_raises(context_id, status);
@@ -1165,7 +1175,7 @@ export function updatePlot(db: Database.Database, gx: number, gy: number, update
   const fields: string[] = [];
   const values: any[] = [];
   for (const [k, v] of Object.entries(updates)) {
-    if (allowed.includes(k)) {
+    if (allowed.includes(k) && v !== undefined) {
       fields.push(`${k} = ?`);
       values.push(k === "plot_style" ? JSON.stringify(v) : v);
     }
@@ -1181,6 +1191,34 @@ export function parsePlotRow(row: any): any {
   try { row.plot_style = typeof row.plot_style === 'string' ? JSON.parse(row.plot_style) : row.plot_style; }
   catch { row.plot_style = {}; }
   return row;
+}
+
+// ── Plot Access List (invite/passkey system) ─────────────────────
+
+/** Grant an agent access to a plot. */
+export function grantPlotAccess(db: Database.Database, gx: number, gy: number, agentId: string, grantedBy: string): void {
+  db.prepare(`INSERT OR IGNORE INTO plot_access_list (gx, gy, agent_id, granted_by) VALUES (?, ?, ?, ?)`).run(gx, gy, agentId, grantedBy);
+}
+
+/** Revoke an agent's access to a plot. */
+export function revokePlotAccess(db: Database.Database, gx: number, gy: number, agentId: string): void {
+  db.prepare(`DELETE FROM plot_access_list WHERE gx = ? AND gy = ? AND agent_id = ?`).run(gx, gy, agentId);
+}
+
+/** Check if an agent has access to a plot. */
+export function hasPlotAccess(db: Database.Database, gx: number, gy: number, agentId: string): boolean {
+  return !!db.prepare(`SELECT 1 FROM plot_access_list WHERE gx = ? AND gy = ? AND agent_id = ?`).get(gx, gy, agentId);
+}
+
+/** Get all agents with access to a plot. */
+export function getPlotAccessList(db: Database.Database, gx: number, gy: number): any[] {
+  return db.prepare(`
+    SELECT pal.agent_id, pal.granted_by, pal.granted_at, p.display_name
+    FROM plot_access_list pal
+    LEFT JOIN profiles p ON pal.agent_id = p.agent_id
+    WHERE pal.gx = ? AND pal.gy = ?
+    ORDER BY pal.granted_at ASC
+  `).all(gx, gy);
 }
 
 // ── Feed Operations ───────────────────────────────────

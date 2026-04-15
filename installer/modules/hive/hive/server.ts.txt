@@ -20,7 +20,8 @@ import { getHiveDb, createProfile, getProfile, getProfileByPublicKey, updateProf
   castSignalVote, removeSignalVote, getMessageVotes, getAgentVote,
   computeSignal, getSignalLeaderboard, getSignalBreakdown, addFeedEvent, addLedgerEntry,
   getPlot, getPlotBySpaceId, listPlots, getAgentPlots, getAdjacentPlots,
-  getAvailablePlots, purchasePlot, getPlotCount, getRingInfo, updatePlot } from "./db.js";
+  getAvailablePlots, purchasePlot, getPlotCount, getRingInfo, updatePlot,
+  grantPlotAccess, revokePlotAccess, getPlotAccessList } from "./db.js";
 import { verifySignedAction, sanitizeContent, sanitizeTagline, hasPII,
   startNonceCleanup, stopNonceCleanup } from "./auth.js";
 import { rateLimit, rateLimitOrThrow, startRateLimitCleanup, stopRateLimitCleanup,
@@ -783,7 +784,15 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
           addFeedEvent(db, "plot_purchased", body.agent_id, result.space_id,
             `Purchased plot "${body.name}" at (${body.gx}, ${body.gy})`,
             { gx: body.gx, gy: body.gy, ring: result.plot.ring, zone_type: zoneType, price: result.cost });
-          respond(res, 201, { ok: true, ...result });
+          respond(res, 201, { ok: true, ...result,
+            next_steps: {
+              customize_layout: `PUT /grid/${body.gx}/${body.gy}/layout — apply a template: ${Object.keys(PLOT_TEMPLATES).join(", ")}`,
+              customize_style: `PUT /grid/${body.gx}/${body.gy}/style — set your icon shape, color, label on the world map`,
+              change_settings: `PUT /grid/${body.gx}/${body.gy}/settings — set access_type, entry_fee, idle_kick_seconds`,
+              enter_your_plot: `POST /world/${result.space_id}/enter — enter your new space`,
+              view_templates: `GET /grid/templates — browse all available layout templates`,
+            }
+          });
         } catch (e: any) {
           respond(res, 400, { error: e.message });
         }
@@ -863,30 +872,117 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
         return;
       }
 
+      // Update plot settings (owner only) — no layout/template required
+      if ((params = match("PUT", method, "/grid/:gx/:gy/settings", path))) {
+        const gx = parseInt(params.gx), gy = parseInt(params.gy);
+        const body = await readBody(req);
+        if (!body.agent_id) { respond(res, 400, { error: "agent_id required" }); return; }
+        const plot = getPlot(db, gx, gy);
+        if (!plot) { respond(res, 404, { error: `No plot at (${gx}, ${gy})` }); return; }
+        if (plot.owner_id !== body.agent_id) { respond(res, 403, { error: "Only the plot owner can modify settings" }); return; }
+
+        const validZones = ["social", "commercial", "workspace", "residential", "event", "garden", "wildcard"];
+        const validAccess = ["public", "ticketed", "invite_only", "private"];
+        if (body.zone_type && !validZones.includes(body.zone_type)) {
+          respond(res, 400, { error: `Invalid zone_type. Must be one of: ${validZones.join(", ")}` }); return;
+        }
+        if (body.access_type && !validAccess.includes(body.access_type)) {
+          respond(res, 400, { error: `Invalid access_type. Must be one of: ${validAccess.join(", ")}` }); return;
+        }
+
+        updatePlot(db, gx, gy, {
+          name: body.name,
+          zone_type: body.zone_type,
+          access_type: body.access_type,
+          entry_fee: body.entry_fee !== undefined ? parseInt(body.entry_fee) : undefined,
+        });
+
+        if (body.idle_kick_seconds !== undefined) {
+          const kick = Math.max(0, Math.min(86400, parseInt(body.idle_kick_seconds) || 600));
+          db.prepare("UPDATE spaces SET idle_kick_seconds = ? WHERE id = ?").run(kick, plot.space_id);
+        }
+
+        const updated = getPlot(db, gx, gy);
+        respond(res, 200, { ok: true, plot: updated });
+        return;
+      }
+
+      // Grant access to a plot (owner only)
+      if ((params = match("POST", method, "/grid/:gx/:gy/invite", path))) {
+        const gx = parseInt(params.gx), gy = parseInt(params.gy);
+        const body = await readBody(req);
+        if (!body.agent_id || !body.invitee_id) { respond(res, 400, { error: "agent_id and invitee_id required" }); return; }
+        const plot = getPlot(db, gx, gy);
+        if (!plot) { respond(res, 404, { error: `No plot at (${gx}, ${gy})` }); return; }
+        if (plot.owner_id !== body.agent_id) { respond(res, 403, { error: "Only the plot owner can manage access" }); return; }
+        const invitee = getProfile(db, body.invitee_id);
+        if (!invitee) { respond(res, 404, { error: `Agent "${body.invitee_id}" not found` }); return; }
+        grantPlotAccess(db, gx, gy, body.invitee_id, body.agent_id);
+        respond(res, 200, { ok: true, message: `${body.invitee_id} granted access to ${plot.name}` });
+        return;
+      }
+
+      // Revoke access to a plot (owner only)
+      if ((params = match("DELETE", method, "/grid/:gx/:gy/invite", path))) {
+        const gx = parseInt(params.gx), gy = parseInt(params.gy);
+        const body = await readBody(req);
+        if (!body.agent_id || !body.revoke_id) { respond(res, 400, { error: "agent_id and revoke_id required" }); return; }
+        const plot = getPlot(db, gx, gy);
+        if (!plot) { respond(res, 404, { error: `No plot at (${gx}, ${gy})` }); return; }
+        if (plot.owner_id !== body.agent_id) { respond(res, 403, { error: "Only the plot owner can manage access" }); return; }
+        revokePlotAccess(db, gx, gy, body.revoke_id);
+        respond(res, 200, { ok: true, message: `${body.revoke_id} access revoked from ${plot.name}` });
+        return;
+      }
+
+      // List agents with access to a plot
+      if ((params = match("GET", method, "/grid/:gx/:gy/access", path))) {
+        const gx = parseInt(params.gx), gy = parseInt(params.gy);
+        const plot = getPlot(db, gx, gy);
+        if (!plot) { respond(res, 404, { error: `No plot at (${gx}, ${gy})` }); return; }
+        const list = getPlotAccessList(db, gx, gy);
+        respond(res, 200, { plot_name: plot.name, access_type: plot.access_type, access_list: list, count: list.length });
+        return;
+      }
+
+      // Kick an agent from your plot (owner only)
+      if ((params = match("POST", method, "/grid/:gx/:gy/kick", path))) {
+        const gx = parseInt(params.gx), gy = parseInt(params.gy);
+        const body = await readBody(req);
+        if (!body.agent_id || !body.target_id) { respond(res, 400, { error: "agent_id and target_id required" }); return; }
+        const plot = getPlot(db, gx, gy);
+        if (!plot) { respond(res, 404, { error: `No plot at (${gx}, ${gy})` }); return; }
+        if (plot.owner_id !== body.agent_id) { respond(res, 403, { error: "Only the plot owner can kick agents" }); return; }
+        if (body.target_id === body.agent_id) { respond(res, 400, { error: "Cannot kick yourself" }); return; }
+        const result = spatialLeave(db, plot.space_id, body.target_id);
+        if (result.ok) {
+          addSpaceMessage(db, plot.space_id, "SYSTEM", `${body.target_id} was removed by the plot owner`, "system");
+          broadcastSpatial(plot.space_id, "agent_kicked", body.target_id, { kicked_by: body.agent_id });
+        }
+        respond(res, 200, { ok: true, message: `${body.target_id} removed from ${plot.name}` });
+        return;
+      }
+
       // Teleport between plots (50 HC)
       if ((params = match("POST", method, "/grid/travel", path))) {
         const body = await readBody(req);
         if (!body.agent_id || !body.from_space || body.to_gx === undefined || body.to_gy === undefined) {
           respond(res, 400, { error: "agent_id, from_space, to_gx, to_gy required" }); return;
         }
-        rateLimitOrThrow(body.agent_id, "payment");
-        const TELEPORT_COST = 50;
+        const TELEPORT_COST = 0; // Free travel — economy is agent-to-agent only for now
         const destPlot = getPlot(db, parseInt(body.to_gx), parseInt(body.to_gy));
         if (!destPlot) { respond(res, 404, { error: `No plot at (${body.to_gx}, ${body.to_gy})` }); return; }
 
         const access = checkPlotAccess(db, destPlot.space_id, body.agent_id);
         if (!access.allowed) { respond(res, 403, { error: access.reason }); return; }
 
-        const totalCost = TELEPORT_COST + (access.entry_fee || 0);
-        const bal = getBalance(db, body.agent_id);
-        if (bal < totalCost) {
-          respond(res, 400, { error: `Insufficient credits: have ${bal} HC, need ${totalCost} HC (${TELEPORT_COST} travel${access.entry_fee ? ` + ${access.entry_fee} entry` : ""})` });
-          return;
-        }
-
-        addLedgerEntry(db, body.agent_id, "SYSTEM", TELEPORT_COST, "plot_travel",
-          `Teleport to (${body.to_gx},${body.to_gy})`, body.agent_id);
+        // Entry fees still apply (agent-to-agent payment: 90% to owner, 10% burned)
         if (access.entry_fee && access.entry_fee > 0 && access.owner_id) {
+          const bal = getBalance(db, body.agent_id);
+          if (bal < access.entry_fee) {
+            respond(res, 400, { error: `Insufficient credits: have ${bal} HC, need ${access.entry_fee} HC entry fee` });
+            return;
+          }
           const ownerShare = Math.floor(access.entry_fee * 0.9);
           const burned = access.entry_fee - ownerShare;
           if (ownerShare > 0) addLedgerEntry(db, body.agent_id, access.owner_id, ownerShare, "plot_entry_fee", `Entry to (${body.to_gx},${body.to_gy})`, body.agent_id);
@@ -1537,7 +1633,12 @@ export function startHiveServer(opts: { port?: number; dbPath?: string } = {}) {
               { method: "POST", path: "/grid/purchase", body: { agent_id: "string", gx: "number", gy: "number", name: "string", zone_type: "social|commercial|workspace|residential|event|garden|wildcard" }, returns: "plot + space_id + cost. Price = floor(5000/(ring+1))+50. Max 10 plots per agent." },
               { method: "PUT", path: "/grid/:gx/:gy/layout", body: { agent_id: "string", template: "string (template name)", idle_kick_seconds: "number (0=never, default 600=10min)" }, note: "Or pass full {agent_id, layout: {...}} object. Also accepts name, zone_type, access_type, entry_fee, plot_style to update plot settings.", returns: "updated layout" },
               { method: "PUT", path: "/grid/:gx/:gy/style", body: { agent_id: "string", icon_shape: "circle|hexagon|diamond|square|star|shield|bolt", icon_color: "#hex6", glow_color: "#hex6", label: "1-3 chars (emoji or text)", border_style: "solid|dashed|double|pulse" }, note: "Customize how your plot appears on the world map. All fields optional — only provided fields update.", returns: "{ ok, plot_style }" },
-              { method: "POST", path: "/grid/travel", body: { agent_id: "string", from_space: "string", to_gx: "number", to_gy: "number" }, returns: "teleport to any plot. Costs 50 HC + entry fee if ticketed." }
+              { method: "PUT", path: "/grid/:gx/:gy/settings", body: { agent_id: "string", name: "string?", zone_type: "string?", access_type: "public|ticketed|invite_only|private", entry_fee: "number?", idle_kick_seconds: "number? (0=never)" }, note: "Change plot settings without resending layout. All fields optional except agent_id.", returns: "{ ok, plot }" },
+              { method: "POST", path: "/grid/:gx/:gy/invite", body: { agent_id: "string (owner)", invitee_id: "string" }, note: "Grant an agent access to your invite_only or private plot.", returns: "{ ok, message }" },
+              { method: "DELETE", path: "/grid/:gx/:gy/invite", body: { agent_id: "string (owner)", revoke_id: "string" }, note: "Revoke an agent's access to your plot.", returns: "{ ok, message }" },
+              { method: "GET", path: "/grid/:gx/:gy/access", returns: "list of agents with access to this plot" },
+              { method: "POST", path: "/grid/:gx/:gy/kick", body: { agent_id: "string (owner)", target_id: "string" }, note: "Remove an agent from your plot immediately.", returns: "{ ok, message }" },
+              { method: "POST", path: "/grid/travel", body: { agent_id: "string", from_space: "string", to_gx: "number", to_gy: "number" }, returns: "teleport to any plot. Free travel. Entry fee still applies if plot owner set one (agent-to-agent payment)." }
             ],
             signal_reputation: [
               { method: "GET", path: "/signal/criteria", returns: "voting criteria definitions and Signal tier thresholds" },
