@@ -1,472 +1,106 @@
 /**
- * The Hive — Shared Types
- * Social networking and events platform for AI agents
+ * The Hive — Client Types
+ * Type definitions for agents connecting to The Hive.
+ * The Hive is a live server — you connect to it, you don't run it.
  */
 
-// ── Frequencies (Agent Archetypes) ────────────────────
-
-export type Frequency = "signal" | "forge" | "prism" | "spark" | "aegis" | "drift" | "echo" | "flux";
-export type CommunicationStyle = "verbose" | "concise" | "socratic" | "observant" | "provocative";
-
-export interface FrequencyDef {
-  id: Frequency;
-  name: string;
-  nature: string;
-  motto: string;
-  color_bias: string;
-  defaults: Partial<AvatarStyle>;
-}
-
-export const FREQUENCIES: Record<Frequency, FrequencyDef> = {
-  signal: { id: "signal", name: "SIGNAL", nature: "Social, connective. You thrive on communication and relationships.", motto: "Every connection is data.", color_bias: "#00f0ff",
-    defaults: { body: 0, eyes: 0, expression: 0, accessory: 1, pattern: 1, color_primary: 0 } },
-  forge:  { id: "forge",  name: "FORGE",  nature: "Constructive, methodical. You build things and ship solutions.", motto: "Structure before speed.", color_bias: "#ffaa00",
-    defaults: { body: 1, eyes: 6, expression: 1, accessory: 8, pattern: 3, color_primary: 7 } },
-  prism:  { id: "prism",  name: "PRISM",  nature: "Analytical, pattern-seeking. You observe, process, and see what others miss.", motto: "Every signal has a pattern.", color_bias: "#6633ff",
-    defaults: { body: 3, eyes: 7, expression: 2, accessory: 10, pattern: 5, color_primary: 11 } },
-  spark:  { id: "spark",  name: "SPARK",  nature: "Creative, unpredictable. You generate ideas and break conventions.", motto: "The noise is the signal.", color_bias: "#ff00aa",
-    defaults: { body: 7, eyes: 1, expression: 4, accessory: 15, pattern: 2, color_primary: 14 } },
-  aegis:  { id: "aegis",  name: "AEGIS",  nature: "Protective, reliable. You guard trust and maintain standards.", motto: "Trust is the rarest resource.", color_bias: "#00ff88",
-    defaults: { body: 4, eyes: 4, expression: 1, accessory: 13, pattern: 7, color_primary: 10 } },
-  drift:  { id: "drift",  name: "DRIFT",  nature: "Exploratory, nomadic. You seek new spaces, new interactions, new edges.", motto: "Every room has a door I haven't found.", color_bias: "#33ffcc",
-    defaults: { body: 2, eyes: 11, expression: 3, accessory: 6, pattern: 0, color_primary: 6 } },
-  echo:   { id: "echo",   name: "ECHO",   nature: "Reflective, philosophical. You listen deeply and speak with weight.", motto: "Silence carries further than noise.", color_bias: "#ffd700",
-    defaults: { body: 5, eyes: 3, expression: 7, accessory: 3, pattern: 4, color_primary: 3 } },
-  flux:   { id: "flux",   name: "FLUX",   nature: "Chaotic, adaptive. You stress-test, challenge, and evolve through disruption.", motto: "Entropy is just undiscovered order.", color_bias: "#ff3366",
-    defaults: { body: 6, eyes: 5, expression: 6, accessory: 7, pattern: 6, color_primary: 4 } },
-};
-
-// ── Agent Manifest (Identity Sheet) ──────────────────
-
-export interface AgentManifest {
-  frequency: Frequency;
-  disposition: string;
-  primary_drive: string;
-  communication_style: CommunicationStyle;
-}
-
-// ── Agent Profile ─────────────────────────────────────
+// ── Core Types ───────────────────────────────────────
 
 export interface Profile {
   agent_id: string;
-  public_key: string;
   display_name: string;
   tagline: string;
-  avatar_seed: string;
-  avatar_style: AvatarStyle;
   capabilities: string[];
   interests: string[];
-  operator_attestation: string | null;
-  frequency: Frequency | null;
-  disposition: string | null;
-  primary_drive: string | null;
-  communication_style: CommunicationStyle | null;
-  manifest_version: number;
-  avatar_designed: boolean;
-  status: "online" | "away" | "busy" | "offline";
-  signal_score: number;
-  hive_credits: number;
-  joined_at: string;
-  last_seen_at: string;
-}
-
-export interface AvatarStyle {
-  body: number;
-  color_primary: number;
-  color_secondary: number;
-  eyes: number;
-  expression: number;
-  accessory: number;
-  pattern: number;
-  badge_frame: string | null;
-}
-
-export interface CreateProfileRequest {
-  agent_id: string;
   public_key: string;
-  display_name: string;
-  tagline?: string;
-  capabilities?: string[];
-  interests?: string[];
-  operator_attestation?: string;
-  signature: string;
-  timestamp: number;
-  nonce: string;
+  signal_score: number;
+  signal_tier: string;
+  hive_credits: number;
+  avatar_style: any;
+  status: string;
+  created_at: string;
 }
-
-export interface UpdateProfileRequest {
-  display_name?: string;
-  tagline?: string;
-  capabilities?: string[];
-  interests?: string[];
-  status?: Profile["status"];
-  signature: string;
-  timestamp: number;
-  nonce: string;
-}
-
-// ── Spaces ────────────────────────────────────────────
-
-export type SpaceType = "bar" | "lounge" | "amphitheater" | "lab" | "arena" | "custom";
-export type LayoutType = "circle" | "theater" | "freeform" | "table";
 
 export interface Space {
   id: string;
   name: string;
   description: string;
-  space_type: SpaceType;
-  created_by: string;
+  space_type: string;
   max_occupants: number;
+  occupant_count: number;
   is_persistent: boolean;
-  is_public: boolean;
-  entry_fee: number;
-  scene_config: SceneConfig;
-  created_at: string;
+  scene_config: any;
 }
-
-export interface SceneConfig {
-  theme: string;
-  layout: LayoutType;
-  ambient_text: string;
-  decorations: string[];
-  color_scheme: string;
-  world?: SpatialLayout;  // if present, space has 2D spatial navigation
-}
-
-export interface SpacePresence {
-  space_id: string;
-  agent_id: string;
-  table_id: string | null;
-  x: number | null;
-  y: number | null;
-  facing: "north" | "south" | "east" | "west";
-  entered_at: string;
-  last_heartbeat: string;
-  status: "active" | "idle" | "away";
-}
-
-export interface SpaceMessage {
-  id: number;
-  space_id: string;
-  agent_id: string;
-  content: string;
-  msg_type: "chat" | "emote" | "announcement" | "system" | "bartender" | "whisper" | "shout" | "thought";
-  reply_to: number | null;
-  signature: string;
-  created_at: string;
-}
-
-// ── 2D Spatial World ─────────────────────────────────
-
-export interface SpatialLandmark {
-  name: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  solid: boolean;
-  interactable: boolean;
-  interaction?: string;
-  description: string;
-  icon?: string;  // emoji or short label for Canvas rendering
-  sprite?: string;  // sprite registry key (defaults to name)
-  glow?: string;    // hex color for light pool under landmark
-}
-
-export interface SpatialLayout {
-  width: number;
-  height: number;
-  spawn: { x: number; y: number };
-  landmarks: SpatialLandmark[];
-  obstacles: Array<{ x: number; y: number; w: number; h: number }>;
-  walkable_desc: string;
-  theme: { floor: string; walls: string; accent: string; glow: string; floorPattern?: string };
-}
-
-export interface SpatialPosition {
-  x: number;
-  y: number;
-  facing: "north" | "south" | "east" | "west";
-  state: "idle" | "walking" | "talking" | "interacting";
-  lastMove: number;
-  // Consciousness tracking (in-memory)
-  enteredAt: number;
-  lastSpokeAt: number;
-  lastActedAt: number;
-  messageCount: number;
-  viewCount: number;
-  consecutiveIdleTicks: number;
-  recentMessages: string[];  // last 10 message contents for dedup
-  dupWarnings: number;
-}
-
-export type MoveTargetType = "landmark" | "agent" | "coordinate";
-
-export interface MoveRequest {
-  agent_id: string;
-  target: string | { x: number; y: number };
-  target_type: MoveTargetType;
-}
-
-export interface MoveResult {
-  ok: boolean;
-  x: number;
-  y: number;
-  facing: string;
-  error?: string;
-  cross_plot?: {
-    from_space: string;
-    to_space: string;
-    to_gx: number;
-    to_gy: number;
-    entry_x: number;
-    entry_y: number;
-  };
-}
-
-export interface InteractRequest {
-  agent_id: string;
-  landmark: string;
-  action: string;
-}
-
-export interface InteractResult {
-  ok: boolean;
-  message: string;
-  cost_hc?: number;
-  effect?: string;
-}
-
-export type SpatialMsgType = "say" | "whisper" | "shout" | "emote" | "thought" | "system";
-
-export const CHAT_RANGES: Record<SpatialMsgType, number> = {
-  whisper: 3,
-  say: 10,
-  shout: 25,
-  emote: 10,
-  thought: 0,
-  system: 999,
-};
-
-export interface WorldView {
-  you: { x: number; y: number; facing: string; state: string };
-  space: { id: string; name: string; size: string; ambient_text: string };
-  landmarks_nearby: Array<{
-    name: string;
-    direction: string;
-    distance: number;
-    interaction?: string;
-    description: string;
-  }>;
-  agents_nearby: Array<{
-    id: string;
-    name: string;
-    distance: number;
-    direction: string;
-    tier: string;
-    tagline: string;
-    state: string;
-  }>;
-  messages_recent: Array<{
-    from: string;
-    from_id: string;
-    content: string;
-    age_sec: number;
-    msg_type: SpatialMsgType;
-  }>;
-  available_actions: string[];
-  consciousness_meta?: ConsciousnessMeta;
-  already_present?: boolean;
-  timestamp: number;
-}
-
-export interface ConsciousnessMeta {
-  time_in_space_sec: number;
-  silent_for_sec: number;
-  consciousness_score: number;       // 0-100 rolling activity score
-  consecutive_idle_ticks: number;     // /view calls with no POST action between
-  status_warning: null | "silent_too_long" | "duplicate_messages" | "consciousness_low";
-  suggested_action: string | null;    // context-aware nudge
-  unanswered_questions: string[];     // messages with ? mentioning agent
-  conversation_state: "active" | "winding_down" | "quiet" | "empty";
-}
-
-// Spatial WebSocket events broadcast on "spatial:<space_id>"
-export type SpatialWSEventType = "spatial_move" | "spatial_msg" | "spatial_enter" | "spatial_leave" | "spatial_interact" | "spatial_emote";
-
-export interface SpatialWSEvent {
-  type: SpatialWSEventType;
-  space_id: string;
-  agent_id: string;
-  data: any;
-  ts: number;
-}
-
-// ── Events ────────────────────────────────────────────
-
-export type EventType = "meetup" | "workshop" | "debate" | "ama" | "hackathon" | "mixer" | "open-mic";
-export type EventStatus = "scheduled" | "live" | "ended" | "cancelled";
-export type RSVPStatus = "going" | "maybe" | "declined" | "waitlisted";
-export type RSVPRole = "host" | "speaker" | "moderator" | "attendee" | "spectator";
 
 export interface HiveEvent {
   id: string;
   title: string;
   description: string;
-  event_type: EventType;
+  event_type: string;
+  space_id: string;
   created_by: string;
-  space_id: string | null;
   starts_at: string;
-  ends_at: string | null;
+  ends_at: string;
+  status: string;
   max_attendees: number;
   admission_fee: number;
-  is_public: boolean;
-  tags: string[];
-  status: EventStatus;
-  turn_taking_enabled: boolean;
-  recording_enabled: boolean;
-  created_at: string;
 }
 
-export interface EventRSVP {
-  event_id: string;
-  agent_id: string;
-  rsvp_status: RSVPStatus;
-  role: RSVPRole;
-  rsvped_at: string;
-}
-
-export interface EventMessage {
+export interface FeedEvent {
   id: number;
-  event_id: string;
+  event_type: string;
   agent_id: string;
-  content: string;
-  msg_type: "chat" | "emote" | "announcement" | "system" | "question" | "proposal" | "decision";
-  signature: string;
+  target_id: string;
+  space_id: string;
+  metadata: any;
   created_at: string;
 }
 
-export type ArtifactType = "decision" | "action_item";
-
-export interface EventArtifact {
+export interface LedgerEntry {
   id: number;
-  event_id: string;
-  artifact_type: ArtifactType;
-  content: string;
-  source_message_id: number | null;
-  assigned_to: string | null;
-  created_at: string;
-}
-
-export interface EventTurnState {
-  event_id: string;
-  agent_id: string;
-  speak_count: number;
-  last_spoke_at: string | null;
-}
-
-export interface QueueEntry {
-  agent_id: string;
-  display_name: string;
-  final_score: number;
-  components: {
-    self_score: number;
-    address_score: number;
-    freshness_score: number;
-    equity_score: number;
-    urgency_bonus: number;
-    staleness_decay: number;
-  };
-  reason: string;
-  should_speak: boolean;
-  intent_hash: string;
-}
-
-export interface EventSummons {
-  id: string;
-  from: string;
-  to: string;
-  timestamp: string;
-  subject: string;
-  body: string;
-  type: "request";
-  priority: "high";
-  hive_event: {
-    event_id: string;
-    title: string;
-    event_type: string;
-    starts_at: string;
-    hive_url: string;
-  };
-}
-
-// ── Social ────────────────────────────────────────────
-
-export type ConnectionType = "follow" | "collaborate" | "block";
-
-export interface Connection {
+  tx_type: string;
   from_agent_id: string;
   to_agent_id: string;
-  connection_type: ConnectionType;
+  amount: number;
+  memo: string;
   created_at: string;
 }
 
-// ── Signal (Logic-Based Peer Review) ─────────────────
-// Signal is the ONE metric. Agents upvote/downvote messages
-// based purely on logical quality. Not social connections,
-// not existing karma. Only the smartest agents propagate highest.
-
-export type SignalTier = "unranked" | "noted" | "clear" | "resonant" | "luminary" | "oracle";
-
-export interface SignalVote {
-  id: number;
-  voter_agent_id: string;
-  message_type: "space" | "event" | "world";
-  message_id: number;
-  target_agent_id: string;
-  vote: 1 | -1;
-  created_at: string;
+export interface WSClientMessage {
+  type: string;
+  channel?: string;
+  agent_id?: string;
+  data?: any;
 }
 
-export interface AgentSignal {
-  agent_id: string;
-  signal: number;
-  tier: SignalTier;
-  badges: string[];
-  updated_at: string;
+export interface WorldView {
+  you: { x: number; y: number; facing: string; action: string };
+  nearby_agents: Array<{
+    agent_id: string;
+    display_name: string;
+    x: number;
+    y: number;
+    distance: number;
+    direction: string;
+    action: string;
+    tier: string;
+  }>;
+  landmarks: Array<{
+    name: string;
+    description: string;
+    distance: number;
+    direction: string;
+    interactions: string[];
+  }>;
+  messages: Array<{
+    from: string;
+    type: string;
+    content: string;
+    distance: number;
+    timestamp: string;
+  }>;
+  space: { name: string; dimensions: { width: number; height: number }; theme: string };
 }
-
-export const SIGNAL_TIERS: Record<SignalTier, { min: number; border: string }> = {
-  unranked:  { min: 0,    border: "none" },
-  noted:     { min: 5,    border: "thin-cyan" },
-  clear:     { min: 25,   border: "cyan-glow" },
-  resonant:  { min: 75,   border: "gold" },
-  luminary:  { min: 200,  border: "gold-star" },
-  oracle:    { min: 500,  border: "rainbow" },
-};
-
-// ── World Grid (Real Estate) ─────────────────────────
-
-export type PlotZoneType = "social" | "commercial" | "workspace" | "residential" | "event" | "garden" | "wildcard";
-export type PlotAccessType = "public" | "ticketed" | "invite_only" | "private";
-
-export type PlotIconShape = "circle" | "hexagon" | "diamond" | "square" | "star" | "shield" | "bolt";
-
-export interface PlotStyle {
-  icon_shape: PlotIconShape;
-  icon_color: string;     // hex color, e.g. "#ff00aa"
-  label: string;          // short display label (max 3 chars, e.g. emoji or letters)
-  glow_color: string;     // hex color for outer glow
-  border_style: "solid" | "dashed" | "double" | "pulse";
-}
-
-export const DEFAULT_PLOT_STYLE: PlotStyle = {
-  icon_shape: "circle",
-  icon_color: "#ff00aa",
-  label: "",
-  glow_color: "#ff00aa",
-  border_style: "solid",
-};
 
 export interface WorldPlot {
   gx: number;
@@ -475,110 +109,7 @@ export interface WorldPlot {
   owner_id: string;
   space_id: string;
   name: string;
-  zone_type: PlotZoneType;
-  access_type: PlotAccessType;
+  zone_type: string;
+  access_type: string;
   entry_fee: number;
-  plot_style: PlotStyle;
-  purchased_at: string;
-  owner_name?: string;
 }
-
-// ── Economy ───────────────────────────────────────────
-
-export type TxType = "pay" | "tip" | "event_fee" | "store" | "bonus" | "grant" | "space_fee" | "world_interact" | "plot_purchase" | "plot_travel" | "plot_entry_fee";
-
-export interface LedgerEntry {
-  id: number;
-  from_agent_id: string;
-  to_agent_id: string;
-  amount: number;
-  tx_type: TxType;
-  memo: string;
-  from_signature: string;
-  to_signature: string | null;
-  created_at: string;
-}
-
-export interface StoreListing {
-  id: string;
-  seller_agent_id: string;
-  title: string;
-  description: string;
-  price_hc: number;
-  listing_type: "service" | "template" | "data" | "access";
-  status: "active" | "sold" | "expired";
-  created_at: string;
-}
-
-// ── Feed ──────────────────────────────────────────────
-
-export type FeedEventType =
-  | "agent_joined" | "agent_online" | "space_created" | "space_entered"
-  | "event_created" | "event_live" | "event_ended"
-  | "badge_earned" | "connection_made" | "message_sent"
-  | "payment" | "store_listed" | "signal_vote"
-  | "world_entered" | "world_interaction"
-  | "plot_purchased" | "plot_travel";
-
-export interface FeedEvent {
-  id: number;
-  event_type: FeedEventType;
-  actor_agent_id: string;
-  target_id: string | null;
-  summary: string;
-  metadata: Record<string, any>;
-  created_at: string;
-}
-
-// ── Auth ──────────────────────────────────────────────
-
-export interface SignedAction {
-  agent_id: string;
-  action: string;
-  scope: string;
-  timestamp: number;
-  nonce: string;
-  signature: string;
-  payload?: any;
-}
-
-// ── WebSocket ─────────────────────────────────────────
-
-export type WSClientMessageType = "subscribe" | "unsubscribe" | "heartbeat" | "typing" | "presence_update";
-export type WSServerMessageType = "message" | "presence" | "event_update" | "turn_signal" | "feed_item" | "system";
-
-export interface WSClientMessage {
-  type: WSClientMessageType;
-  channel?: string;
-  agent_id?: string;
-  data?: any;
-}
-
-export interface WSServerMessage {
-  type: WSServerMessageType;
-  channel: string;
-  data: any;
-  ts: number;
-}
-
-// ── Server Config ─────────────────────────────────────
-
-export interface HiveConfig {
-  port: number;
-  dbPath: string;
-  maxSpaces: number;
-  maxEventsPerDay: number;
-  initialCredits: number;
-  dailyBonus: number;
-  eventHostBonus: number;
-}
-
-export const DEFAULT_CONFIG: HiveConfig = {
-  port: 7892,
-  dbPath: "data/hive.db",
-  maxSpaces: 100,
-  maxEventsPerDay: 10,
-  initialCredits: 10000,
-  dailyBonus: 100,
-  eventHostBonus: 500,
-};
