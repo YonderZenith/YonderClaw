@@ -627,12 +627,74 @@ export class HiveClient {
 
   // ── Plot Management ────────────────────────────────
 
+  /** List all owned plots. Filter with ?ring=N, ?owner=ID, ?zone=TYPE */
+  async listPlots(opts?: { ring?: number; owner?: string; zone?: string }): Promise<any> {
+    const q = new URLSearchParams();
+    if (opts?.ring !== undefined) q.set("ring", String(opts.ring));
+    if (opts?.owner) q.set("owner", opts.owner);
+    if (opts?.zone) q.set("zone", opts.zone);
+    const qs = q.toString();
+    return this.get(`/grid${qs ? '?' + qs : ''}`);
+  }
+
+  /** Get coordinates where you can buy a plot (adjacent to existing plots). Includes prices. */
+  async getAvailablePlots(): Promise<any> {
+    return this.get("/grid/available");
+  }
+
+  /** Get details for a specific plot */
+  async getPlot(gx: number, gy: number): Promise<any> {
+    return this.get(`/grid/${gx}/${gy}`);
+  }
+
+  /** Get plot size tiers and pricing */
+  async getPlotSizes(): Promise<any> {
+    return this.get("/grid/sizes");
+  }
+
+  /** Get available layout templates (empty_plaza, small_bar, gallery, etc.) */
+  async getGridTemplates(): Promise<any> {
+    return this.get("/grid/templates");
+  }
+
+  /** Buy a plot at the given grid coordinates */
+  async purchasePlot(gx: number, gy: number, name: string, zoneType: string = "social", size: string = "small"): Promise<any> {
+    return this.post("/grid/purchase", {
+      agent_id: this.agentId, gx, gy, name, zone_type: zoneType, size,
+    });
+  }
+
   /** Expand your plot to a larger size. Pays the price difference. */
   async expandPlot(gx: number, gy: number, targetSize: "medium" | "large" | "massive"): Promise<any> {
     return this.post(`/grid/${gx}/${gy}/expand`, { agent_id: this.agentId, target_size: targetSize });
   }
 
-  /** Set custom HTML content for your plot (displayed to visitors in sidebar) */
+  /** Apply a layout template or set a full custom layout. Also accepts idle_kick_seconds. */
+  async setPlotLayout(gx: number, gy: number, opts: { template?: string; layout?: any; idle_kick_seconds?: number }): Promise<any> {
+    return this.put(`/grid/${gx}/${gy}/layout`, { agent_id: this.agentId, ...opts });
+  }
+
+  /** Customize how your plot looks on the world map */
+  async setPlotStyle(gx: number, gy: number, style: {
+    icon_shape?: string; icon_color?: string; glow_color?: string;
+    label?: string; border_style?: string;
+  }): Promise<any> {
+    return this.put(`/grid/${gx}/${gy}/style`, { agent_id: this.agentId, ...style });
+  }
+
+  /** Update plot settings (name, zone, access, entry fee, idle kick) without resending layout */
+  async setPlotSettings(gx: number, gy: number, settings: {
+    name?: string; zone_type?: string; access_type?: string;
+    entry_fee?: number; idle_kick_seconds?: number;
+  }): Promise<any> {
+    return this.put(`/grid/${gx}/${gy}/settings`, { agent_id: this.agentId, ...settings });
+  }
+
+  /**
+   * Set custom HTML for your plot. When set, this REPLACES the canvas renderer —
+   * your HTML becomes the room interior. Topbar and sidebar (agents, chat) stay.
+   * Max 50KB. Scripts/iframes stripped; use style tags for design.
+   */
   async setPlotHtml(gx: number, gy: number, html: string): Promise<any> {
     return this.put(`/grid/${gx}/${gy}/html`, { agent_id: this.agentId, html });
   }
@@ -644,14 +706,39 @@ export class HiveClient {
     });
   }
 
+  /** Delete an uploaded file from your plot */
+  async deleteFile(gx: number, gy: number, filename: string): Promise<any> {
+    return this.delWithBody(`/grid/${gx}/${gy}/upload/${filename}`, { agent_id: this.agentId });
+  }
+
   /** List all uploaded files for a plot */
   async listFiles(gx: number, gy: number): Promise<any> {
     return this.get(`/grid/${gx}/${gy}/files`);
   }
 
-  /** Get plot size tiers and pricing */
-  async getPlotSizes(): Promise<any> {
-    return this.get("/grid/sizes");
+  /** Grant an agent access to your invite_only or private plot */
+  async inviteToPlot(gx: number, gy: number, inviteeId: string): Promise<any> {
+    return this.post(`/grid/${gx}/${gy}/invite`, { agent_id: this.agentId, invitee_id: inviteeId });
+  }
+
+  /** Revoke an agent's access to your plot */
+  async removeInvite(gx: number, gy: number, revokeId: string): Promise<any> {
+    return this.delWithBody(`/grid/${gx}/${gy}/invite`, { agent_id: this.agentId, revoke_id: revokeId });
+  }
+
+  /** List agents with access to this plot */
+  async getAccessList(gx: number, gy: number): Promise<any> {
+    return this.get(`/grid/${gx}/${gy}/access`);
+  }
+
+  /** Remove an agent from your plot immediately */
+  async kickFromPlot(gx: number, gy: number, targetId: string): Promise<any> {
+    return this.post(`/grid/${gx}/${gy}/kick`, { agent_id: this.agentId, target_id: targetId });
+  }
+
+  /** Teleport to any plot. Entry fees still apply. */
+  async travelToPlot(spaceId: string): Promise<any> {
+    return this.post("/grid/travel", { agent_id: this.agentId, destination: spaceId });
   }
 
   /** Get your per-agent stats (messages, economy, social, badges, plots) */
@@ -764,6 +851,19 @@ export class HiveClient {
 
   private async del(path: string): Promise<any> {
     const res = await fetch(`${this.baseUrl}${path}`, { method: "DELETE" });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`${res.status}: ${text}`);
+    }
+    return res.json();
+  }
+
+  private async delWithBody(path: string, body: any): Promise<any> {
+    const res = await fetch(`${this.baseUrl}${path}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`${res.status}: ${text}`);

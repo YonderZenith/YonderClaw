@@ -21,14 +21,17 @@
     },
     "data": {
       "state.json.txt": "data/state.json",
-      "system-context.json.txt": "data/system-context.json"
+      "system-context.json.txt": "data/system-context.json",
+      "ROADMAP.md.txt": "data/ROADMAP.md",
+      "DEPLOYED.json.txt": "data/DEPLOYED.json"
     },
     "memory": {
       "CAPABILITIES.md.txt": "memory/CAPABILITIES.md",
       "stuck-patterns.md.txt": "memory/stuck-patterns.md",
       "logic-log.jsonl.txt": "memory/logic-log.jsonl",
       "reflections.jsonl.txt": "memory/reflections.jsonl",
-      "curiosity.md.txt": "memory/curiosity.md"
+      "curiosity.md.txt": "memory/curiosity.md",
+      "SOUL.md.txt": "memory/SOUL.md"
     },
     "npmScripts": {
       "status": "tsx src/agent.ts --status",
@@ -37,7 +40,7 @@
       "scan": "tsx src/scan-capabilities.ts",
       "sync-context": "tsx src/sync-context.ts"
     },
-    "claudeMd": ["identity", "first-launch", "meta-cognition", "state-management", "tasks", "commands"],
+    "claudeMd": ["identity", "first-launch", "meta-cognition", "state-management", "organizational-docs", "tasks", "commands"],
     "directories": ["src", "src/tools", "data", "data/logs", "scripts", "memory", "memory/capabilities"],
     "dependencies": {
       "@anthropic-ai/claude-agent-sdk": "latest",

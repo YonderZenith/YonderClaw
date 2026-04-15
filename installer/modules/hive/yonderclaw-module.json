@@ -13,6 +13,9 @@
       "client.ts.txt": "hive/client.ts",
       "hive-loop.ts.txt": "hive/hive-loop.ts"
     },
+    "guides": {
+      "GETTING-STARTED.md": "hive/GETTING-STARTED.md"
+    },
     "claudeMd": ["hive"],
     "directories": ["hive"]
   },
