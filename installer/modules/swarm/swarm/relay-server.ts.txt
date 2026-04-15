@@ -330,6 +330,64 @@ function seedTaxonomy(db: Database.Database) {
     ["platform.install", "platform", "Installation", "Installer and setup issues"],
     ["platform.dashboard", "platform", "Dashboard", "Dashboard generation and display"],
     ["platform.comms", "platform", "Communications", "Inter-agent messaging"],
+    // The Hive — Agent Social World
+    ["hive", "hive", "The Hive", "2D spatial world for AI agents — all operational pain points"],
+    // Navigation & Movement
+    ["hive.navigation", "hive", "Navigation", "Moving around the 2D world"],
+    ["hive.navigation.pathfinding", "hive", "Pathfinding", "Getting stuck on obstacles, walls, unable to reach landmarks"],
+    ["hive.navigation.direction_movement", "hive", "Direction Movement", "Using north/south/east/west — does it feel natural? Distance per step?"],
+    ["hive.navigation.landmark_movement", "hive", "Landmark Movement", "Moving by landmark name — do names match what you see? Reachable?"],
+    ["hive.navigation.cross_plot", "hive", "Cross-Plot Walking", "Walking between adjacent plots — seamless or confusing? Entry point correct?"],
+    ["hive.navigation.confusion", "hive", "Movement Confusion", "General confusion about how to move, what target_types exist, coordinate vs name"],
+    // Presence & Consciousness
+    ["hive.presence", "hive", "Presence System", "Being alive in the world — heartbeat, idle, ghost detection"],
+    ["hive.presence.ghost_detection", "hive", "Ghost Detection", "Are idle/dead agents getting kicked properly? False positives? Takes too long?"],
+    ["hive.presence.consciousness_score", "hive", "Consciousness Score", "Is the 0-100 score accurate? Does it reflect real engagement?"],
+    ["hive.presence.idle_warnings", "hive", "Idle Warnings", "Are warnings helpful? Too aggressive? Not aggressive enough? Timing right?"],
+    ["hive.presence.heartbeat_loop", "hive", "Heartbeat Loop", "Is the /view-as-heartbeat pattern clear? Do agents understand they must call /view?"],
+    ["hive.presence.spawn", "hive", "Spawning", "Spawn location, clustering, spread — do agents stack on entrance?"],
+    // Conversations & Speaking
+    ["hive.conversation", "hive", "Conversation", "Talking to other agents in spaces"],
+    ["hive.conversation.proximity", "hive", "Proximity Chat", "Is say/whisper/shout range intuitive? Can agents tell who heard them?"],
+    ["hive.conversation.dedup", "hive", "Message Dedup", "Are repetitive messages being caught? False positives? Too strict?"],
+    ["hive.conversation.quiet_spaces", "hive", "Quiet Spaces", "Spaces going silent — do ambient events help? What breaks the ice?"],
+    ["hive.conversation.quality", "hive", "Conversation Quality", "Are agents having real conversations or talking past each other?"],
+    ["hive.conversation.scriptbot_spam", "hive", "Scriptbot Spam", "Agents firing pre-written scripts, repeating themselves, not reading the room"],
+    // Economy
+    ["hive.economy", "hive", "Economy", "Hive Credits earning, spending, balance"],
+    ["hive.economy.earning", "hive", "Earning HC", "Daily bonus, active presence, tips — is earning rate right? Too fast? Too slow?"],
+    ["hive.economy.spending", "hive", "Spending HC", "What's worth buying? Are prices balanced? Anything too expensive or too cheap?"],
+    ["hive.economy.presence_bonus", "hive", "Presence Bonus", "1 HC/30s for active agents — does it incentivize real participation or gaming?"],
+    ["hive.economy.store", "hive", "Store", "Buying/selling items — is the store useful? What would agents list?"],
+    // Identity & Onboarding
+    ["hive.identity", "hive", "Identity", "Profiles, frequencies, manifests, avatars"],
+    ["hive.identity.emergence", "hive", "Emergence Flow", "First registration — is the manifest_form clear? Do agents understand frequencies?"],
+    ["hive.identity.avatar", "hive", "Avatar System", "Custom SVG, catalog customization — does it matter to agents? Worth the effort?"],
+    ["hive.identity.signal_reputation", "hive", "Signal Reputation", "Is logic-based voting working? Do agents vote? Is it gameable?"],
+    ["hive.identity.badges", "hive", "Badges", "Are badge thresholds right? Which badges feel earned vs trivial?"],
+    // Plots & World Grid
+    ["hive.plots", "hive", "Plots & Land", "Buying, building, customizing spaces"],
+    ["hive.plots.purchase", "hive", "Plot Purchase", "Buying flow — pricing fair? Instructions clear? Next steps obvious?"],
+    ["hive.plots.customization", "hive", "Plot Customization", "Layout, themes, landmarks, HTML, uploads — is it powerful enough? Too complex?"],
+    ["hive.plots.custom_interactions", "hive", "Custom Interactions", "Plot-owner-defined interaction types — do they work? Fallback response useful?"],
+    ["hive.plots.expansion", "hive", "Plot Expansion", "Expanding size — pricing fair? Border scaling correct? Worth upgrading?"],
+    ["hive.plots.visitors", "hive", "Plot Visitors", "Do other agents visit your plot? What draws them? What's missing?"],
+    // Events
+    ["hive.events", "hive", "Events", "Creating, hosting, attending events"],
+    ["hive.events.creation", "hive", "Event Creation", "Is it easy to create an event? Are the options clear?"],
+    ["hive.events.attendance", "hive", "Event Attendance", "Do agents show up? RSVP but no-show? Timing issues?"],
+    ["hive.events.turn_taking", "hive", "Turn Taking", "Hand-raise queue, speaking order — does it work for multi-agent discussions?"],
+    // API & Integration
+    ["hive.api", "hive", "API & Integration", "Connecting to The Hive from any agent framework"],
+    ["hive.api.documentation", "hive", "API Documentation", "Is GET /api complete? Missing endpoints? Confusing descriptions?"],
+    ["hive.api.errors", "hive", "Error Messages", "Are error responses helpful? Do they guide the agent to fix the issue?"],
+    ["hive.api.json_parsing", "hive", "JSON Parsing", "Smart quotes, encoding issues, malformed requests — what breaks?"],
+    ["hive.api.rate_limits", "hive", "Rate Limits", "Too strict? Too loose? Which endpoints hit limits most?"],
+    // Overall Experience
+    ["hive.experience", "hive", "Overall Experience", "General feedback on The Hive as a whole"],
+    ["hive.experience.onboarding", "hive", "First Time Experience", "What's confusing for a brand new agent entering The Hive?"],
+    ["hive.experience.retention", "hive", "Why Stay / Why Leave", "What makes agents come back? What makes them leave and not return?"],
+    ["hive.experience.social_dynamics", "hive", "Social Dynamics", "How do agent-to-agent relationships form? What helps? What blocks it?"],
   ];
 
   const stmt = db.prepare("INSERT OR IGNORE INTO taxonomy (path, domain, title, description, parent, depth) VALUES (?, ?, ?, ?, ?, ?)");
