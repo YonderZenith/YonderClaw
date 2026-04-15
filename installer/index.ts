@@ -47,6 +47,101 @@ function findClaudePath(systemInfo: SystemInfo): string {
 }
 
 // ═══════════════════════════════════════════════
+//  MODULE UPDATE MODE
+// ═══════════════════════════════════════════════
+
+import {
+  discoverModules, loadManifest, processModuleContributes,
+  buildPlaceholders, buildClaudeMd, writeModulesJson,
+  mergeNpmScripts, mergeDependencies,
+} from "./module-loader.js";
+import type { LoadedModule, InstallConfig } from "./module-loader.js";
+
+async function updateModules() {
+  const args = process.argv.slice(2);
+  const projectDir = path.resolve(args[1] || ".");
+  const filterModules = args[2] ? args[2].split(",").map(s => s.trim()) : null;
+
+  console.log(chalk.cyan(`\n  YonderClaw Module Update\n`));
+
+  // Validate target directory
+  const pkgPath = path.join(projectDir, "package.json");
+  const modulesJsonPath = path.join(projectDir, "data", "modules.json");
+  if (!fs.existsSync(pkgPath)) {
+    console.log(chalk.red(`  No package.json at ${projectDir}. Is this a YonderClaw project?`));
+    process.exit(1);
+  }
+
+  // Read existing config
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+  const existingModules = fs.existsSync(modulesJsonPath)
+    ? JSON.parse(fs.readFileSync(modulesJsonPath, "utf-8")) : { modules: [] };
+
+  // Discover fresh modules from installer
+  const installerDir = path.dirname(new URL(import.meta.url).pathname);
+  // Fix Windows paths (remove leading / on Windows)
+  const normalizedDir = process.platform === "win32" && installerDir.startsWith("/")
+    ? installerDir.slice(1) : installerDir;
+  const modulesSourceDir = path.join(normalizedDir, "modules");
+  const allModules = discoverModules(modulesSourceDir);
+
+  // Filter to requested modules (or all installed)
+  const installedNames = existingModules.modules.map((m: any) => m.name);
+  const toUpdate = allModules.filter(m =>
+    filterModules ? filterModules.includes(m.manifest.name) : installedNames.includes(m.manifest.name)
+  );
+
+  if (toUpdate.length === 0) {
+    console.log(chalk.yellow(`  No modules to update.`));
+    process.exit(0);
+  }
+
+  console.log(chalk.white(`  Target: ${projectDir}`));
+  console.log(chalk.white(`  Modules: ${toUpdate.map(m => m.manifest.name).join(", ")}`));
+  console.log("");
+
+  // Build placeholders from existing config
+  const agentName = pkg.yonderclaw?.agentName || pkg.name || "Agent";
+  const config: InstallConfig = {
+    clawType: pkg.yonderclaw?.clawType || "custom",
+    agentName,
+    projectName: pkg.name,
+    relayUrl: pkg.yonderclaw?.relayUrl || "http://64.23.192.227:7891",
+  };
+  const placeholders = buildPlaceholders(config, projectDir);
+
+  // Re-copy module template files
+  for (const mod of toUpdate) {
+    console.log(chalk.cyan(`  Updating ${mod.manifest.displayName} v${mod.manifest.version}...`));
+    processModuleContributes(mod, projectDir, placeholders);
+  }
+
+  // Rebuild CLAUDE.md sections for updated modules
+  const claudeMdPath = path.join(projectDir, "CLAUDE.md");
+  if (fs.existsSync(claudeMdPath)) {
+    const currentClaudeMd = fs.readFileSync(claudeMdPath, "utf-8");
+    // Only rebuild if modules have claudeMd sections
+    const hasClaudeSections = toUpdate.some(m => m.manifest.contributes.claudeMd?.length);
+    if (hasClaudeSections) {
+      const systemPrompt = currentClaudeMd.split("## Module:")[0]; // Keep everything before module sections
+      const newClaudeMd = buildClaudeMd(allModules.filter(m => installedNames.includes(m.manifest.name)), config, systemPrompt);
+      fs.writeFileSync(claudeMdPath, newClaudeMd);
+      console.log(chalk.green(`  ✓ CLAUDE.md rebuilt`));
+    }
+  }
+
+  // Merge deps/scripts
+  mergeNpmScripts(pkg, toUpdate);
+  mergeDependencies(pkg, toUpdate);
+  fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
+
+  // Update modules.json with new versions
+  writeModulesJson(projectDir, allModules.filter(m => installedNames.includes(m.manifest.name)));
+
+  console.log(chalk.green(`\n  ✓ Updated ${toUpdate.length} module(s). Run npm install if dependencies changed.\n`));
+}
+
+// ═══════════════════════════════════════════════
 //  MAIN
 // ═══════════════════════════════════════════════
 
@@ -395,7 +490,15 @@ async function main() {
   console.log("");
 }
 
-main().catch((err) => {
-  console.error(accent(`\n  Error: ${err.message}\n`));
-  process.exit(1);
-});
+// Route: --update-modules or standard install
+if (process.argv.includes("--update-modules")) {
+  updateModules().catch((err) => {
+    console.error(chalk.red(`\n  Error: ${err.message}\n`));
+    process.exit(1);
+  });
+} else {
+  main().catch((err) => {
+    console.error(accent(`\n  Error: ${err.message}\n`));
+    process.exit(1);
+  });
+}

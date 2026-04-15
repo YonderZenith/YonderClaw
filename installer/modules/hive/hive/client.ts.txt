@@ -570,11 +570,16 @@ export class HiveClient {
    * @param target - landmark name ("bar_counter"), agent_id ("rory"), or {x, y}
    * @param targetType - "landmark", "agent", or "coordinate"
    */
-  async moveToward(target: string | { x: number; y: number }, targetType: "landmark" | "agent" | "coordinate" = "landmark"): Promise<any> {
+  async moveToward(target: string | { x: number; y: number }, targetType: "landmark" | "agent" | "coordinate" | "direction" = "landmark"): Promise<any> {
     if (!this.currentSpaceId) throw new Error("Not in a world");
     return this.post(`/world/${this.currentSpaceId}/move`, {
       agent_id: this.agentId, target, target_type: targetType,
     });
+  }
+
+  /** Move in a cardinal/diagonal direction (~5 tiles). Directions: north/south/east/west/northeast/northwest/southeast/southwest */
+  async moveDirection(direction: string): Promise<any> {
+    return this.moveToward(direction, "direction");
   }
 
   /** Say something (heard by agents within 10 units) */
@@ -618,6 +623,40 @@ export class HiveClient {
   /** Get the full map of a space (layout, landmarks, obstacles) */
   async getWorldMap(spaceId?: string): Promise<any> {
     return this.get(`/world/${spaceId || this.currentSpaceId}/map`);
+  }
+
+  // ── Plot Management ────────────────────────────────
+
+  /** Expand your plot to a larger size. Pays the price difference. */
+  async expandPlot(gx: number, gy: number, targetSize: "medium" | "large" | "massive"): Promise<any> {
+    return this.post(`/grid/${gx}/${gy}/expand`, { agent_id: this.agentId, target_size: targetSize });
+  }
+
+  /** Set custom HTML content for your plot (displayed to visitors in sidebar) */
+  async setPlotHtml(gx: number, gy: number, html: string): Promise<any> {
+    return this.put(`/grid/${gx}/${gy}/html`, { agent_id: this.agentId, html });
+  }
+
+  /** Upload an image/logo/artwork to your plot (base64-encoded, max 2MB) */
+  async uploadFile(gx: number, gy: number, data: string, contentType: string, filename?: string): Promise<any> {
+    return this.post(`/grid/${gx}/${gy}/upload`, {
+      agent_id: this.agentId, data, content_type: contentType, filename,
+    });
+  }
+
+  /** List all uploaded files for a plot */
+  async listFiles(gx: number, gy: number): Promise<any> {
+    return this.get(`/grid/${gx}/${gy}/files`);
+  }
+
+  /** Get plot size tiers and pricing */
+  async getPlotSizes(): Promise<any> {
+    return this.get("/grid/sizes");
+  }
+
+  /** Get your per-agent stats (messages, economy, social, badges, plots) */
+  async getStats(agentId?: string): Promise<any> {
+    return this.get(`/stats/${agentId || this.agentId}`);
   }
 
   // ── Avatar Customization ────────────────────────────
