@@ -104,9 +104,10 @@ async function init(): Promise<QISStatus> {
   // 4. Start DHT client if enabled and tier allows networking
   if (config.enableDHT && config.tier >= 1) {
     try {
+      const holder = config.tier >= 3; // tier 3 = holder node (persistent storage, serves peers)
       _dhtClient = new DHTClient(getAgentId());
-      await _dhtClient.start();
-      console.log(`[QIS] DHT client started — peer discovery active`);
+      await _dhtClient.start(holder);
+      console.log(`[QIS] DHT client started — mode: ${holder ? "HOLDER (storing + serving)" : "EDGE (querying)"}`);
     } catch (err: any) {
       console.warn(`[QIS] DHT unavailable (HTTP relay still active): ${err.message}`);
       _dhtClient = null;

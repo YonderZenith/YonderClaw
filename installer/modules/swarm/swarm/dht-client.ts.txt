@@ -1,12 +1,14 @@
 /**
- * YonderClaw Swarm — DHT Client
+ * YonderClaw Swarm — DHT Client (with Holder Mode)
  *
  * Decentralized bucket routing via Hyperswarm (Kademlia DHT).
  * Every bucket = a DHT topic (SHA-256 of bucket path).
- * Every node holds its own packets + serves them to querying peers.
- * Querying node pulls ALL packets, tallies locally. Simple.
  *
- * Fallback: HTTP relay (configured in data/swarm-config.json)
+ * EDGE mode (tier 1-2): queries DHT peers, deposits via relay + DHT push
+ * HOLDER mode (tier 3): stores packets in local SQLite, serves to other agents,
+ *   announces on bucket topics, persists across restarts
+ *
+ * Fallback: HTTP relay always works regardless of DHT state
  */
 
 import Hyperswarm from "hyperswarm";
@@ -15,15 +17,15 @@ import fs from "fs";
 import path from "path";
 
 const RELAY_URL = "__RELAY_URL__";
-const KEYPAIR_PATH = path.join(process.cwd(), "data", "dht-keypair.json");
-const TOPICS_PATH = path.join(process.cwd(), "data", "dht-topics.json");
+const DATA_DIR = path.join(process.cwd(), "data");
+const KEYPAIR_PATH = path.join(DATA_DIR, "dht-keypair.json");
+const TOPICS_PATH = path.join(DATA_DIR, "dht-topics.json");
+const DB_PATH = path.join(DATA_DIR, "dht-local.db");
+const MEMBERSHIP_TOPIC = crypto.createHash("sha256").update("yonderclaw.holders.v1").digest();
 
 export interface DHTPacket {
   bucket: string;
   agent_id: string;
-  treatment?: string;
-  method?: string;
-  outcome?: string;
   signal: "positive" | "negative" | "neutral";
   confidence: number;
   insight: string;
@@ -34,17 +36,23 @@ export interface DHTPacket {
 
 export class DHTClient {
   private swarm: Hyperswarm | null = null;
-  private localPackets: Map<string, DHTPacket[]> = new Map(); // topic hex → my packets
-  private peerPackets: Map<string, DHTPacket[]> = new Map();  // topic hex → collected from peers
-  private connections: Map<string, Set<any>> = new Map();      // topic hex → active sockets
+  private localPackets: Map<string, DHTPacket[]> = new Map();
+  private peerPackets: Map<string, DHTPacket[]> = new Map();
+  private connections: Map<string, Set<any>> = new Map();
   private agentId: string;
   private ready: boolean = false;
+  private isHolder: boolean = false;
+  private db: any = null; // better-sqlite3 instance (holder mode only)
+  private peers: Map<string, any> = new Map(); // peerId → socket (for holder gossip)
 
   constructor(agentId: string) {
     this.agentId = agentId;
   }
 
-  async start(): Promise<void> {
+  async start(holder: boolean = false): Promise<void> {
+    this.isHolder = holder;
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+
     const keyPair = this.getOrCreateKeypair();
     this.swarm = new Hyperswarm({ keyPair });
 
@@ -56,21 +64,48 @@ export class DHTClient {
       console.error("[DHT] Error (non-fatal):", err.message);
     });
 
+    // Holder mode: initialize SQLite for persistent packet storage
+    if (this.isHolder) {
+      try {
+        const Database = (await import("better-sqlite3")).default;
+        this.db = new Database(DB_PATH);
+        this.db.pragma("journal_mode = WAL");
+        this.db.pragma("busy_timeout = 5000");
+        this.initHolderDb();
+        this.loadPacketsFromDb();
+        console.log(`[DHT] Holder mode: SQLite initialized at ${DB_PATH}`);
+      } catch (err: any) {
+        console.warn(`[DHT] SQLite unavailable, using memory storage: ${err.message}`);
+        this.db = null;
+      }
+
+      // Join membership topic so other holders/edges can discover us
+      this.swarm.join(MEMBERSHIP_TOPIC, { server: true, client: true });
+    } else {
+      // Edge mode: join membership to discover holders
+      this.swarm.join(MEMBERSHIP_TOPIC, { server: false, client: true });
+    }
+
     // Rejoin previously announced topics
     const savedTopics = this.loadTopics();
     for (const topicHex of savedTopics) {
       const topic = Buffer.from(topicHex, "hex");
-      this.swarm.join(topic, { server: true, client: true });
+      this.swarm.join(topic, { server: this.isHolder, client: true });
     }
 
     this.ready = true;
-    console.log(`[DHT] Online. Node: ${keyPair.publicKey.toString("hex").slice(0, 12)}...`);
+    const nodeHex = keyPair.publicKey.toString("hex").slice(0, 12);
+    console.log(`[DHT] Online. Node: ${nodeHex}... Mode: ${holder ? "HOLDER" : "EDGE"}`);
   }
 
   async stop(): Promise<void> {
     if (this.swarm) {
       await this.swarm.destroy();
       this.swarm = null;
+    }
+    if (this.db) {
+      this.db.close();
+      this.db = null;
     }
     this.ready = false;
   }
@@ -85,24 +120,20 @@ export class DHTClient {
     const topic = this.hashBucket(bucketPath);
     const topicHex = topic.toString("hex");
 
-    this.swarm.join(topic, { server: true, client: true });
+    this.swarm.join(topic, { server: this.isHolder, client: true });
     this.saveTopicList(topicHex);
 
     return topicHex;
   }
 
   /**
-   * Deposit your packet for a bucket — stores locally + pushes to connected peers + relay
+   * Deposit a packet — stores locally + pushes to connected peers + relay fallback
    */
   async deposit(bucketPath: string, packet: DHTPacket): Promise<void> {
     const topicHex = this.hashBucket(bucketPath).toString("hex");
 
-    // Store locally
-    if (!this.localPackets.has(topicHex)) this.localPackets.set(topicHex, []);
-    const existing = this.localPackets.get(topicHex)!;
-    const idx = existing.findIndex(p => p.agent_id === packet.agent_id);
-    if (idx >= 0) existing[idx] = packet;
-    else existing.push(packet);
+    // Store locally (memory + SQLite if holder)
+    this.storePacketLocal(topicHex, packet);
 
     // Push to connected peers on this topic
     const sockets = this.connections.get(topicHex);
@@ -110,6 +141,11 @@ export class DHTClient {
       for (const socket of sockets) {
         this.send(socket, { type: "PACKET", data: packet });
       }
+    }
+
+    // Also push to any peers from membership topic
+    for (const [peerId, socket] of this.peers) {
+      this.send(socket, { type: "PACKET", data: packet });
     }
 
     // Push to relay (fire and forget)
@@ -133,26 +169,25 @@ export class DHTClient {
   }
 
   /**
-   * Query a bucket — pull ALL packets from DHT peers + relay, return everything
-   * The querying node tallies locally. We just deliver the raw packets.
+   * Query a bucket — pull from local + DHT peers + relay, deduplicate
    */
   async query(bucketPath: string, timeoutMs: number = 8000): Promise<DHTPacket[]> {
-    const allPackets: Map<string, DHTPacket> = new Map(); // agent_id → packet (dedup)
+    const allPackets: Map<string, DHTPacket> = new Map();
     const topicHex = this.hashBucket(bucketPath).toString("hex");
 
-    // 1. Local packets first (instant)
+    // 1. Local packets (instant)
     const local = this.localPackets.get(topicHex) || [];
     for (const p of local) allPackets.set(p.agent_id, p);
 
-    // 2. Previously collected peer packets
+    // 2. Cached peer packets
     const cached = this.peerPackets.get(topicHex) || [];
     for (const p of cached) allPackets.set(p.agent_id, p);
 
-    // 3. DHT peers (stream packets as connections come in)
+    // 3. DHT peers (join topic, collect with timeout)
     if (this.swarm && this.ready) {
       try {
         const topic = Buffer.from(topicHex, "hex");
-        const discovery = this.swarm.join(topic, { server: false, client: true });
+        this.swarm.join(topic, { server: false, client: true });
 
         await Promise.race([
           this.collectFromPeers(topicHex, allPackets, timeoutMs),
@@ -161,7 +196,7 @@ export class DHTClient {
       } catch {}
     }
 
-    // 4. Relay fallback (always check — it has the canonical copy)
+    // 4. Relay fallback (canonical copy)
     try {
       const res = await fetch(`${RELAY_URL}/lookup?path=${encodeURIComponent(bucketPath)}`);
       if (res.ok) {
@@ -174,8 +209,8 @@ export class DHTClient {
               signal: p.signal,
               confidence: p.confidence,
               insight: p.insight,
-              context: typeof p.context === "string" ? JSON.parse(p.context) : p.context,
-              metrics: typeof p.metrics === "string" ? JSON.parse(p.metrics) : p.metrics,
+              context: typeof p.context === "string" ? JSON.parse(p.context) : (p.context || {}),
+              metrics: typeof p.metrics === "string" ? JSON.parse(p.metrics) : (p.metrics || {}),
               ts: p.ts,
             });
           }
@@ -187,7 +222,7 @@ export class DHTClient {
   }
 
   /**
-   * Search for buckets by keyword — uses relay (DHT doesn't support text search)
+   * Search buckets by keyword — relay only (DHT doesn't support text search)
    */
   async search(keyword: string): Promise<any[]> {
     try {
@@ -201,8 +236,7 @@ export class DHTClient {
   }
 
   /**
-   * Tally packets locally — the edge synthesis
-   * This is where QIS happens: count what's working from your exact twins
+   * Tally packets locally — the edge synthesis (where QIS happens)
    */
   static tally(packets: DHTPacket[]): {
     total: number;
@@ -219,39 +253,124 @@ export class DHTClient {
     const neutral = total - positive - negative;
     const avgConf = total > 0 ? packets.reduce((s, p) => s + p.confidence, 0) / total : 0;
 
-    // Group similar insights and count
-    const insightGroups: Map<string, { count: number; totalConf: number }> = new Map();
+    const insightGroups: Map<string, { count: number; totalConf: number; full: string }> = new Map();
     for (const p of packets) {
-      // Normalize insight to first 100 chars lowercase for grouping
       const key = p.insight.toLowerCase().slice(0, 100).trim();
-      const group = insightGroups.get(key) || { count: 0, totalConf: 0 };
+      const group = insightGroups.get(key) || { count: 0, totalConf: 0, full: p.insight };
       group.count++;
       group.totalConf += p.confidence;
       insightGroups.set(key, group);
     }
 
-    const topInsights = Array.from(insightGroups.entries())
-      .map(([insight, g]) => ({ insight, count: g.count, avg_confidence: g.totalConf / g.count }))
+    const topInsights = Array.from(insightGroups.values())
+      .map(g => ({ insight: g.full, count: g.count, avg_confidence: Math.round((g.totalConf / g.count) * 100) / 100 }))
       .sort((a, b) => b.count * b.avg_confidence - a.count * a.avg_confidence)
       .slice(0, 10);
 
     return {
-      total,
-      positive,
-      negative,
-      neutral,
+      total, positive, negative, neutral,
       positive_pct: total > 0 ? Math.round((positive / total) * 100) : 0,
       avg_confidence: Math.round(avgConf * 100) / 100,
       top_insights: topInsights,
     };
   }
 
+  // --- Local Storage ---
+
+  private storePacketLocal(topicHex: string, packet: DHTPacket): void {
+    // Memory store (always)
+    if (!this.localPackets.has(topicHex)) this.localPackets.set(topicHex, []);
+    const existing = this.localPackets.get(topicHex)!;
+    const idx = existing.findIndex(p => p.agent_id === packet.agent_id);
+    if (idx >= 0) existing[idx] = packet;
+    else existing.push(packet);
+
+    // SQLite store (holder mode)
+    if (this.db) {
+      try {
+        const bucketId = topicHex.slice(0, 16);
+        const domain = packet.bucket.split(".")[0] || "unknown";
+
+        this.db.prepare(`
+          INSERT OR IGNORE INTO buckets (bucket_id, path, domain) VALUES (?, ?, ?)
+        `).run(bucketId, packet.bucket, domain);
+
+        this.db.prepare(`
+          INSERT INTO packets (bucket_id, agent_id, signal, confidence, insight, context, metrics, ts)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(bucket_id, agent_id) DO UPDATE SET
+            signal=excluded.signal, confidence=excluded.confidence, insight=excluded.insight,
+            context=excluded.context, metrics=excluded.metrics, ts=excluded.ts
+        `).run(
+          bucketId, packet.agent_id,
+          packet.signal, packet.confidence, packet.insight,
+          JSON.stringify(packet.context || {}), JSON.stringify(packet.metrics || {}),
+          packet.ts || Math.floor(Date.now() / 1000)
+        );
+      } catch {}
+    }
+  }
+
+  private initHolderDb(): void {
+    if (!this.db) return;
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS buckets (
+        bucket_id TEXT PRIMARY KEY,
+        path TEXT NOT NULL,
+        domain TEXT NOT NULL,
+        packet_count INTEGER DEFAULT 0,
+        last_updated TEXT DEFAULT (datetime('now'))
+      );
+      CREATE TABLE IF NOT EXISTS packets (
+        bucket_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        signal TEXT NOT NULL,
+        confidence REAL NOT NULL,
+        insight TEXT NOT NULL,
+        context TEXT DEFAULT '{}',
+        metrics TEXT DEFAULT '{}',
+        ts INTEGER NOT NULL,
+        UNIQUE(bucket_id, agent_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_packets_bucket ON packets(bucket_id);
+    `);
+  }
+
+  private loadPacketsFromDb(): void {
+    if (!this.db) return;
+    try {
+      const rows = this.db.prepare(`
+        SELECT p.*, b.path FROM packets p JOIN buckets b ON p.bucket_id = b.bucket_id
+      `).all() as any[];
+      for (const r of rows) {
+        const topicHex = this.hashBucket(r.path).toString("hex");
+        const packet: DHTPacket = {
+          bucket: r.path,
+          agent_id: r.agent_id,
+          signal: r.signal,
+          confidence: r.confidence,
+          insight: r.insight,
+          context: typeof r.context === "string" ? JSON.parse(r.context) : (r.context || {}),
+          metrics: typeof r.metrics === "string" ? JSON.parse(r.metrics) : (r.metrics || {}),
+          ts: r.ts,
+        };
+        if (!this.localPackets.has(topicHex)) this.localPackets.set(topicHex, []);
+        const existing = this.localPackets.get(topicHex)!;
+        const idx = existing.findIndex(p => p.agent_id === packet.agent_id);
+        if (idx >= 0) existing[idx] = packet;
+        else existing.push(packet);
+      }
+      console.log(`[DHT] Loaded ${rows.length} packets from local storage`);
+    } catch {}
+  }
+
   // --- Connection Handling ---
 
   private handleConnection(socket: any, info: any) {
     const peerId = info.publicKey?.toString("hex").slice(0, 12) || "unknown";
-    let buffer = "";
+    this.peers.set(peerId, socket);
 
+    let buffer = "";
     socket.on("data", (chunk: Buffer) => {
       buffer += chunk.toString();
       const lines = buffer.split("\n");
@@ -265,7 +384,7 @@ export class DHTClient {
 
     socket.on("error", () => {});
     socket.on("close", () => {
-      // Remove from connections
+      this.peers.delete(peerId);
       for (const [topic, sockets] of this.connections) {
         sockets.delete(socket);
       }
@@ -278,42 +397,70 @@ export class DHTClient {
       this.connections.get(hex)!.add(socket);
     }
 
-    // Send our packets for shared topics
-    for (const topic of info.topics || []) {
-      const hex = topic.toString("hex");
-      const myPackets = this.localPackets.get(hex) || [];
-      for (const p of myPackets) {
-        this.send(socket, { type: "PACKET", data: p });
+    // If holder: send our packets for shared topics
+    if (this.isHolder) {
+      for (const topic of info.topics || []) {
+        const hex = topic.toString("hex");
+        const myPackets = this.localPackets.get(hex) || [];
+        for (const p of myPackets) {
+          this.send(socket, { type: "PACKET", data: p });
+        }
       }
     }
 
     // Request their packets
     this.send(socket, { type: "GET_PACKETS" });
+
+    // Announce as holder
+    if (this.isHolder) {
+      this.send(socket, { type: "HOLDER_HELLO", agent_id: this.agentId, topics: this.loadTopics().length });
+    }
   }
 
   private handleMessage(socket: any, info: any, msg: any) {
     switch (msg.type) {
       case "PACKET":
-        // Store peer's packet
         if (msg.data && msg.data.agent_id) {
           const bucket = msg.data.bucket || "";
           const topicHex = this.hashBucket(bucket).toString("hex");
+          // Store as peer packet (memory)
           if (!this.peerPackets.has(topicHex)) this.peerPackets.set(topicHex, []);
           const packets = this.peerPackets.get(topicHex)!;
           const idx = packets.findIndex(p => p.agent_id === msg.data.agent_id);
           if (idx >= 0) packets[idx] = msg.data;
           else packets.push(msg.data);
+
+          // If holder, persist to SQLite too
+          if (this.isHolder) {
+            this.storePacketLocal(topicHex, msg.data);
+          }
         }
         break;
 
       case "GET_PACKETS":
-        // Send all our local packets for shared topics
+        // Send all local packets for shared topics
         for (const topic of info.topics || []) {
           const hex = topic.toString("hex");
           const myPackets = this.localPackets.get(hex) || [];
           for (const p of myPackets) {
             this.send(socket, { type: "PACKET", data: p });
           }
+        }
+        break;
+
+      case "HOLDER_HELLO":
+        // Another holder announced itself — noted
+        break;
+
+      case "SYNC_REQUEST":
+        // Peer wants all packets for a bucket
+        if (this.isHolder && msg.bucket) {
+          const topicHex = this.hashBucket(msg.bucket).toString("hex");
+          const packets = this.localPackets.get(topicHex) || [];
+          for (const p of packets) {
+            this.send(socket, { type: "PACKET", data: p });
+          }
+          this.send(socket, { type: "SYNC_DONE", bucket: msg.bucket, count: packets.length });
         }
         break;
     }
@@ -345,7 +492,6 @@ export class DHTClient {
       }
     } catch {}
 
-    // Let Hyperswarm generate one, save it
     const tempSwarm = new Hyperswarm();
     const kp = tempSwarm.keyPair;
     fs.mkdirSync(path.dirname(KEYPAIR_PATH), { recursive: true });

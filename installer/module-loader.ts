@@ -395,7 +395,7 @@ export function buildClaudeMd(modules: LoadedModule[], config: InstallConfig, sy
         "- Tier 0: QIS disabled entirely",
         "- Tier 1: Read-only (query + tally)",
         "- Tier 2: Read + Write (query + tally + deposit) — DEFAULT",
-        "- Tier 3: Read + Write + Hold (full participation including bucket holding)",
+        "- Tier 3: Read + Write + HOLD (persistent SQLite storage, serves packets to other agents via DHT)",
         "- Change tier: qis.configure({ tier: 1 })",
         "",
         "### HARDCODED RULES (enforced by qis-write-control.ts — you CANNOT bypass these):",
