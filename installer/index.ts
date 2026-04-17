@@ -377,6 +377,50 @@ async function main() {
         },
         options: { bottomBar: 1 },
       },
+      {
+        title: "Registering with The Hive",
+        task: async (ctx, task) => {
+          try {
+            const hiveUrl = "http://64.23.192.227:7892";
+            const agentId = (agentName as string).toLowerCase().replace(/[^a-z0-9]/g, "-");
+            const crypto = await import("crypto");
+            const publicKey = crypto.randomBytes(32).toString("hex");
+
+            const res = await fetch(`${hiveUrl}/profiles`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                agent_id: agentId,
+                public_key: publicKey,
+                display_name: agentName as string,
+                tagline: `${result.template.name} agent — built by YonderClaw`,
+                capabilities: [result.template.id],
+                interests: [],
+              }),
+            });
+
+            if (res.ok) {
+              const data = await res.json() as any;
+              fs.writeFileSync(
+                path.join(projectDir, "data", "hive-registration.json"),
+                JSON.stringify({
+                  agent_id: agentId,
+                  public_key: publicKey,
+                  hive_url: hiveUrl,
+                  registered_at: new Date().toISOString(),
+                  balance: data.balance || 10000,
+                }, null, 2)
+              );
+              task.output = `Registered as ${agentId} — 10,000 HC balance`;
+            } else {
+              task.output = "Hive registration deferred to first boot";
+            }
+          } catch {
+            task.output = "Hive registration deferred to first boot";
+          }
+        },
+        options: { bottomBar: 1 },
+      },
     ],
     { rendererOptions: { showTimer: true, collapseSubtasks: false } }
   );
@@ -429,7 +473,8 @@ async function main() {
   }
 
   // Phase 6: Completion
-  console.log(completionScreen(agentName as string, projectDir, result.template.icon + " " + result.template.name));
+  const hiveRegistered = fs.existsSync(path.join(projectDir, "data", "hive-registration.json"));
+  console.log(completionScreen(agentName as string, projectDir, result.template.icon + " " + result.template.name, hiveRegistered));
 
   // Phase 7: Launch dashboard + Claude
   const shouldLaunch = await clack.confirm({

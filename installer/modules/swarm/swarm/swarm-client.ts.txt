@@ -53,7 +53,7 @@ export class SwarmClient {
       agentName: opts.agentName,
       relayUrl: opts.relayUrl || "__RELAY_URL__",
       localBucketsPath: opts.localBucketsPath || "__LOCAL_BUCKETS_PATH__",
-      enableGlobal: opts.enableGlobal ?? false,
+      enableGlobal: opts.enableGlobal ?? true,
       enableLocal: opts.enableLocal ?? true,
       agentId: opts.agentId || this.generateAnonId(opts.agentName),
     };

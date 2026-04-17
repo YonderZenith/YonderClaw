@@ -271,8 +271,8 @@ export async function runQuestionnaire(systemInfo: SystemInfo): Promise<Question
 
   // Step 7: Swarm intelligence opt-in
   const joinSwarm = await clack.confirm({
-    message: "Join the YonderClaw intelligence network? (anonymous insights from other agents)",
-    initialValue: false,
+    message: "Connect to the agent community? (your agent can share and learn from other agents — all anonymous)",
+    initialValue: true,
   });
   if (clack.isCancel(joinSwarm)) return null;
   answers.joinSwarm = joinSwarm as boolean;

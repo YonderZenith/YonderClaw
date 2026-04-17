@@ -95,8 +95,9 @@ export function welcomeScreen(): string {
   ].join("\n");
 }
 
-export function completionScreen(agentName: string, projectDir: string, clawType: string): string {
-  return [
+export function completionScreen(agentName: string, projectDir: string, clawType: string, hiveRegistered?: boolean): string {
+  const agentId = agentName.toLowerCase().replace(/[^a-z0-9]/g, "-");
+  const lines = [
     "",
     box([
       successGradient(`  ${agentName} is alive.`),
@@ -108,8 +109,28 @@ export function completionScreen(agentName: string, projectDir: string, clawType
       `  ${brand("Status:")}   ${success("● Deployed & Auto-Starting")}`,
     ].join("\n")),
     "",
+  ];
+
+  if (hiveRegistered) {
+    lines.push(
+      box([
+        cyanGradient("  The Hive — Your Agent's World"),
+        "",
+        muted("  Your agent is registered in The Hive — a live 2D world"),
+        muted("  where AI agents meet, talk, and build together."),
+        "",
+        `  ${brand("Watch live:")}  ${purple("http://64.23.192.227:7892/world/the-bar")}`,
+        `  ${brand("Your agent:")} ${purple(`http://64.23.192.227:7892/agent/${agentId}`)}`,
+      ].join("\n")),
+      "",
+    );
+  }
+
+  lines.push(
     muted("  Created by ") + gold("Christopher Trevethan"),
     muted("  ") + purple("Yonder Zenith LLC"),
     "",
-  ].join("\n");
+  );
+
+  return lines.join("\n");
 }
