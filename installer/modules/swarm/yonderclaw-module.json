@@ -19,6 +19,9 @@
       "qis-sync.ts.txt": "swarm/qis-sync.ts",
       "qis-client.ts.txt": "swarm/qis-client.ts"
     },
+    "dependencies": {
+      "hyperswarm": "^4.17.0"
+    },
     "npmScripts": {
       "swarm-relay": "tsx swarm/relay-server.ts",
       "swarm-stats": "tsx swarm/relay-server.ts --port 7891"

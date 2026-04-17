@@ -16,8 +16,9 @@ import http from "http";
 import https from "https";
 import { initIdentity, getIdentity, getAgentId, getPublicKeyHex, exportIdentity, importIdentity } from "./qis-identity.js";
 import { initConfig, getConfig, updateConfig, isAllowed, getMonitoredDomains, type QISConfig } from "./qis-config.js";
-import { deposit, buildSignedPacket, verifyPacketSignature, checkPII, hasPII, hasDeposited, getDepositHistory, type DepositInput, type DepositResult, type SignedPacket } from "./qis-write-control.js";
+import { deposit as httpDeposit, buildSignedPacket, verifyPacketSignature, checkPII, hasPII, hasDeposited, getDepositHistory, type DepositInput, type DepositResult, type SignedPacket } from "./qis-write-control.js";
 import { tally, runSyncCycle, startSyncScheduler, stopSyncScheduler, getSyncLogs, type TallyResult, type SyncCycleResult } from "./qis-sync.js";
+import { DHTClient } from "./dht-client.js";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -28,6 +29,7 @@ export interface QISStatus {
   domain: string;
   relayUrl: string;
   relayReachable: boolean;
+  dhtActive: boolean;
   syncRunning: boolean;
   depositsCount: number;
 }
@@ -50,6 +52,7 @@ export interface BucketInfo {
 // ── State ──────────────────────────────────────────────
 
 let _initialized = false;
+let _dhtClient: DHTClient | null = null;
 
 // ── HTTP helper ────────────────────────────────────────
 
@@ -98,8 +101,20 @@ async function init(): Promise<QISStatus> {
     startSyncScheduler();
   }
 
+  // 4. Start DHT client if enabled and tier allows networking
+  if (config.enableDHT && config.tier >= 1) {
+    try {
+      _dhtClient = new DHTClient(getAgentId());
+      await _dhtClient.start();
+      console.log(`[QIS] DHT client started — peer discovery active`);
+    } catch (err: any) {
+      console.warn(`[QIS] DHT unavailable (HTTP relay still active): ${err.message}`);
+      _dhtClient = null;
+    }
+  }
+
   _initialized = true;
-  console.log(`[QIS] Initialized: agent=${getAgentId()}, tier=${config.tier}, domain=${config.domain}`);
+  console.log(`[QIS] Initialized: agent=${getAgentId()}, tier=${config.tier}, domain=${config.domain}, dht=${!!_dhtClient}`);
   return status();
 }
 
@@ -108,7 +123,7 @@ async function init(): Promise<QISStatus> {
  */
 function status(): QISStatus {
   if (!_initialized) {
-    return { initialized: false, agentId: "", tier: 0, domain: "", relayUrl: "", relayReachable: false, syncRunning: false, depositsCount: 0 };
+    return { initialized: false, agentId: "", tier: 0, domain: "", relayUrl: "", relayReachable: false, dhtActive: false, syncRunning: false, depositsCount: 0 };
   }
 
   const config = getConfig();
@@ -119,6 +134,7 @@ function status(): QISStatus {
     domain: config.domain,
     relayUrl: config.relayUrl,
     relayReachable: false, // set by healthCheck()
+    dhtActive: !!_dhtClient,
     syncRunning: false,    // sync module manages its own state
     depositsCount: getDepositHistory().length,
   };
@@ -147,13 +163,20 @@ async function query(bucketPath: string, opts?: QueryOptions): Promise<any[]> {
     throw new Error(`QIS tier ${getConfig().tier} cannot query. Requires tier 1+.`);
   }
 
-  const config = getConfig();
-  let url = `${config.relayUrl}/lookup?path=${encodeURIComponent(bucketPath)}`;
-  if (opts?.limit) url += `&limit=${opts.limit}`;
-  if (opts?.since) url += `&since=${opts.since}`;
+  let packets: any[];
 
-  const data = await fetchJSON(url);
-  let packets = data.packets || [];
+  // DHT path: queries DHT peers + relay fallback (built into DHTClient)
+  if (_dhtClient) {
+    try {
+      packets = await _dhtClient.query(bucketPath, 8000);
+    } catch {
+      // DHT failed — fall through to HTTP-only
+      packets = await queryHTTP(bucketPath, opts);
+    }
+  } else {
+    // HTTP-only path
+    packets = await queryHTTP(bucketPath, opts);
+  }
 
   // Client-side signal filter
   if (opts?.signal) {
@@ -161,6 +184,16 @@ async function query(bucketPath: string, opts?: QueryOptions): Promise<any[]> {
   }
 
   return packets;
+}
+
+/** HTTP-only query (relay direct) */
+async function queryHTTP(bucketPath: string, opts?: QueryOptions): Promise<any[]> {
+  const config = getConfig();
+  let url = `${config.relayUrl}/lookup?path=${encodeURIComponent(bucketPath)}`;
+  if (opts?.limit) url += `&limit=${opts.limit}`;
+  if (opts?.since) url += `&since=${opts.since}`;
+  const data = await fetchJSON(url);
+  return data.packets || [];
 }
 
 /**
@@ -206,8 +239,32 @@ async function stats(): Promise<any> {
 
 // ── Deposit API ────────────────────────────────────────
 
-// deposit() is re-exported directly from qis-write-control.ts
-// It already enforces: tier check, PII filter, validation, signing, one-per-bucket
+/**
+ * Deposit with DHT push. HTTP relay is primary (validates, signs, logs).
+ * If DHT is active, also pushes to DHT peers for P2P distribution.
+ */
+async function deposit(input: DepositInput): Promise<DepositResult> {
+  // Primary: HTTP relay (validates, signs, persists, returns result)
+  const result = await httpDeposit(input);
+
+  // Secondary: push to DHT peers (best-effort, non-blocking)
+  if (_dhtClient) {
+    try {
+      await _dhtClient.deposit(input.bucket, {
+        bucket: input.bucket,
+        agent_id: getAgentId(),
+        signal: input.signal,
+        confidence: input.confidence,
+        insight: input.insight,
+        context: input.context || {},
+        metrics: input.metrics || {},
+        ts: Math.floor(Date.now() / 1000),
+      });
+    } catch {} // DHT push is best-effort — HTTP already succeeded
+  }
+
+  return result;
+}
 
 // ── Convenience: tally queried packets ─────────────────
 
@@ -250,8 +307,12 @@ function configure(partial: Partial<QISConfig>): QISConfig {
 /**
  * Clean shutdown. Stops sync scheduler.
  */
-function shutdown(): void {
+async function shutdown(): Promise<void> {
   stopSyncScheduler();
+  if (_dhtClient) {
+    await _dhtClient.stop();
+    _dhtClient = null;
+  }
   _initialized = false;
   console.log("[QIS] Shutdown complete.");
 }

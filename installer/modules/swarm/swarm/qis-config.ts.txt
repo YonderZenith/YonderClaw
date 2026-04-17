@@ -29,7 +29,7 @@ const DEFAULTS: QISConfig = {
   additionalDomains: [],
   syncIntervalHours: 4,
   relayUrl: "__RELAY_URL__",
-  enableDHT: false,
+  enableDHT: true,
   maxDepositsPerCycle: 10,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
