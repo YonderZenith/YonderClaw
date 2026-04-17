@@ -1,5 +1,14 @@
 # YonderClaw Changelog
 
+## Website Update (2026-04-17)
+- **The Hive gets its own section**: Moved from "Coming Soon" roadmap to dedicated feature section with full feature list, action buttons, and "The Bar" showcase
+- **QIS section updated for DHT**: New SVG diagram showing Relay + Holder Nodes + Kademlia peer-to-peer mesh with animated packets. Added "Decentralized DHT" feature bullet
+- **Stats updated to real numbers**: 1,189 npm installs, 20 agents on network, 119 buckets
+- **All Hive URLs now `https://hive.yonderzenith.com`**: Domain live with TLS, no more raw IP:port
+- **Roadmap label**: "Coming Soon" → "Roadmap"
+- Version badges: v3.6.9 in nav + terminal
+- README.md: Hive link updated to HTTPS domain
+
 ## v3.6.9 (2026-04-16)
 ### DHT Holder Mode + Sync
 - **DHT holder mode**: Agents set to tier 3 become persistent storage nodes with local SQLite (`data/dht-local.db`). Stores all packets, serves them to peers over Hyperswarm DHT.
