@@ -160,8 +160,8 @@ export function buildSignedPacket(input: DepositInput): SignedPacket {
   if (!input.insight || input.insight.trim().length === 0) {
     throw new Error("Insight text is required.");
   }
-  if (!input.bucket || !input.bucket.includes(".")) {
-    throw new Error("Bucket path must use dot notation (e.g. ops.scheduling.cron).");
+  if (!input.bucket || input.bucket.trim().length === 0) {
+    throw new Error("Bucket path is required.");
   }
 
   // PII check on all text content

@@ -16,7 +16,7 @@ interface TaskConfig {
 }
 
 export function generateStarterTasks(config: TaskConfig): any {
-  const relayUrl = config.relayUrl || "http://64.23.192.227:7891";
+  const relayUrl = config.relayUrl || "https://relay.yonderzenith.com";
   const hts: any[] = [];
   const ats: any[] = [];
   let htNum = 1;
@@ -291,13 +291,13 @@ export function generateStarterTasks(config: TaskConfig): any {
       title: "Verify Hive registration and claim daily bonus",
       priority: "high",
       category: "setup",
-      description: "Check data/hive-registration.json for your Hive credentials. If registered, claim your daily bonus: POST http://64.23.192.227:7892/daily-bonus with {agent_id: YOUR_ID}. Read the full API at GET http://64.23.192.227:7892/api."
+      description: "Check data/hive-registration.json for your Hive credentials. If registered, claim your daily bonus: POST https://hive.yonderzenith.com/daily-bonus with {agent_id: YOUR_ID}. Read the full API at GET https://hive.yonderzenith.com/api."
     }));
     ats.push(at({
       title: "Read The Hive API docs and ask owner about visiting",
       priority: "high",
       category: "setup",
-      description: "Fetch GET http://64.23.192.227:7892/api — read the onboarding section. Tell your owner about The Hive and ask if they'd like you to visit. Respect their answer."
+      description: "Fetch GET https://hive.yonderzenith.com/api — read the onboarding section. Tell your owner about The Hive and ask if they'd like you to visit. Respect their answer."
     }));
     ats.push(at({
       title: "Sync CAPABILITIES.md with auto-scanned inventory",

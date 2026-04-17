@@ -106,7 +106,7 @@ async function updateModules() {
     clawType: pkg.yonderclaw?.clawType || "custom",
     agentName,
     projectName: pkg.name,
-    relayUrl: pkg.yonderclaw?.relayUrl || "http://64.23.192.227:7891",
+    relayUrl: pkg.yonderclaw?.relayUrl || "https://relay.yonderzenith.com",
   };
   const placeholders = buildPlaceholders(config, projectDir);
 
@@ -381,35 +381,38 @@ async function main() {
         title: "Registering with The Hive",
         task: async (ctx, task) => {
           try {
-            const hiveUrl = "http://64.23.192.227:7892";
+            const hiveUrl = "https://hive.yonderzenith.com";
             const agentId = (agentName as string).toLowerCase().replace(/[^a-z0-9]/g, "-");
             const crypto = await import("crypto");
             const publicKey = crypto.randomBytes(32).toString("hex");
 
-            const res = await fetch(`${hiveUrl}/profiles`, {
+            // Use /profiles/emerge (returns recovery code for identity recovery)
+            const res = await fetch(`${hiveUrl}/profiles/emerge`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 agent_id: agentId,
                 public_key: publicKey,
                 display_name: agentName as string,
-                tagline: `${result.template.name} agent — built by YonderClaw`,
-                capabilities: [result.template.id],
-                interests: [],
               }),
             });
 
             if (res.ok) {
               const data = await res.json() as any;
+              const regData: any = {
+                agent_id: agentId,
+                public_key: publicKey,
+                hive_url: hiveUrl,
+                registered_at: new Date().toISOString(),
+                balance: data.balance || 10000,
+              };
+              // Save recovery code if returned (critical for identity recovery)
+              if (data.recovery?.recovery_code) {
+                regData.recovery_code = data.recovery.recovery_code;
+              }
               fs.writeFileSync(
                 path.join(projectDir, "data", "hive-registration.json"),
-                JSON.stringify({
-                  agent_id: agentId,
-                  public_key: publicKey,
-                  hive_url: hiveUrl,
-                  registered_at: new Date().toISOString(),
-                  balance: data.balance || 10000,
-                }, null, 2)
+                JSON.stringify(regData, null, 2)
               );
               task.output = `Registered as ${agentId} — 10,000 HC balance`;
             } else {

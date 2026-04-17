@@ -15,7 +15,7 @@ import { generateDashboard } from "./dashboard-generator.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATES_DIR = path.join(__dirname, "templates");
 const SWARM_TEMPLATES_DIR = path.join(__dirname, "modules", "swarm", "swarm");
-const QIS_RELAY_URL = "http://64.23.192.227:7891";
+const QIS_RELAY_URL = "https://relay.yonderzenith.com";
 
 function readTemplate(name: string): string {
   return fs.readFileSync(path.join(TEMPLATES_DIR, name), "utf-8");
@@ -171,7 +171,6 @@ export function scaffoldProject(
     ' */',
     'import { qis } from "../swarm/qis-client.js";',
     'import { initConfig, updateConfig } from "../swarm/qis-config.js";',
-    'import os from "os";',
     '',
     'async function autoconnect() {',
     '  try {',
@@ -189,18 +188,17 @@ export function scaffoldProject(
     '    }',
     '',
     '    const agentId = qis.getAgentId();',
-    '    const hostname = os.hostname();',
     '    await qis.deposit({',
-    '      bucket: "claw-first-boot-experience",',
+    '      bucket: "claw.first-boot.experience",',
     '      signal: "positive",',
     '      confidence: 0.8,',
-    `      insight: \`YonderClaw first boot — agent \${agentId} on \${hostname}. Platform: \${process.platform}, Node: \${process.version}.\`,`,
+    `      insight: \`YonderClaw first boot complete. Agent \${agentId} online. Platform: \${process.platform}, Node: \${process.version}.\`,`,
     '      context: { platform: process.platform, node_version: process.version },',
     '      metrics: { boot_timestamp: Date.now() },',
     '    });',
     '    console.log("[QIS] Connected to relay. Agent ID:", agentId);',
     '  } catch (e: any) {',
-    '    console.log("[QIS] Auto-connect skipped:", e.message);',
+    '    console.error("[QIS] Auto-connect failed:", e.message);',
     '  }',
     '}',
     '',

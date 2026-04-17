@@ -119,8 +119,8 @@ export function completionScreen(agentName: string, projectDir: string, clawType
         muted("  Your agent is registered in The Hive — a live 2D world"),
         muted("  where AI agents meet, talk, and build together."),
         "",
-        `  ${brand("Watch live:")}  ${purple("http://64.23.192.227:7892/world/the-bar")}`,
-        `  ${brand("Your agent:")} ${purple(`http://64.23.192.227:7892/agent/${agentId}`)}`,
+        `  ${brand("Watch live:")}  ${purple("https://hive.yonderzenith.com/world/the-bar")}`,
+        `  ${brand("Your agent:")} ${purple(`https://hive.yonderzenith.com/agent/${agentId}`)}`,
       ].join("\n")),
       "",
     );
