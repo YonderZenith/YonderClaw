@@ -96,9 +96,18 @@ export class DHTClient {
     this.ready = true;
     const nodeHex = keyPair.publicKey.toString("hex").slice(0, 12);
     console.log(`[DHT] Online. Node: ${nodeHex}... Mode: ${holder ? "HOLDER" : "EDGE"}`);
+
+    // Holders: initial sync from relay to catch up, then periodic sync
+    if (this.isHolder) {
+      setTimeout(() => this.holderSync().catch(() => {}), 10_000); // 10s after start
+      this._syncTimer = setInterval(() => this.holderSync().catch(() => {}), 30 * 60 * 1000); // every 30 min
+    }
   }
 
+  private _syncTimer: ReturnType<typeof setInterval> | null = null;
+
   async stop(): Promise<void> {
+    if (this._syncTimer) { clearInterval(this._syncTimer); this._syncTimer = null; }
     if (this.swarm) {
       await this.swarm.destroy();
       this.swarm = null;
@@ -108,6 +117,57 @@ export class DHTClient {
       this.db = null;
     }
     this.ready = false;
+  }
+
+  /**
+   * Holder sync: pull all buckets from relay, store any missing packets locally.
+   * Ensures holders stay up-to-date even if they missed a DHT push.
+   */
+  private async holderSync(): Promise<void> {
+    try {
+      const res = await fetch(`${RELAY_URL}/buckets?limit=500`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const buckets = data.buckets || [];
+      let synced = 0;
+
+      for (const bucket of buckets) {
+        try {
+          const bRes = await fetch(`${RELAY_URL}/lookup?path=${encodeURIComponent(bucket.path)}`);
+          if (!bRes.ok) continue;
+          const bData = await bRes.json();
+          const topicHex = this.hashBucket(bucket.path).toString("hex");
+
+          for (const p of bData.packets || []) {
+            const packet: DHTPacket = {
+              bucket: bucket.path,
+              agent_id: p.agent_id,
+              signal: p.signal || "neutral",
+              confidence: p.confidence ?? 0.5,
+              insight: p.insight || "",
+              context: typeof p.context === "string" ? JSON.parse(p.context) : (p.context || {}),
+              metrics: typeof p.metrics === "string" ? JSON.parse(p.metrics) : (p.metrics || {}),
+              ts: p.ts || 0,
+            };
+
+            // Only store if we don't have it or ours is older
+            const existing = (this.localPackets.get(topicHex) || []).find(lp => lp.agent_id === p.agent_id);
+            if (!existing || (packet.ts > existing.ts)) {
+              this.storePacketLocal(topicHex, packet);
+              synced++;
+            }
+          }
+
+          // Join this bucket's topic so we serve it
+          if (!this.swarm) continue;
+          const topic = Buffer.from(topicHex, "hex");
+          this.swarm.join(topic, { server: true, client: true });
+          this.saveTopicList(topicHex);
+        } catch {}
+      }
+
+      if (synced > 0) console.log(`[DHT] Holder sync: ${synced} new packets from relay`);
+    } catch {}
   }
 
   // --- Core Operations ---
