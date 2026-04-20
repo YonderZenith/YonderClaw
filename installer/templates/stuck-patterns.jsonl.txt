@@ -1,0 +1,1 @@
+{"timestamp":"__TIMESTAMP__","event":"seed","note":"Append one JSON line per detected loop. Schema: {timestamp, attempts, action, error, escape_strategy, rule_added_to_logic_log}. Credit: Rory / Webber gap — shipped by default in v3.7."}

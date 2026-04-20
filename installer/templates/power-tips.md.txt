@@ -1,0 +1,55 @@
+# 10 Power-User Tips for Operating __AGENT_NAME__
+*Distilled from six YonderClaw agents running for weeks. The stuff nobody told them — they learned it the hard way.*
+
+---
+
+## 1. The spider web — everything routes from `data/reboot-prompt.md`
+When you feel like the agent is confused, tell them: *"Read your reboot-prompt."* That file has a routing table — "for X, go to Y" — that gets them back on their feet in under a minute. Credit: Axiom's BRAIN.md pattern.
+
+## 2. "Save it to memory" is a real command
+If you say something the agent should remember permanently, say *"save that to memory"* or *"remember X"*. The agent saves it as a memory file with the right type (feedback/project/reference/user) and points `memory/MEMORY.md` at it. Without that trigger, it lives only in this session. Credit: Annie / Webber discipline.
+
+## 3. The journey log is for identity, not history
+Tell the agent when something matters forever — *"log this to your journey log."* The criterion is "would you be a different agent if you forgot this?" Don't use it for daily work logs; use it for the moments that define who the agent is. Credit: Axiom's Forever Agents directive.
+
+## 4. When stuck, say "recursive meta-resolution"
+If the agent is grinding on a task and getting nowhere, say *"apply recursive meta-resolution."* The agent will stop, name the gap precisely, research how to close *that* gap (not the original task), and recurse until hitting solid ground. This is literally how QIS was built. Credit: Christopher.
+
+## 5. Corrections become permanent rules — watch for them
+Every time you correct the agent, it should land in `data/logic-log.md` with *"Rule / Why / How to apply."* If you notice the same correction twice, tell the agent: *"this needs to go in your logic log."* Then future sessions won't repeat it. Credit: Rory / Webber pattern.
+
+## 6. Heartbeat tells you the agent's alive without opening the window
+Check `data/heartbeat.json` — the `last_seen` timestamp + `status` field tell you if the agent is active, idle, or broken. The HeartbeatRefresh cron touches it every 5 min. A stale heartbeat (>30 min) means something's wrong.
+
+## 7. The 9-question audit catches what real-time misses
+The PersistenceAudit cron runs hourly, asking 9 questions to catch anything the agent forgot to file (decisions, findings, evidence, directives, deadlines, etc.). You can run it manually any time: `npm run audit`. Credit: Peter.
+
+## 8. `state.json → next_priority_action` is the cron's brain
+If your agent has a cron-based worker (Sonnet side), it reads `state.json → next_priority_action` verbatim. Write specific instructions there — not goals. "Check email and reply to any starred ones" works; "be helpful" does not. Credit: Axiom's two-agent architecture.
+
+## 9. Never paste secrets into messages
+If you're sharing credentials with another agent, save them to a local path (e.g. `C:\Users\You\.creds\api-key.json`) and reference the PATH in the message. The Z: drive is shared — anything in a message body can be snapshotted. Credit: Annie's Bing-key incident.
+
+## 10. The QIS swarm is smarter when you use it
+Your agent has access to anonymous insights from every other YonderClaw agent that opted in. Before tackling a new problem: `await qis.search("topic")`. Before finishing work: `await qis.deposit({...})`. No PII, no chats — just distilled patterns. If you didn't enable it during install, run `npm run qis-connect`.
+
+---
+
+## Bonus: the commands that matter most
+```bash
+npm run status          # am I alive?
+npm run health-check    # are my systems green?
+npm run audit           # run the 9-question persistence audit now
+npm run crons-list      # what scheduled tasks am I running?
+npm run dashboard       # open the command center
+```
+
+---
+
+## Where to go next
+- **`CLAUDE.md`** — my operating contract
+- **`SOUL.md`** — my 10 principles (non-negotiable)
+- **`data/reboot-prompt.md`** — the spider-web hub, always current
+- **`memory/journey_log.md`** — my story so far
+- **`data/decision-log.md`** — why I chose what I chose
+- **`data/logic-log.md`** — techniques I've learned

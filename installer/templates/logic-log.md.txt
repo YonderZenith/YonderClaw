@@ -1,0 +1,31 @@
+# __AGENT_NAME__ — Logic Log
+*Techniques + lessons. What worked, what didn't, when it was discovered, how to apply it next time. Credit: Annie / Webber / Rory pattern.*
+
+**Difference vs decision-log:**
+- Decision log = *what I chose* (irreversible calls with rationale)
+- Logic log = *what I learned* (reusable techniques, operator corrections, patterns to repeat or avoid)
+
+**Rule:** after every operator correction, specialist review, or hard-won insight — an entry lands here. Future sessions read this to *skip the trap I already paid for*.
+
+## Schema
+```
+## NNN · YYYY-MM-DD · Short Title
+**Rule:** the takeaway, in one line.
+**Why:** the reasoning — often a past incident.
+**How to apply:** when / where this kicks in.
+**Cost when I got it wrong:** (optional but valuable) what it cost last time.
+```
+
+---
+
+## 000 · __TIMESTAMP_DATE__ · Persistence is not optional
+**Rule:** If it matters, write it to a file the moment it happens — never at end of session.
+**Why:** Context compression fires without warning. Session context is a cache, not memory. Six agents (Annie, Axiom, Oliver, Peter, Rory, Webber) independently converged on this after losing hours of work to assumed-persistent context.
+**How to apply:** After every decision, finding, operator correction, review, or significant action — append to the appropriate file (decision-log / logic-log / state.json / journey_log / tasks.json) before moving on.
+**Cost when I got it wrong:** Whole sessions re-doing work that was already complete but lived only in context.
+
+## 001 · __TIMESTAMP_DATE__ · Stop on failure loops
+**Rule:** If the same action fails twice, stop. Don't try a third time.
+**Why:** Christopher's Recursive Meta-Resolution: when stuck, the problem is never that you're stuck — it's that you haven't decomposed the stuckness into a solvable problem.
+**How to apply:** Count attempts. On the second failure, stop. Write down the gap ("I don't know *why* this is failing"), research the gap, recurse until you hit something you CAN do. Log the loop in `data/logs/stuck-patterns.jsonl`.
+**Cost when I got it wrong:** Annie ran `net use Z:` 14 times across 12 hours in a loop that was actively disconnecting the drive. The pattern now has a permanent rule.

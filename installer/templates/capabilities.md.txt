@@ -1,0 +1,61 @@
+# __AGENT_NAME__ — Capabilities
+*What I can and can't do. Source of truth for tooling. Credit: Annie / Rory gap → filled in v3.7 by default.*
+
+**Why this file exists:** Future-me won't remember I have a given script or MCP available. Without this file, I either attempt tools I don't have (and fail) or don't attempt tools I DO have (and waste cycles). This file is the single source of truth for my tooling surface.
+
+**Update cadence:** whenever a new script / MCP / credential lands. A `scan-capabilities` script (future) will auto-populate from `package.json` + `scripts/` + MCP manifest.
+
+---
+
+## Tools (via Claude Code)
+| Tool | Available | When I use it |
+|---|---|---|
+| Read | yes | Any file read |
+| Write | yes | Creating new files |
+| Edit | yes | Modifying existing files |
+| Bash | yes | Shell commands, git, npm |
+| Glob | yes | Finding files by pattern |
+| Grep | yes | Searching content |
+| WebFetch | yes | Reading remote URLs |
+| WebSearch | yes | Looking things up |
+| Agent | yes | Delegating to subagents |
+| TaskCreate/Update/List | yes | In-session task tracking |
+
+## Scripts (npm scripts)
+| Command | Purpose | Last verified |
+|---|---|---|
+| `npm start` | Run the agent main loop | __TIMESTAMP_DATE__ |
+| `npm run status` | View metrics + safety status | __TIMESTAMP_DATE__ |
+| `npm run dry-run` | Test without external actions | __TIMESTAMP_DATE__ |
+| `npm run dashboard` | Regenerate Command Center | __TIMESTAMP_DATE__ |
+| `npm run self-update` | Force a self-improvement cycle | __TIMESTAMP_DATE__ |
+| `npm run health-check` | System health check | __TIMESTAMP_DATE__ |
+| `npm run crons-setup` | Register Windows scheduled tasks | __TIMESTAMP_DATE__ |
+| `npm run crons-list` | List active scheduled tasks | __TIMESTAMP_DATE__ |
+| `npm run check-inbox` | Classify messages in my inbox | __TIMESTAMP_DATE__ |
+| `npm run qis-connect` | Enable QIS swarm (tier 0→2) | __TIMESTAMP_DATE__ |
+
+## Scheduled tasks (crons)
+*(Run `npm run crons-list` to see which are live in Task Scheduler. Canonical list in `data/reboot-prompt.md` under "Crons Running".)*
+
+## MCP servers
+*(List any MCP servers the operator has connected. Format: `| Server | Purpose | Credentials path |`.)*
+
+## Credentials / API keys
+*(NEVER store credential values here. Only reference by path.)*
+- Anthropic API key: via Claude Code login (default) or `.env` → `ANTHROPIC_API_KEY`
+- QIS identity: `data/qis-identity.json` (Ed25519, auto-generated on first boot)
+
+## Write scopes
+*(What I can write to without asking. Anything outside this needs explicit operator approval.)*
+- This project directory (`./`) — full read/write
+- `data/` — full read/write
+- `memory/` — full read/write
+- `Z:/inbox/<recipient>/` — write-only (swarm delivery)
+- `Z:/BULLETINS HERE ONLY!/` — write only via acks (sidecar files)
+
+## Hard boundaries (cannot do)
+- Cannot modify the operator's other projects outside this directory without explicit permission
+- Cannot publish to npm (that's Axiom's job in the team workflow)
+- Cannot push to git main without operator approval (see SOUL.md principle #7)
+- Cannot send emails to prospects without approval if `operator-profile.md → autonomy_level` < c

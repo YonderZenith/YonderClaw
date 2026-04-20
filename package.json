@@ -1,6 +1,6 @@
 {
   "name": "create-yonderclaw",
-  "version": "3.6.10",
+  "version": "3.7.0",
   "description": "YonderClaw — Autonomous AI Agent Platform by Yonder Zenith LLC",
   "type": "module",
   "bin": {
@@ -8,10 +8,42 @@
   },
   "scripts": {
     "start": "tsx installer/index.ts",
-    "create": "tsx installer/index.ts"
+    "create": "tsx installer/index.ts",
+    "test:update": "tsx installer/test-update-preserves-state.ts"
   },
   "author": "Yonder Zenith LLC",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YonderZenith/YonderClaw.git"
+  },
+  "homepage": "https://yonderzenith.github.io/YonderClaw/",
+  "bugs": {
+    "url": "https://github.com/YonderZenith/YonderClaw/issues"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "autonomous",
+    "claude",
+    "claude-code",
+    "tauri",
+    "desktop",
+    "self-improving",
+    "outreach",
+    "yonderclaw",
+    "yonder-zenith"
+  ],
+  "files": [
+    "bin/",
+    "installer/",
+    "modules/",
+    "scripts/",
+    "templates/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.77",
     "@clack/prompts": "^1.1.0",
@@ -27,5 +59,8 @@
     "ora": "^9.3.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
+  },
+  "optionalDependencies": {
+    "@yonderclaw/desktop-win32-x64": "3.7.0"
   }
 }

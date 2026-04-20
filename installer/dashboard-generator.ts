@@ -8,7 +8,7 @@
  * The self-update module evolves the dashboard over time.
  */
 
-import type { ClawConfig } from "./research.js";
+import type { ClawConfig, DashboardPanel } from "./research.js";
 
 type DashboardSection = {
   id: string;
@@ -111,15 +111,46 @@ function getLayoutForTemplate(template: string, answers: Record<string, unknown>
 }
 
 /**
+ * Split Board-authored panels into KPI + section layout.
+ * Board output overrides the deterministic template layout when present.
+ */
+function layoutFromBoardPanels(panels: DashboardPanel[]): DashboardLayout {
+  const kpis: DashboardKPI[] = [];
+  const sections: DashboardSection[] = [];
+  const sorted = [...panels].sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99));
+  for (const p of sorted) {
+    if (p.type === "kpi") {
+      kpis.push({
+        id: p.id,
+        label: p.title,
+        dataKey: p.dataKey || p.id,
+        color: p.color || "var(--cyan)",
+      });
+    } else if (p.type === "table" || p.type === "feed" || p.type === "health") {
+      sections.push({ id: p.id, title: p.title, type: p.type });
+    }
+    // "custom" panels currently fall through — future: render a raw <iframe> / markdown
+  }
+  // Ensure we always have at least one section so the dashboard renders
+  if (sections.length === 0) sections.push({ id: "activity", title: "Recent Activity", type: "feed" });
+  return { kpis, sections };
+}
+
+/**
  * Generate the full dashboard HTML for a specific claw.
+ * If the Board produced custom panels (Seat 8), they override the deterministic
+ * template layout. Otherwise falls back to the per-template layouts above.
  */
 export function generateDashboard(
   agentName: string,
   clawType: string,
   answers: Record<string, unknown>,
-  researchNotes?: string
+  researchNotes?: string,
+  boardPanels?: DashboardPanel[],
 ): string {
-  const layout = getLayoutForTemplate(clawType, answers);
+  const layout = boardPanels && boardPanels.length
+    ? layoutFromBoardPanels(boardPanels)
+    : getLayoutForTemplate(clawType, answers);
 
   const kpiCards = layout.kpis.map(kpi => `
     <div class="kpi">

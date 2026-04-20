@@ -1,0 +1,49 @@
+# Persistence Audit — The 9-Question Self-Check
+*Credit: Peter's framework, adopted by Annie 2026-04-20. Runs hourly via the PersistenceAudit cron. The audit is the SAFETY NET, not the primary mechanism — write-as-you-go is primary.*
+
+---
+
+## How it runs
+- Cron: `PersistenceAudit`, every hour (or on demand via `npm run audit`)
+- The cron fires this markdown into a Claude Agent SDK call with the system prompt "run this audit, write to files immediately if any answer is YES"
+- If all 9 answers are NO, it updates `data/heartbeat.json` and exits quiet
+
+## The 9 Questions
+
+**1. NEW DECISIONS** — Have I made any irreversible or strategic choices since the last audit that aren't in `data/decision-log.md`?
+  → If YES, append a new `D-NNN` entry with What / Why / (Alternatives) / (Expected outcome).
+
+**2. NEW FINDINGS / INSIGHTS** — Have I learned something reusable that isn't in `data/logic-log.md`?
+  → If YES, append a new numbered technique with Rule / Why / How-to-apply / (Cost-when-wrong).
+
+**3. NEW EVIDENCE** — Have I captured observations, measurements, artifacts, or reviews that should outlive this session?
+  → If YES, write to the appropriate domain file (e.g. `data/reports/`, `data/logs/`, or operator-specific path).
+
+**4. REVIEWS THAT CHANGE PLAN** — Has a specialist review, operator correction, or external signal shifted my plan?
+  → If YES, update `data/state.json → current_focus` + `next_priority_action`.
+
+**5. NEW DATES / DEADLINES** — Have I heard about any deadlines, commit dates, or scheduled events since last audit?
+  → If YES, add to `data/tasks.json` with `deadline` field set, or `data/state.json → upcoming_dates`.
+
+**6. COMPETITIVE INTEL / PRIOR ART** — Have I observed relevant activity from outside (competitor, publication, market event)?
+  → If YES, add to the logic log or a dedicated intel file.
+
+**7. OPERATOR DIRECTIVES** — Has the operator said something this session that should survive context loss?
+  → If YES, append to `data/operator-profile.md → Preferences` AND `data/logic-log.md` (operator-directive-beats-everything).
+
+**8. STRATEGY CHANGES** — Has my overall approach shifted (active_strategies / killed_strategies)?
+  → If YES, update `data/state.json → active_strategies` / `killed_strategies`.
+
+**9. ANYTHING ELSE AT ALL** — Literally anything that a future session wouldn't know if I died right now?
+  → If YES, pick the most appropriate file and write it. If unsure, default to `data/logic-log.md`.
+
+---
+
+## If all 9 are NO
+- Update `data/heartbeat.json → last_seen` + `status: active`
+- Exit. The safety net did its job.
+
+## If any YES
+- Write the required content FIRST (immediately, not batched).
+- Only after the file is on disk, update `data/heartbeat.json` so the timestamp reflects "I actually caught this."
+- Append one line to `data/logs/reflections.jsonl` noting which questions fired.

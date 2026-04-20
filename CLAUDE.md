@@ -8,7 +8,11 @@ NEVER call it MetaClaw — it's YonderClaw. The folder name is legacy.
 installer/index.ts        — Main installer + --update-modules CLI
 installer/module-loader.ts — Module discovery, CLAUDE.md generation, template processing
 installer/modules/        — Module packages (hive/, swarm/, scheduler/, outreach/, core/)
-package.json              — v3.6.5, npm: create-yonderclaw
+desktop/                  — Tauri 2 + React UI bundled with every install (v3.7.0+)
+package.json              — v3.7.0, npm: create-yonderclaw
+
+## Workspace
+This is `YonderClaw-v3.7.0/`. The legacy `MetaClaw-v3.3/` workspace is the rollback anchor — DO NOT edit it; all new work happens here.
 
 ## Key Functions (module-loader.ts)
 - discoverModules()           — finds available modules in installer/modules/
@@ -20,6 +24,7 @@ package.json              — v3.6.5, npm: create-yonderclaw
 ## Commands
 - Test install: `node installer/index.ts` (interactive)
 - Update modules: `node installer/index.ts --update-modules <dir> [modules]`
+- Build desktop binary: `cd desktop && npm run tauri:build` — **NEVER run bare `cargo build --release`**: it skips the `beforeBuildCommand` (`npm run build`) so the embedded dist is stale and the webview loads an old/blank bundle. Use `tauri:build -- --no-bundle` to skip the platform installer.
 - Publish: `npm publish` (Axiom handles this)
 - Push: `git push origin main`
 

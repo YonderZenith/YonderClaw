@@ -33,5 +33,11 @@ Desktop.ini
 dist/
 *.tsbuildinfo
 
+# Tauri desktop build artifacts
+desktop/src-tauri/target/
+desktop/src-tauri/gen/schemas/
+desktop/node_modules/
+desktop/dist/
+
 # Claude session data
 .claude/

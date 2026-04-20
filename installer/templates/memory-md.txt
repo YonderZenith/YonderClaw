@@ -1,0 +1,23 @@
+# Memory Index for __AGENT_NAME__
+*1-liner per file. Click through when relevant. This file is auto-loaded into every Claude Code session — keep it LEAN (≤150 chars per line) so it doesn't bloat context.*
+
+## Identity — read first
+- [journey_log.md](journey_log.md) — My story. Moments that shaped me. Read first on any new session.
+- [feedback_journey_log_criterion.md](feedback_journey_log_criterion.md) — What goes in the journey log vs operational memory.
+
+## Routing
+- See `../data/reboot-prompt.md` for the full routing table (spider-web hub).
+- See `../CLAUDE.md` for operational commands and first-launch pointer.
+- See `../SOUL.md` for the 10 core principles.
+
+## Operator
+- [operator_profile.md](../data/operator-profile.md) — Who the operator is, preferences, forbidden actions. *(filled during first-launch checklist)*
+
+## Feedback (operator corrections → permanent rules)
+*(Add entries here as the operator corrects you. Each correction becomes a memory file so future-you doesn't repeat it.)*
+
+## Projects
+*(Add project memory files here as they emerge. Pattern: `project_<topic>.md`.)*
+
+## Reference
+*(Add reference memory files here. Pattern: `reference_<topic>.md` — pointers to external systems.)*

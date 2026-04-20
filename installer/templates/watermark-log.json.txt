@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "description": "Gap-free analytics continuity log. Every data pull records the timestamp/cursor it covered THROUGH, so the next pull resumes exactly there — no gaps, no overlap. Credit: Annie's analytics-watermark-continuity pattern.",
+  "when_to_use": "Only populated if this agent pulls time-series data (analytics, logs, email events, etc.). Outreach / research / support / social agents may leave this empty.",
+  "schema": {
+    "<data_source>": {
+      "last_pull_iso": "ISO UTC — when the pull ran",
+      "last_date_covered": "ISO UTC — the latest event timestamp the pull captured",
+      "cycle": "integer — which agent cycle ran this pull",
+      "sessions_logged_through": "integer — how many sessions (or records) captured",
+      "note": "anything unusual about this pull"
+    }
+  },
+  "sources": {}
+}

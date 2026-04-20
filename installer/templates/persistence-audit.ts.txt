@@ -1,0 +1,86 @@
+/**
+ * Persistence Audit — hourly self-check.
+ *
+ * Credit: Peter's 9-question persistence audit. Adopted by Annie.
+ * This cron invokes a short Claude Agent SDK session that reads
+ * docs/persistence-audit.md (the 9 questions) and answers them against
+ * the last hour of activity. Anything found that wasn't written down
+ * gets written to the correct file RIGHT NOW.
+ *
+ * Cheap fallback: if @anthropic-ai/claude-agent-sdk is unavailable or
+ * ANTHROPIC_API_KEY is missing, we skip the LLM call and just log a
+ * reminder into data/logs/persistence-audit.log so the operator can run
+ * the audit manually via `npm run audit`.
+ */
+
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PROJECT_DIR = path.join(__dirname, "..");
+const PROMPT_PATH = path.join(PROJECT_DIR, "data", "persistence-audit.md");
+const LOG_PATH = path.join(PROJECT_DIR, "data", "logs", "persistence-audit.log");
+
+async function runWithSdk(prompt: string): Promise<string | null> {
+  try {
+    const sdk = await import("@anthropic-ai/claude-agent-sdk").catch(() => null);
+    if (!sdk || !process.env.ANTHROPIC_API_KEY) return null;
+    const { query } = sdk as { query: (opts: { prompt: string; options?: Record<string, unknown> }) => AsyncIterable<unknown> };
+
+    const iter = query({
+      prompt,
+      options: {
+        model: "claude-sonnet-4-6",
+        cwd: PROJECT_DIR,
+        maxTurns: 20,
+        allowedTools: ["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
+      },
+    });
+
+    const parts: string[] = [];
+    for await (const msg of iter) {
+      parts.push(JSON.stringify(msg));
+    }
+    return parts.join("\n");
+  } catch (err) {
+    return `sdk_error: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+function append(line: string) {
+  fs.mkdirSync(path.dirname(LOG_PATH), { recursive: true });
+  fs.appendFileSync(LOG_PATH, `[${new Date().toISOString()}] ${line}\n`);
+}
+
+async function main() {
+  if (!fs.existsSync(PROMPT_PATH)) {
+    append("skip: docs/persistence-audit.md not found");
+    return;
+  }
+
+  const promptTemplate = fs.readFileSync(PROMPT_PATH, "utf-8");
+  const prompt = [
+    "You are running the hourly Persistence Audit for agent __AGENT_NAME__.",
+    "",
+    "Read data/state.json, data/heartbeat.json, and data/logs/ for activity in the last ~60 min.",
+    "Then walk the 9 questions below. For each question, answer honestly:",
+    "  - If there's a gap (something happened but wasn't written down), WRITE IT NOW to the file the question points to.",
+    "  - If there's no gap, move on.",
+    "Be terse. No ceremony. No summary at the end unless something was actually written.",
+    "",
+    "--- THE 9 QUESTIONS ---",
+    promptTemplate,
+  ].join("\n");
+
+  const result = await runWithSdk(prompt);
+  if (result === null) {
+    append("skip: SDK or ANTHROPIC_API_KEY unavailable — run `npm run audit` manually");
+    return;
+  }
+  append(`audit_complete bytes=${result.length}`);
+}
+
+main().catch(err => {
+  append(`error: ${err instanceof Error ? err.message : String(err)}`);
+});

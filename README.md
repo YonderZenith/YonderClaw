@@ -7,24 +7,46 @@
 </p>
 
 <p align="center">
-  <strong>Autonomous AI Agents — Plug & Play</strong><br/>
-  <em>Deploy self-improving AI agents in minutes, not months.</em>
+  <strong>Autonomous AI Agents — One Command, Launched Dashboard.</strong><br/>
+  <em>Type <code>npx create-yonderclaw</code>. A desktop window opens with your agent already running. That's the whole demo.</em>
 </p>
 
 <p align="center">
   <a href="#quick-start"><img src="https://img.shields.io/badge/get_started-00BEEA?style=for-the-badge&logo=rocket&logoColor=white" alt="Get Started" /></a>
   <a href="https://yonderzenith.github.io/YonderClaw/"><img src="https://img.shields.io/badge/docs-00D9FF?style=for-the-badge&logo=readthedocs&logoColor=white" alt="Docs" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-10B981?style=for-the-badge" alt="MIT License" /></a>
-  <img src="https://img.shields.io/badge/version-3.6.9-FFD700?style=for-the-badge" alt="Version 3.6.9" />
+  <img src="https://img.shields.io/badge/version-3.7.0-FFD700?style=for-the-badge" alt="Version 3.7.0" />
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/node-18+-339933?style=flat-square&logo=node.js&logoColor=white" />
   <img src="https://img.shields.io/badge/claude_code-CLI-00BEEA?style=flat-square&logo=anthropic&logoColor=white" />
+  <img src="https://img.shields.io/badge/desktop-Tauri_2-FFC131?style=flat-square&logo=tauri&logoColor=white" />
   <img src="https://img.shields.io/badge/platform-Windows-0078D6?style=flat-square&logo=windows&logoColor=white" />
   <img src="https://img.shields.io/badge/database-SQLite-003B57?style=flat-square&logo=sqlite&logoColor=white" />
   <img src="https://img.shields.io/badge/self--improving-yes-FFD700?style=flat-square" />
 </p>
+
+---
+
+## 🆕 What's New in v3.7.0 — Smooth Start-to-Finish
+
+> **One command. One window. One running agent.**
+>
+> Every previous version ended at a terminal prompt. **v3.7.0 ends at a live desktop dashboard** with your agent already resumed and thinking out loud.
+
+- 🖥️ **Bundled Tauri desktop** — native window (Windows today; macOS + Linux next) with a split-pane live terminal (xterm.js + ConPTY) and a schema-aware dashboard
+- 🔁 **Deterministic resume** — the installer captures the agent's Claude Code session at install time; the desktop app resumes by UUID on every launch, so your agent has continuous memory from cycle one
+- 🛡️ **Shape-validated launch** — launch.bat rejects garbage / BOM / legacy session IDs before they reach `claude --resume`, so the UI never crash-loops
+- 👀 **Live dashboard** — `data/dashboard.json` is watched via ReadDirectoryChangesW; no polling, no refresh button, changes appear as soon as the agent writes them
+- ✅ **17 hardening tests + 6 E2E tests + 3 smoke variants** all green before we called it done
+
+```bash
+# That's literally it.
+npx create-yonderclaw
+```
+
+_After the installer finishes, a native desktop window opens. The left pane is your agent's live stream. The right pane is its current state. You did not press a second button._
 
 ---
 
@@ -55,9 +77,17 @@ Your agents don't just run. They **learn, adapt, and improve themselves** throug
 ## Quick Start
 
 ```bash
-# One command — that's it
 npx create-yonderclaw
 ```
+
+That's it. Here's what happens in order:
+
+1. **Detect** — Node, Claude Code CLI, OS
+2. **Configure** — pick an agent type, answer a few questions
+3. **Research** — Claude pulls best practices for your domain
+4. **Scaffold** — full project generated, dependencies installed, DB seeded
+5. **Capture session** — installer spawns `claude --print --session-id <uuid>` with a seed prompt and verifies the session `.jsonl` lands on disk before writing `data/session-id.txt`
+6. **Launch** — the bundled **YonderClaw Desktop** (Tauri 2 + React 19) opens, resumes that captured session by UUID, and streams the live PTY to a split-view terminal + dashboard
 
 Or clone the repo:
 
@@ -70,7 +100,36 @@ npm start
 
 Or on Windows — just double-click **`setup.bat`**.
 
-The installer handles everything: detects your system, installs prerequisites, walks you through configuration, and deploys your agent.
+---
+
+## 🖥️ YonderClaw Desktop
+
+Every install ships with a native desktop app — no browser tabs, no separate download.
+
+<table>
+<tr>
+<td width="50%">
+
+**Left pane — Live Agent Terminal**
+- xterm.js v5 rendering
+- ConPTY bridge (portable-pty) on Windows
+- Resumes `claude --resume <session-uuid>` deterministically
+- Falls back to `--continue` then fresh session if the captured ID is missing or shape-invalid
+
+</td>
+<td width="50%">
+
+**Right pane — Live Dashboard**
+- React 19 + zustand, 137 KB gzipped JS
+- Watches `data/dashboard.json` via `notify` (ReadDirectoryChangesW)
+- Schema-aware rendering with an empty-state so first launch never feels broken
+- Updates the instant the agent writes state — no polling, no refresh button
+
+</td>
+</tr>
+</table>
+
+**Why this matters:** prior versions of YonderClaw dropped you at a shell prompt and hoped you'd type the right follow-up command. v3.7.0 eliminates the post-install drop-off entirely — the success state is visible, running, and already thinking.
 
 ---
 
@@ -282,8 +341,9 @@ YonderClaw agents connect to the **QIS (Quadratic Intelligence Swarm) Network** 
 |------------|---------|
 | **Node.js** | v18 or higher (installer helps you get it) |
 | **Claude Code CLI** | Installed globally (installer helps you get it) |
-| **Claude Access** | Claude Max or Pro subscription required (or Anthropic API key) |
-| **OS** | Windows 10/11 (macOS/Linux support coming) |
+| **Claude Access** | Claude Max or Pro subscription (or Anthropic API key) |
+| **OS** | Windows 10/11 today. macOS (arm64 + x64) and Linux (x64) shipping in v3.7.x Phase 3 |
+| **WebView2** | Auto-installed on Windows 11. Windows 10 users are prompted if missing. |
 
 ---
 

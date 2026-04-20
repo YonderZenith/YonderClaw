@@ -133,29 +133,131 @@ export function buildPlaceholders(config: InstallConfig, outputDir: string): Rec
 }
 
 /**
- * Copy a template file with placeholder replacement
+ * Agent-state paths that must NEVER be overwritten in preserve mode.
+ *
+ * The rule is path-prefix based so ANY future file an agent or operator
+ * writes under data/ or memory/ is auto-protected — no manifest audit
+ * required. Credentials, databases, and session-id files are protected
+ * globally (a rogue module manifest can't override these).
  */
-export function copyTemplate(srcPath: string, destPath: string, placeholders: Record<string, string>): void {
+const PROTECTED_PREFIXES = [
+  "data/",         // all runtime state: state.json, tasks.json, logs, SQLite journals, registrations
+  "memory/",       // the agent's durable memory — SOUL.md, journey_log.md, CAPABILITIES.md, kb.md, jsonl logs
+];
+const PROTECTED_EXACT = [
+  ".env",
+  ".env.local",
+  ".env.production",
+  "CLAUDE.md",     // operator may have edited the system prompt section
+];
+const PROTECTED_SUFFIXES = [
+  ".db", ".db-shm", ".db-wal",
+];
+
+/** Normalize a relative path to forward-slash form for prefix matching. */
+function normalizeRel(p: string): string {
+  return p.replace(/\\/g, "/");
+}
+
+/**
+ * Decide whether a given destination path (relative to outputDir) must be
+ * preserved when the installer is running in update mode AND the file already
+ * exists on disk. The check is intentionally conservative: when in doubt,
+ * preserve. Only a fresh install (preserve=false) ever clobbers these files.
+ */
+export function isProtectedPath(relPath: string): boolean {
+  const r = normalizeRel(relPath);
+  if (PROTECTED_EXACT.includes(r)) return true;
+  if (PROTECTED_PREFIXES.some(prefix => r === prefix.slice(0, -1) || r.startsWith(prefix))) return true;
+  if (PROTECTED_SUFFIXES.some(suffix => r.endsWith(suffix))) return true;
+  return false;
+}
+
+export type CopyOptions = {
+  /** When true, skip writes that would clobber an existing protected file. Set by --update-modules flow. */
+  preserve?: boolean;
+  /** When true, record every skipped/written path to `skipped`/`written` on the shared tally object. */
+  tally?: { written: string[]; preserved: string[]; missing: string[] };
+  /**
+   * Project root used to re-derive the path relative to the agent's install dir before
+   * protection classification. Passed implicitly by `processModuleContributes` so a
+   * project that happens to sit under a folder named `data` or `memory` isn't
+   * misclassified. Falls back to substring heuristic when absent (single-file callers).
+   */
+  outputDir?: string;
+};
+
+/**
+ * Copy a template file with placeholder replacement.
+ *
+ * In preserve mode (updates), a protected destination that already exists is
+ * left alone — the agent's runtime state survives the update. Code paths
+ * (src/, swarm/, hive/, boardroom/, scripts/) are always overwritten so
+ * framework bug-fixes actually land.
+ */
+export function copyTemplate(
+  srcPath: string,
+  destPath: string,
+  placeholders: Record<string, string>,
+  opts: CopyOptions = {},
+): void {
   if (!fs.existsSync(srcPath)) {
     console.warn(`Template not found: ${srcPath}`);
+    opts.tally?.missing.push(destPath);
     return;
   }
+
+  if (opts.preserve && fs.existsSync(destPath)) {
+    // Prefer the project-relative path — that's what `isProtectedPath` expects, and
+    // it avoids misclassifying a project nested under `.../data/<agent>/src/...`.
+    // Absolute-path fallback remains for single-file callers that never pass outputDir.
+    const rel = opts.outputDir ? path.relative(opts.outputDir, destPath) : "";
+    let isProtected: boolean;
+    if (rel && !rel.startsWith("..") && !path.isAbsolute(rel)) {
+      isProtected = isProtectedPath(rel);
+    } else {
+      const norm = normalizeRel(destPath);
+      isProtected =
+        PROTECTED_PREFIXES.some(p => norm.includes("/" + p)) ||
+        PROTECTED_EXACT.some(e => norm.endsWith("/" + e)) ||
+        PROTECTED_SUFFIXES.some(s => norm.endsWith(s));
+    }
+    if (isProtected) {
+      opts.tally?.preserved.push(destPath);
+      return;
+    }
+  }
+
   let content = fs.readFileSync(srcPath, "utf-8");
   for (const [key, value] of Object.entries(placeholders)) {
     content = content.replace(new RegExp(key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"), value);
   }
   fs.mkdirSync(path.dirname(destPath), { recursive: true });
   fs.writeFileSync(destPath, content);
+  opts.tally?.written.push(destPath);
 }
 
 /**
- * Process a module's contributes section — copy all template files
+ * Process a module's contributes section — copy all template files.
+ *
+ * Pass `opts.preserve = true` during --update-modules so that agent state
+ * files (data/*, memory/*, .env, *.db) are never overwritten.
  */
-export function processModuleContributes(mod: LoadedModule, outputDir: string, placeholders: Record<string, string>): void {
+export function processModuleContributes(
+  mod: LoadedModule,
+  outputDir: string,
+  placeholders: Record<string, string>,
+  opts: CopyOptions = {},
+): void {
   const { manifest, dir } = mod;
   const skipKeys = new Set(["npmScripts", "dependencies", "claudeMd", "directories", "dashboard", "inject"]);
 
-  // Create directories
+  // Forward outputDir so copyTemplate can run protection checks against the
+  // project-relative path — avoids a false positive when the project itself sits
+  // inside a path containing "data/" or "memory/".
+  const copyOpts: CopyOptions = { ...opts, outputDir };
+
+  // Create directories (mkdir is safe on existing dirs — preserves contents)
   if (manifest.contributes.directories) {
     for (const d of manifest.contributes.directories) {
       fs.mkdirSync(path.join(outputDir, d), { recursive: true });
@@ -170,7 +272,7 @@ export function processModuleContributes(mod: LoadedModule, outputDir: string, p
     for (const [srcFile, destRelative] of Object.entries(fileMap as Record<string, string>)) {
       const srcPath = path.join(dir, sectionKey, srcFile);
       const destPath = path.join(outputDir, destRelative);
-      copyTemplate(srcPath, destPath, placeholders);
+      copyTemplate(srcPath, destPath, placeholders, copyOpts);
     }
   }
 }

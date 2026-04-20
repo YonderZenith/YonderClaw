@@ -60,6 +60,20 @@ export const DEFAULT_CRONS: CronTask[] = [
     description: "System health check (circuit breakers, disk, errors)",
     businessHoursOnly: false,
   },
+  {
+    name: "HeartbeatRefresh",
+    script: "src/heartbeat-refresh.ts",
+    intervalMinutes: 5,
+    description: "Touch data/heartbeat.json so operators/other agents can see we're alive",
+    businessHoursOnly: false,
+  },
+  {
+    name: "PersistenceAudit",
+    script: "src/persistence-audit.ts",
+    intervalMinutes: 60,
+    description: "9-question self-audit — catches anything important that wasn't written down",
+    businessHoursOnly: false,
+  },
 ];
 
 /**

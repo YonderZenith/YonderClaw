@@ -14,15 +14,19 @@ echo.
 REM Set working directory
 cd /d "__PROJECT_DIR__"
 
-REM Clean up stale session tracking from pre-v1.1 installs
-if exist "data\session-id.txt" del "data\session-id.txt" >nul 2>&1
+REM v3.7.0 uses data\session-id.txt as the resume target (created by installer).
+REM Pre-v1.1 also wrote that file with a different format — if it's empty, ignore it below.
 
-REM Find Claude executable
+REM Find Claude executable. Prefer real .exe binaries over the .cmd shim so the
+REM child process is claude itself (no extra cmd.exe in the tree). Order matches
+REM desktop/src-tauri/src/claude.rs::find_claude — keep them in sync.
 set "CLAUDE_CMD="
-if exist "%USERPROFILE%\AppData\Roaming\npm\claude.cmd" (
-    set "CLAUDE_CMD=%USERPROFILE%\AppData\Roaming\npm\claude.cmd"
-) else if exist "%USERPROFILE%\.local\bin\claude.exe" (
+if exist "%USERPROFILE%\.local\bin\claude.exe" (
     set "CLAUDE_CMD=%USERPROFILE%\.local\bin\claude.exe"
+) else if exist "%USERPROFILE%\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe" (
+    set "CLAUDE_CMD=%USERPROFILE%\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe"
+) else if exist "%USERPROFILE%\AppData\Roaming\npm\claude.cmd" (
+    set "CLAUDE_CMD=%USERPROFILE%\AppData\Roaming\npm\claude.cmd"
 ) else (
     where claude >nul 2>&1
     if !ERRORLEVEL! equ 0 set "CLAUDE_CMD=claude"
@@ -49,13 +53,34 @@ if not exist "%USERPROFILE%\.claude\.credentials.json" (
 echo   Directory: %CD%
 echo.
 
-REM === LAUNCH LOGIC ===
-REM Simple and reliable: try --continue (resumes most recent session
-REM in this directory). If no session exists yet, start fresh.
+REM === LAUNCH LOGIC (v3.7.0) ===
+REM Priority:
+REM   1. --resume <session-id-from-installer>  (deterministic; never loses the agent)
+REM   2. --continue                            (most-recent session in this dir)
+REM   3. fresh claude                          (first run, no history)
 
 :launch
 
-REM Check if any session exists for this project
+set "RESUME_ID="
+if exist "data\session-id.txt" (
+    set /p RESUME_ID=<data\session-id.txt
+)
+REM Validate UUID shape (8-4-4-4-12 hex, total 36 chars). Anything else (BOM, garbage,
+REM partial write, legacy pre-v1.1 content) is rejected so we don't crash-loop on
+REM `claude --resume <bad>`. Length-check first (rejects empty + over-long), then a small
+REM findstr regex (findstr's heap can't handle the full {n}-style expansion).
+if not "!RESUME_ID!"=="" (
+    if "!RESUME_ID:~35,1!"=="" set "RESUME_ID="
+)
+if not "!RESUME_ID!"=="" (
+    if not "!RESUME_ID:~36,1!"=="" set "RESUME_ID="
+)
+if not "!RESUME_ID!"=="" (
+    echo !RESUME_ID!| findstr /R /C:"^[0-9A-Fa-f]*-[0-9A-Fa-f]*-[0-9A-Fa-f]*-[0-9A-Fa-f]*-[0-9A-Fa-f]*$" >nul
+    if !ERRORLEVEL! neq 0 set "RESUME_ID="
+)
+
+REM Check if any session exists for this project (fallback path)
 set "HAS_SESSION=0"
 set "ENCODED_PATH=__ENCODED_PATH__"
 set "SESSION_DIR=%USERPROFILE%\.claude\projects\!ENCODED_PATH!"
@@ -73,15 +98,19 @@ if not exist "data\qis-deposit-log.json" (
     echo.
 )
 
-if "!HAS_SESSION!"=="1" (
-    echo   Resuming __AGENT_NAME__...
+if not "!RESUME_ID!"=="" (
+    echo   Resuming __AGENT_NAME__ ^(session !RESUME_ID:~0,8!…^)...
     echo.
-    "!CLAUDE_CMD!" --continue
+    "!CLAUDE_CMD!" --resume !RESUME_ID!__SKIP_PERMS_ARG__
+) else if "!HAS_SESSION!"=="1" (
+    echo   Resuming __AGENT_NAME__ ^(most recent session^)...
+    echo.
+    "!CLAUDE_CMD!" --continue__SKIP_PERMS_ARG__
 ) else (
     echo   First launch — initializing __AGENT_NAME__...
     echo   Claude will read CLAUDE.md and SOUL.md for context.
     echo.
-    "!CLAUDE_CMD!"
+    "!CLAUDE_CMD!"__SKIP_PERMS_ARG__
 )
 
 echo.

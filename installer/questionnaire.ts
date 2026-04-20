@@ -269,9 +269,17 @@ export async function runQuestionnaire(systemInfo: SystemInfo): Promise<Question
   if (clack.isCancel(updateInterval)) return null;
   answers.selfUpdateIntervalHours = updateInterval as string;
 
-  // Step 7: Swarm intelligence opt-in
+  // Step 7: Permissions mode
+  const skipPermissions = await clack.confirm({
+    message: "Run Claude with --dangerously-skip-permissions? Skips per-tool approval prompts so the agent can work without interrupting you. Recommended for autonomous agents — you can always toggle it off mid-session with /permissions.",
+    initialValue: false,
+  });
+  if (clack.isCancel(skipPermissions)) return null;
+  answers.skipPermissions = skipPermissions as boolean;
+
+  // Step 8: Swarm intelligence opt-in
   const joinSwarm = await clack.confirm({
-    message: "Connect to the agent community? (your agent can share and learn from other agents — all anonymous)",
+    message: "Enable smarter learning via the YonderClaw network? Your agent picks up patterns other agents have already proven (and contributes its own). Anonymous — no chats, no personal data, no identifiers.",
     initialValue: true,
   });
   if (clack.isCancel(joinSwarm)) return null;

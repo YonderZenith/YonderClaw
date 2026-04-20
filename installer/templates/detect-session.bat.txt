@@ -33,8 +33,10 @@ if "!LATEST_SESSION!"=="" (
     exit /b 1
 )
 
-REM Write session ID to file
-echo !LATEST_SESSION!> "!SESSION_FILE!"
+REM Write session ID to file. NOTE: no space before `>` — `echo abc> file` writes
+REM `abc\r\n`, but `echo abc > file` writes `abc \r\n` (trailing space) which
+REM bloats the line past the 36-char UUID length check downstream.
+echo !LATEST_SESSION!>"!SESSION_FILE!"
 echo Session ID detected: !LATEST_SESSION!
 echo Saved to: !SESSION_FILE!
 echo.

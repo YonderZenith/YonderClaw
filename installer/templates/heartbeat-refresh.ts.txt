@@ -1,0 +1,58 @@
+/**
+ * Heartbeat Refresh — lightweight liveness touch.
+ *
+ * Runs every 5 min via cron. Does NOT invoke Claude.
+ * Just updates data/heartbeat.json so operators and other agents can see:
+ *   - Agent is still alive (last_seen within 5 min)
+ *   - Current cycle count
+ *   - Whatever current_task / current_focus was last written by the interactive session
+ *
+ * Why this matters: if you only update heartbeat at session boundaries, a
+ * long-running session or a crashed session looks identical from the outside.
+ * A 5-min touch closes that gap.
+ */
+
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PROJECT_DIR = path.join(__dirname, "..");
+const HEARTBEAT_PATH = path.join(PROJECT_DIR, "data", "heartbeat.json");
+const STATE_PATH = path.join(PROJECT_DIR, "data", "state.json");
+
+function readJson<T>(p: string, fallback: T): T {
+  try {
+    return JSON.parse(fs.readFileSync(p, "utf-8")) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function main() {
+  const now = new Date().toISOString();
+
+  const heartbeat = readJson<Record<string, unknown>>(HEARTBEAT_PATH, {
+    agent: "__AGENT_NAME__",
+    status: "running",
+    health: "HEALTHY",
+    cycle: 0,
+  });
+
+  const state = readJson<Record<string, unknown>>(STATE_PATH, {});
+
+  heartbeat.last_seen = now;
+  if (typeof state.current_focus === "string") {
+    heartbeat.current_focus = state.current_focus;
+  }
+  if (typeof state.next_priority_action === "string") {
+    heartbeat.next_action = state.next_priority_action;
+  }
+  heartbeat.refreshed_by = "cron:heartbeat-refresh";
+
+  fs.mkdirSync(path.dirname(HEARTBEAT_PATH), { recursive: true });
+  fs.writeFileSync(HEARTBEAT_PATH, JSON.stringify(heartbeat, null, 2));
+  console.log(`[heartbeat-refresh] ${now} — touched ${HEARTBEAT_PATH}`);
+}
+
+main();

@@ -1,0 +1,29 @@
+{
+  "name": "@yonderclaw/desktop-win32-x64",
+  "version": "3.7.0",
+  "description": "YonderClaw desktop binary for Windows x64 — loaded as an optional dependency of create-yonderclaw",
+  "author": "Yonder Zenith LLC",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YonderZenith/YonderClaw.git"
+  },
+  "homepage": "https://yonderzenith.github.io/YonderClaw/",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin/yonderclaw-desktop.exe",
+    "README.md"
+  ],
+  "keywords": [
+    "yonderclaw",
+    "desktop",
+    "tauri",
+    "win32",
+    "x64"
+  ]
+}

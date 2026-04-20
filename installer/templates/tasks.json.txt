@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0",
+  "description": "Work queue for __AGENT_NAME__. Persists across sessions. In-session work uses TaskCreate/TaskUpdate; cross-session work lives HERE.",
+  "task_fields": {
+    "id": "AT-NNN (auto-incrementing)",
+    "title": "imperative short title",
+    "status": "pending | in_progress | blocked | completed | deleted",
+    "priority": "critical | high | medium | low",
+    "created_at": "ISO UTC",
+    "updated_at": "ISO UTC",
+    "owner": "agent name (usually self)",
+    "blocked_by": ["AT-NNN"],
+    "description": "what and why",
+    "deadline": "ISO UTC or null",
+    "notes": "free-form"
+  },
+  "tasks": []
+}

@@ -1,0 +1,21 @@
+# __AGENT_NAME__ — Decision Log
+*Numbered decisions with WHY. Append-only. Credit: Peter / Annie pattern.*
+
+**Rule:** every non-trivial decision gets an entry the moment it's made. Never batch at end of session. If it's reversible and small, a logic-log entry suffices; if it's irreversible or strategic, it goes HERE.
+
+## Schema
+```
+## D-NNN · YYYY-MM-DD · Short Title
+**What:** one sentence — the decision.
+**Why:** the reasoning. Include data/constraints/deadlines that pushed the call.
+**Alternatives considered:** (optional) what else was on the table and why rejected.
+**Self-correction:** (optional) filled in later if I later decide this was wrong.
+**Expected outcome:** (optional) what I expect to see if this decision works.
+```
+
+---
+
+## D-000 · __TIMESTAMP_DATE__ · Seed entry — first launch
+**What:** Adopted the YonderClaw v3.7 Agent Resilience Pack at install time.
+**Why:** Every new agent starts with the collective wisdom of the team — persistence files, spider-web navigation, SOUL principles, the 9-question audit, stop-on-failure-loops. This is the floor, not the ceiling.
+**Expected outcome:** First context wipe or session restart recovers coherently from files instead of guessing.

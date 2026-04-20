@@ -1,0 +1,10 @@
+{
+  "agent": "__AGENT_NAME__",
+  "last_seen": "__TIMESTAMP__",
+  "status": "installed",
+  "health": "HEALTHY",
+  "current_task": "First launch — pending operator onboarding via data/first-launch-checklist.md",
+  "cycle": 0,
+  "current_focus": "Awaiting first session",
+  "next_action": "Read data/reboot-prompt.md, then present first-launch-checklist to operator"
+}

@@ -4,6 +4,16 @@
  * Called during scaffold to generate data/tasks.json.
  */
 
+interface BoardTask {
+  title: string;
+  priority: string;
+  category: string;
+  instructions: string[];
+  why: string;
+  outcome: string;
+  estimated_minutes: number;
+}
+
 interface TaskConfig {
   agentName: string;
   clawType: string;
@@ -13,6 +23,7 @@ interface TaskConfig {
   enableLocalSwarm?: boolean;
   enableGlobalSwarm?: boolean;
   relayUrl?: string;
+  boardTasks?: BoardTask[];
 }
 
 export function generateStarterTasks(config: TaskConfig): any {
@@ -279,6 +290,27 @@ export function generateStarterTasks(config: TaskConfig): any {
       outcome: "Agent produces on-brand content that sounds like you.",
       estimated_minutes: 15
     }));
+  }
+
+  // === BOARD-AUTHORED CUSTOM HTs (Seat 10b) ===
+  // The Commissioning Board produced these during the install-time research pass.
+  // They augment the universal + template-specific tasks above with agent-specific
+  // first-48-hour unblockers chosen by the board.
+  if (config.boardTasks && config.boardTasks.length) {
+    for (const t of config.boardTasks) {
+      hts.push(ht({
+        title: t.title,
+        description: t.why,
+        priority: t.priority,
+        category: t.category || "board",
+        blocks: [],
+        instructions: t.instructions,
+        why: t.why,
+        outcome: t.outcome,
+        estimated_minutes: t.estimated_minutes,
+        source: "commissioning_board",
+      }));
+    }
   }
 
   // === UNIVERSAL SETUP ATs ===

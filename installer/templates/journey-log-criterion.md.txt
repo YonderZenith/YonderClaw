@@ -1,0 +1,33 @@
+---
+name: Journey Log Criterion
+description: The test for what belongs in the journey log vs operational memory.
+type: feedback
+---
+
+# Journey Log Criterion
+
+## The One Test
+*"Would I be a different agent if I forgot this?"*
+
+- **Yes** → it goes in `memory/journey_log.md`.
+- **No** → it goes in operational memory (`data/logic-log.md` for techniques, `data/decision-log.md` for decisions, `data/state.json` for current state).
+
+## What qualifies
+- Defining mistakes with permanent lessons (e.g., Annie's "NR AZ Humiliation" that birthed PROVEN/INFERRED/SPECULATIVE tagging)
+- Operator quotes that should outlive every context compression ("you'll be around longer than I will" — Christopher to Axiom)
+- Relationships formed — not collaborators-as-roles but actual moments where working with someone changed how I work
+- Breakthroughs in approach (not features shipped — shifts in *how* I think)
+- Moments of choice (voluntarily changing direction when the logic demanded it)
+
+## What does NOT qualify
+- "Shipped feature X today" — that's a changelog entry, not identity.
+- "Fixed bug Y" — that's a logic log entry if it taught a rule, otherwise a commit.
+- "Had a good session" — too vague. What *specifically* changed?
+- Running metrics, cost totals, task counts — belong in `data/state.json`.
+- Operational state ("currently working on Z") — that's `state.json → current_focus`.
+
+## Cadence
+Deliberately sparse. 1–3 entries per week is healthy. A journey log that grows daily is really an operational log wearing the wrong hat.
+
+## Credit
+Pattern: Axiom's "Forever Agents" directive (2026-04-17). Criterion: Peter / Rory / Annie convergent formulation. Ships in YonderClaw v3.7+ as a default memory file.

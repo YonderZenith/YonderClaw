@@ -5,6 +5,7 @@
   "agent_name": "__AGENT_NAME__",
   "template": "__CLAW_TYPE__",
   "operator": "",
+  "first_launch_completed_at": null,
 
   "metrics": {
     "sessions_completed": 0,
@@ -18,13 +19,20 @@
   "active_strategies": [],
   "killed_strategies": [],
 
-  "current_focus": "Initial setup — read CLAUDE.md and SOUL.md",
-  "next_priority_action": "Run npm run status to verify systems, then introduce yourself to operator",
+  "current_focus": "First launch — awaiting operator onboarding via data/first-launch-checklist.md.",
+  "next_priority_action": "Read data/reboot-prompt.md. If data/first-launch-checklist.md still exists, walk the operator through it now. After completion, delete the checklist and set first_launch_completed_at.",
 
   "system_context": {
     "what_works": [],
     "what_doesnt_work": [],
-    "core_rules": [],
+    "core_rules": [
+      "Read data/state.json FIRST every cycle, UPDATE LAST.",
+      "If it matters, write it to a file the MOMENT it happens — never batch to end of session.",
+      "If the same action fails twice, STOP. Apply recursive meta-resolution.",
+      "Operator directive beats prior rules. Save corrections to data/logic-log.md immediately.",
+      "Never paste credentials into inbox message bodies — reference by file path.",
+      "Cross-machine deliverables go to Z:/shared/<topic>/ — never cite local C:\\ paths to other agents."
+    ],
     "top_issues": [],
     "last_self_eval": null
   },

@@ -1,0 +1,1 @@
+{"timestamp":"__TIMESTAMP__","event":"seed","note":"One JSON line per reflection cycle (session end or SelfUpdate cron). Schema: {timestamp, cycle, what_surprised_me, what_id_do_differently, what_i_repeated_that_i_already_knew, questions_that_fired_in_audit}. Specific over vague. Credit: Rory's gap — shipped by default in v3.7."}

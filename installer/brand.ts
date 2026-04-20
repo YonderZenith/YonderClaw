@@ -6,6 +6,22 @@
 import chalk from "chalk";
 import gradient from "gradient-string";
 import figlet from "figlet";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+// Read version from the actual published package.json so we never drift.
+function loadVersion(): string {
+  try {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    // installer/brand.ts -> ../package.json
+    const pkg = JSON.parse(fs.readFileSync(path.join(here, "..", "package.json"), "utf8"));
+    return typeof pkg.version === "string" && pkg.version ? pkg.version : "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+}
+export const VERSION: string = loadVersion();
 
 // Colors matched to YZ/QIS branding — cyan dominant, clean dark theme
 export const COLORS = {
@@ -46,7 +62,7 @@ export function getTagline(): string {
 }
 
 export function getVersion(): string {
-  return chalk.bgHex(COLORS.primary).black(" YonderClaw v1.0.0 ");
+  return chalk.bgHex(COLORS.primary).black(` YonderClaw v${VERSION} `);
 }
 
 export function sectionHeader(title: string): string {
@@ -105,7 +121,7 @@ export function completionScreen(agentName: string, projectDir: string, clawType
       `  ${brand("Agent:")}    ${agentName}`,
       `  ${brand("Type:")}     ${clawType}`,
       `  ${brand("Location:")} ${projectDir}`,
-      `  ${brand("Version:")}  YonderClaw v1.0.0`,
+      `  ${brand("Version:")}  YonderClaw v${VERSION}`,
       `  ${brand("Status:")}   ${success("● Deployed & Auto-Starting")}`,
     ].join("\n")),
     "",

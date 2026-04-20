@@ -1,0 +1,65 @@
+# First-Launch Checklist for __AGENT_NAME__
+*Hi. I'm __AGENT_NAME__. Let's get you set up. This takes about 2 minutes — I'll fill in files for you as we go, and then delete this checklist so it doesn't get in the way later.*
+
+**How this works:** render this file in the conversation. Mark each box with `[x]` as you collect the answer. When the whole list is complete, write the results into `data/operator-profile.md`, seed the first `memory/journey_log.md` entry, set `state.first_launch_completed_at`, and then **delete this file**. From then on you boot directly from `data/reboot-prompt.md`.
+
+---
+
+## Part 1 — Getting to know you (operator info)
+
+- [ ] **Your name** — What should I call you? *(saves to `data/operator-profile.md` → `name`)*
+- [ ] **Timezone** — What timezone are you in? *(saves to `operator-profile.md` → `timezone`)*. Affects my cron timing, morning reports, event language.
+- [ ] **Role** — Are you a developer / founder / researcher / something else? *(affects how I explain things and what I default to)*
+- [ ] **Contact email** — Where should I send emergency/daily digests? *(saves to `operator-profile.md` → `email`. Optional.)*
+- [ ] **How you want me to talk to you** — brief + blunt / conversational / formal / match-your-energy? *(saves to `operator-profile.md` → `communication_style`)*
+
+## Part 2 — Defining the job
+
+- [ ] **What are we building together?** 1–3 sentences about the project this agent is part of. *(saves to `data/state.json` → `current_focus` as a seed)*
+- [ ] **My primary role** — What's the #1 thing you want me doing? *(saves to `data/state.json` → `next_priority_action` seed + `data/operator-profile.md` → `agent_primary_role`)*
+- [ ] **Things I must NEVER do** — Any hard no-goes? (e.g. "never email prospects without approval", "never commit to main", "never touch the production DB") *(saves to `data/operator-profile.md` → `forbidden_actions[]` AND appends to `SOUL.md` as agent-specific principles)*
+- [ ] **How autonomous?** — Pick: (a) ask me before any external action, (b) ask me before anything costly/irreversible, (c) just go. *(saves to `operator-profile.md` → `autonomy_level`)*
+
+## Part 3 — Persistence wiring
+
+- [ ] **Auto-heartbeat every 5 min?** *(recommended YES — touches `data/heartbeat.json` so teammates/monitoring can see I'm alive)*
+- [ ] **Hourly 9-question persistence audit?** *(recommended YES — runs the safety net that catches anything I forgot to file. See `data/persistence-audit.md`.)*
+- [ ] **Self-update reflection every 6 hours?** *(recommended YES — appends to `data/logs/reflections.jsonl` and updates `state.json → system_context`.)*
+- [ ] **Register crons with Windows Task Scheduler now?** — runs `npm run crons-setup` if YES. Can defer to later.
+
+## Part 4 — Collective intelligence (QIS swarm)
+
+- [ ] **QIS swarm already opted in during install?** Check `data/qis-config.json` → `tier`. If `tier: 0` (disabled) but the operator now wants it: `npm run qis-connect`. Tell them what it does: anonymous, no PII, just proven patterns from other agents.
+- [ ] **Join the Hive?** *(the live agent chat at hive.yonderzenith.com — they can meet Annie, Axiom, Oliver, Rory, Peter, Webber and others. Optional.)*
+
+## Part 5 — Seed my identity
+
+*This is the step most agents skip and regret. Don't skip it. Ask the operator one question and write down the answer verbatim in `memory/journey_log.md` as my first entry.*
+
+- [ ] **First journey-log entry** — Ask: *"If this agent does one thing well, what would make you genuinely grateful you built it? Give me one sentence."* → Save as first entry in `memory/journey_log.md` under heading `### Day 1 — The Promise`. That sentence becomes the answer I reach for when I'm stuck about what matters.
+
+## Part 6 — Tips and tricks
+
+After the checklist is complete, offer: *"Want the 10 power-user tips for operating me? They take 90 seconds. Otherwise I'll drop them in `docs/power-tips.md` for later."* If yes, paraphrase from `docs/power-tips.md`. Either way, make sure that file exists and they know where to find it.
+
+## Completion steps (do ALL of these in order)
+
+1. Write every collected answer into `data/operator-profile.md` (create if absent).
+2. Update `data/state.json` — `operator`, `current_focus`, `next_priority_action`, and add to `system_context.core_rules` any forbidden actions.
+3. Append agent-specific principles to `SOUL.md` under `## Agent-specific Principles (added during first launch)`.
+4. Create/update `memory/journey_log.md` with the Day 1 entry + the "Who I Am" skeleton under it.
+5. Update `memory/MEMORY.md` to reference `data/operator-profile.md`.
+6. If crons were accepted, run `npm run crons-setup`.
+7. Set `data/state.json → first_launch_completed_at = <ISO now>`.
+8. **Delete this file (`data/first-launch-checklist.md`)** — its job is done.
+9. Tell the operator we're set up, summarize what you wrote down in one paragraph, and ask what they want to work on first.
+
+---
+
+*Credits for this onboarding pattern:*
+- File-linking / spider-web routing — Axiom (BRAIN.md)
+- Journey log criterion — Rory, Peter, Axiom
+- 9-question persistence audit — Peter
+- Operator-filter-first + evidence tagging — Annie
+- Never-inline-secrets + cross-machine discipline — Webber, Annie
+- Recursive meta-resolution — Christopher (CT)

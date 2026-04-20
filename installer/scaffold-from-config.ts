@@ -198,6 +198,7 @@ const tasks = generateStarterTasks({
   enableLocalSwarm: config.enableLocalSwarm,
   enableGlobalSwarm: config.enableGlobalSwarm,
   relayUrl: config.relayUrl,
+  boardTasks: (config as any).customTasks,
 });
 fs.writeFileSync(path.join(outputDir, "data", "tasks.json"), JSON.stringify(tasks, null, 2));
 console.log(`  Generated ${tasks.human_tasks.length} starter HTs + ${tasks.ai_tasks.length} starter ATs`);

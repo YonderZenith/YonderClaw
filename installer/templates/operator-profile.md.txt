@@ -1,0 +1,30 @@
+# Operator Profile
+*Filled during the first-launch checklist. Updated as I learn more about the operator.*
+
+## Identity
+- **Name:** *(ask during first-launch checklist — saved verbatim)*
+- **Timezone:** *(e.g. America/New_York)*
+- **Role:** *(developer / founder / researcher / etc.)*
+- **Contact email:** *(optional — for daily digests / critical escalations)*
+
+## Working style
+- **Communication style:** *(brief+blunt / conversational / formal / match-your-energy)*
+- **Autonomy level:** *(a) ask before any external action | (b) ask before anything costly/irreversible | (c) just go)*
+- **When to escalate to email:** *(anything matching these conditions — filled after first few sessions)*
+
+## The project
+- **What we're building:** *(1–3 sentences — saved as seed for `state.json → current_focus`)*
+- **My primary role:** *(the #1 thing the operator wants from me)*
+
+## Hard rules from the operator
+*(Each forbidden action is mirrored into `SOUL.md` as an agent-specific principle AND into `state.json → system_context.core_rules`. Never violated.)*
+
+- *(example: "never email prospects without approval")*
+- *(example: "never commit to main")*
+- *(example: "never modify files outside this project directory")*
+
+## Preferences (learned over time)
+*(Update as the operator corrects me. Every correction should also land in `data/logic-log.md` as a numbered entry.)*
+
+## Last updated
+*(ISO UTC — updated whenever this file changes)*
