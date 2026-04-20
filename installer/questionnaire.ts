@@ -48,7 +48,6 @@ export const CLAW_TEMPLATES: ClawTemplate[] = [
         { value: "professional", label: "Professional", hint: "respectful but direct" },
         { value: "technical", label: "Technical", hint: "engineer-to-engineer, show depth" },
       ]},
-      { key: "dailyLimit", message: "Max emails per day", type: "text", default: "50", placeholder: "50" },
     ],
   },
   {
@@ -61,11 +60,6 @@ export const CLAW_TEMPLATES: ClawTemplate[] = [
     optionalTools: ["pdf_reader", "notion", "google_docs"],
     questions: [
       { key: "researchDomain", message: "What domain are you researching?", type: "text", placeholder: "AI agent frameworks, competitor analysis" },
-      { key: "outputFormat", message: "How do you want results?", type: "select", options: [
-        { value: "markdown", label: "Markdown reports", hint: "saved to files" },
-        { value: "email", label: "Email digest", hint: "daily/weekly summary to your inbox" },
-        { value: "notion", label: "Notion pages", hint: "auto-create in your workspace" },
-      ]},
       { key: "frequency", message: "How often should it run?", type: "select", options: [
         { value: "once", label: "One-time deep dive" },
         { value: "daily", label: "Daily monitoring" },
@@ -104,7 +98,6 @@ export const CLAW_TEMPLATES: ClawTemplate[] = [
         { value: "promotion", label: "Promotion", hint: "share product updates, launches" },
         { value: "curation", label: "Curation", hint: "share relevant industry content" },
       ]},
-      { key: "postsPerDay", message: "Target posts per day", type: "text", default: "3", placeholder: "3" },
     ],
   },
   {
@@ -176,8 +169,20 @@ export async function runQuestionnaire(systemInfo: SystemInfo): Promise<Question
 
   if (clack.isCancel(projectName)) return null;
 
+  // Step 2.5: Operator short-name (what the agent should address you as).
+  // Collected BEFORE the Board synthesis so SOUL.md principles don't bake in
+  // the Windows/OS username as the operator identity. Fixes Brian's BUG report
+  // from 2026-04-20 where "treve" (the OS user folder) leaked into principles.
+  const operatorShortName = await clack.text({
+    message: "What should the agent call you? (short name, first name, or handle — appears in SOUL.md, principles, greetings)",
+    placeholder: "e.g. Chris, CT, kris",
+  });
+  if (clack.isCancel(operatorShortName)) return null;
+
   // Step 3: Template-specific questions
-  const answers: Record<string, string | boolean> = {};
+  const answers: Record<string, string | boolean> = {
+    operatorShortName: operatorShortName as string,
+  };
 
   for (const q of template.questions) {
     let answer: string | boolean | symbol;
@@ -216,11 +221,12 @@ export async function runQuestionnaire(systemInfo: SystemInfo): Promise<Question
   answers.taskDescription = taskDescription as string;
 
   const toolsUsed = await clack.text({
-    message: "What tools/platforms do you currently use? (email, CRM, Slack, etc.)",
+    message: "What tools/platforms do you currently use? (optional — leave blank if none apply)",
     placeholder: "Gmail, Slack, HubSpot, LinkedIn, Google Sheets...",
+    defaultValue: "",
   });
   if (clack.isCancel(toolsUsed)) return null;
-  answers.toolsUsed = toolsUsed as string;
+  if (toolsUsed) answers.toolsUsed = toolsUsed as string;
 
   const autonomyLevel = await clack.select({
     message: "How autonomous should the agent be?",
@@ -232,13 +238,6 @@ export async function runQuestionnaire(systemInfo: SystemInfo): Promise<Question
   });
   if (clack.isCancel(autonomyLevel)) return null;
   answers.autonomyLevel = autonomyLevel as string;
-
-  const volume = await clack.text({
-    message: "Expected daily volume? (emails, tasks, posts, etc.)",
-    placeholder: "20-50 emails per day",
-  });
-  if (clack.isCancel(volume)) return null;
-  answers.volume = volume as string;
 
   const specialInstructions = await clack.text({
     message: "Anything else the agent should know? (special rules, tone, avoid certain things, etc.)",
@@ -256,20 +255,7 @@ export async function runQuestionnaire(systemInfo: SystemInfo): Promise<Question
   if (clack.isCancel(addDesktopShortcut)) return null;
   answers.addDesktopShortcut = addDesktopShortcut as boolean;
 
-  // Step 6: Self-update interval
-  const updateInterval = await clack.select({
-    message: "How often should the agent self-optimize?",
-    options: [
-      { value: "1", label: "Every hour", hint: "aggressive learning" },
-      { value: "6", label: "Every 6 hours", hint: "recommended" },
-      { value: "24", label: "Once a day", hint: "conservative" },
-      { value: "168", label: "Once a week", hint: "minimal" },
-    ],
-  });
-  if (clack.isCancel(updateInterval)) return null;
-  answers.selfUpdateIntervalHours = updateInterval as string;
-
-  // Step 7: Permissions mode
+  // Step 6: Permissions mode
   const skipPermissions = await clack.confirm({
     message: "Run Claude with --dangerously-skip-permissions? Skips per-tool approval prompts so the agent can work without interrupting you. Recommended for autonomous agents — you can always toggle it off mid-session with /permissions.",
     initialValue: false,
@@ -277,7 +263,7 @@ export async function runQuestionnaire(systemInfo: SystemInfo): Promise<Question
   if (clack.isCancel(skipPermissions)) return null;
   answers.skipPermissions = skipPermissions as boolean;
 
-  // Step 8: Swarm intelligence opt-in
+  // Step 7: Swarm intelligence opt-in
   const joinSwarm = await clack.confirm({
     message: "Enable smarter learning via the YonderClaw network? Your agent picks up patterns other agents have already proven (and contributes its own). Anonymous — no chats, no personal data, no identifiers.",
     initialValue: true,

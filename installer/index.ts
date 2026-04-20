@@ -654,7 +654,7 @@ async function main() {
     rawResearch: "",
   };
   finalConfig.name = agentName as string;
-  (finalConfig as any).selfUpdateIntervalHours = parseInt(result.answers.selfUpdateIntervalHours as string) || 6;
+  (finalConfig as any).selfUpdateIntervalHours = 6;
   (finalConfig as any).joinSwarm = result.answers.joinSwarm === true;
   (finalConfig as any).skipPermissions = result.answers.skipPermissions === true;
   (finalConfig as any).answers = result.answers;

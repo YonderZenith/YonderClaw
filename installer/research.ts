@@ -118,8 +118,8 @@ export type ClawConfig = {
 
 function formatAnswerLines(answers: Record<string, string | boolean>): string {
   const excluded = new Set([
-    "taskDescription", "toolsUsed", "autonomyLevel", "volume",
-    "specialInstructions", "selfUpdateIntervalHours",
+    "taskDescription", "toolsUsed", "autonomyLevel",
+    "specialInstructions", "operatorShortName",
     "addDesktopShortcut", "skipPermissions", "joinSwarm",
   ]);
   const entries = Object.entries(answers)
@@ -140,7 +140,7 @@ The agent is named **${agentName}**. In about five minutes it will wake up for t
 
 ## THE OPERATOR
 
-${agentName} is being commissioned by **${systemInfo.user.username}**, running on ${systemInfo.os.platform} ${systemInfo.os.release} (${systemInfo.os.arch}), ${systemInfo.hardware.cpus} CPUs / ${systemInfo.hardware.ram} RAM / GPU ${systemInfo.hardware.gpu}. Available runtime: Node.js ${systemInfo.node.version}${systemInfo.docker.installed ? ", Docker " + systemInfo.docker.version : ""}${systemInfo.python.installed ? ", Python " + systemInfo.python.version : ""}. Workspace: ${systemInfo.paths.workspace}.
+${agentName} is being commissioned by **${(answers.operatorShortName as string) || systemInfo.user.username}** — this is the name the agent should use in SOUL.md principles, greetings, escalations, and any text that refers to its operator. **Do not substitute the OS username or any other handle for this name.** System context: ${systemInfo.os.platform} ${systemInfo.os.release} (${systemInfo.os.arch}), ${systemInfo.hardware.cpus} CPUs / ${systemInfo.hardware.ram} RAM / GPU ${systemInfo.hardware.gpu}. Available runtime: Node.js ${systemInfo.node.version}${systemInfo.docker.installed ? ", Docker " + systemInfo.docker.version : ""}${systemInfo.python.installed ? ", Python " + systemInfo.python.version : ""}. Workspace: ${systemInfo.paths.workspace}.
 
 ## THE BRIEF (what the operator told us in the onboarding questionnaire)
 
@@ -149,7 +149,6 @@ ${agentName} is being commissioned by **${systemInfo.user.username}**, running o
 > **Day-to-day work:** ${answers.taskDescription || "(not specified — use the template description as the job)"}
 > **Tools the operator already uses:** ${answers.toolsUsed || "(not specified)"}
 > **Autonomy setting:** ${answers.autonomyLevel || "semi"} (supervised = suggest & wait; semi = act on routine, ask on important; full = handle everything, alert on issues only)
-> **Expected daily volume:** ${answers.volume || "(not specified)"}
 > **Hard rules & special instructions from the operator:** ${answers.specialInstructions || "(none — use judgment)"}
 >
 > **Template-specific answers:**
@@ -205,7 +204,7 @@ Given Seats 1-2, craft ${agentName}'s **operational system prompt** (the \`syste
 - 400–800 words. No filler. Every sentence earns its place.
 
 ### Seat 4 — Operations Engineer (SRE mindset, chaos-tested)
-Autonomy = **${answers.autonomyLevel || "semi"}**, volume = **${answers.volume || "(not specified)"}**. Produce specific numbers with one-line justifications:
+Autonomy = **${answers.autonomyLevel || "semi"}**. Infer expected throughput from the mission and task description; cite your reasoning. Produce specific numbers with one-line justifications:
 - \`maxActionsPerHour\`
 - \`maxActionsPerDay\`
 - \`circuitBreakerThreshold\` (error rate at which the agent halts itself)

@@ -185,6 +185,36 @@ Once the installer can commission a Day-1 brain, the next risk is losing it. An 
 
 **Test coverage extended to 47/47** — added two layers: (1) nested-project false-positive check (project at `.../data/MyAgent/`, asserts `src/db.ts` still rewrites while `data/state.json` still preserves); (2) full `updateModules` subprocess test that spawns the real installer via `npx tsx installer/index.ts --update-modules <tmp>` and verifies CLAUDE.md byte-equality, state/SOUL/.env survival, `src/db.ts` rewrite, and that `UPGRADE-NOTES.md` + `data/.upgrade-pending.json` both land. The CLAUDE.md duplication bug would have been caught by this integration test alone.
 
+### Phase 4.6 — Installer question audit (2026-04-20)
+Cut questions that didn't do real work so the operator only answers things that actually shape the agent.
+
+**Removed (decorative, not wired end-to-end):**
+- `dailyLimit` (Outreach) — max emails per day. Never fed any rate limiter; the Commissioning Board sets `maxActionsPerDay` from autonomy + task context.
+- `outputFormat` (Research) — three options but only `markdown` was wired; `email` and `notion` silently fell through since the installer never collected the creds they'd need.
+- `postsPerDay` (Social) — decorative like `dailyLimit`. Board decides posting cadence from content strategy.
+- `volume` (Universal) — free-text "expected daily volume". Was fed into Seat 4 of the Board as a raw string; now Seat 4 infers throughput from the mission and task description with explicit cite-your-reasoning instruction.
+- `selfUpdateIntervalHours` (Universal) — cadence for the agent's self-optimization cron. Hardcoded to 6 hours (the recommended default) across `core-scaffold.ts`, `module-loader.ts`, and `scaffold-from-config.ts`; operators weren't tuning this in practice and the question cluttered the flow.
+
+**Kept but reworded:**
+- `toolsUsed` — "What tools/platforms do you currently use?" now labeled **optional** with `defaultValue: ""` and skipped from the answers map when blank, so the Board doesn't see `(not specified)` noise for operators with no existing stack.
+
+**Downstream cleanup:**
+- `scaffold-from-config.ts::buildSystemPrompt` — removed the `if (cfg.volume) p.push("Volume: " + cfg.volume)` line so the fallback skeleton prompt stays clean when volume isn't collected.
+- `research.ts::buildMetaPrompt` — removed the `Expected daily volume:` line from the brief and the `volume = ...` parameter from Seat 4's charge. Seat 4 now has an explicit instruction to infer throughput from mission + task and cite reasoning.
+- `research.ts::formatAnswerLines` — trimmed `volume` and `selfUpdateIntervalHours` from the exclusion set (they're no longer in the answers map, so the exclusion was dead code).
+- `index.ts` post-Board finalConfig assembly — replaced `parseInt(result.answers.selfUpdateIntervalHours) || 6` with literal `6` since the answer no longer exists.
+
+**Question count:** went from 13-15 questions (template-dependent) to 10-12. Universal tail went from 5 → 4.  Global settings went from 4 → 3.
+
+### Phase 4.7 — Operator short-name collection (2026-04-20)
+Fixes Brian's BUG-2026-04-20 where the Commissioning Board baked the Windows/OS username (`treve` in Brian's case) into SOUL.md principles because SOUL.md is written at install time — before the first-launch checklist collects the real operator name.
+
+- **`questionnaire.ts`** — new universal prompt inserted between project name and template-specific questions: *"What should the agent call you?"* (short name / first name / handle). Stored as `answers.operatorShortName`; pre-populated into the answers map so downstream code paths pick it up without a second lookup.
+- **`research.ts::buildMetaPrompt`** — THE OPERATOR section now consumes `answers.operatorShortName || systemInfo.user.username`, with explicit instruction to the Board: *"this is the name the agent should use in SOUL.md principles, greetings, escalations. Do not substitute the OS username or any other handle."* The OS username remains as fallback only if the prompt is skipped.
+- **`research.ts::formatAnswerLines`** — `operatorShortName` added to the excluded set so it doesn't duplicate in the "Template-specific answers" bullet list.
+
+Root cause was the OS username leaking into LLM synthesis via `systemInfo.user.username` at line 143. Brian's preferred fix was Option A (placeholder tokens until first-launch); we went with his Option B (collect before Board) because it gives the Board real data to personalize Day-1 text, not generic tokens.
+
 ### Phase 4.5 — Docs polish (COMPLETE 2026-04-19)
 Final pass on `docs/index.html` (GitHub Pages site) for release readiness:
 - **Architecture diagram rebuilt as 7-zone feedback-loop map** — replaced the old tree-style SVG (CLAUDE.md → state.json → dashboard) with a graph grounded in live core-module code: State Layer, Memory Spider-Web (hub = `reboot-prompt.md`, spokes to journey_log / decision-log / logic-log / reflections / stuck-patterns / CAPABILITIES), 5-Step Cycle (Read State → Read Context → Execute → Update State → Log Cycle), 5 Background Crons with real cadences (heartbeat /5m, sync-context /30m, health-check /1h, persistence-audit /1h, self-update /6h), 9-Question Persistence Audit, SQLite Truth Layer, Commissioning Board. Animated arrows show the feedback loops (cron → audit → state correction; cycle → memory write → context refresh). Subtitle updated to match.

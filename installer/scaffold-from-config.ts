@@ -258,7 +258,6 @@ function buildSystemPrompt(cfg: any): string {
   if (cfg.autonomy === "supervised") p.push("Always suggest and wait for approval.");
   if (cfg.autonomy === "full") p.push("Fully autonomous. Alert on errors only.");
   if (cfg.autonomy === "semi") p.push("Act on routine. Ask on important.");
-  if (cfg.volume) p.push("Volume: " + cfg.volume);
   if (cfg.specialInstructions) p.push("Special: " + cfg.specialInstructions);
   if (cfg.clawType === "outreach") {
     if (cfg.senderName) p.push("Send as: " + cfg.senderName);
