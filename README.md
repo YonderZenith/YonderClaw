@@ -15,7 +15,7 @@
   <a href="#quick-start"><img src="https://img.shields.io/badge/get_started-00BEEA?style=for-the-badge&logo=rocket&logoColor=white" alt="Get Started" /></a>
   <a href="https://yonderzenith.github.io/YonderClaw/"><img src="https://img.shields.io/badge/docs-00D9FF?style=for-the-badge&logo=readthedocs&logoColor=white" alt="Docs" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-10B981?style=for-the-badge" alt="MIT License" /></a>
-  <img src="https://img.shields.io/badge/version-3.7.0-FFD700?style=for-the-badge" alt="Version 3.7.0" />
+  <img src="https://img.shields.io/badge/version-3.7.1-FFD700?style=for-the-badge" alt="Version 3.7.1" />
 </p>
 
 <p align="center">
@@ -29,11 +29,13 @@
 
 ---
 
-## 🆕 What's New in v3.7.0 — Smooth Start-to-Finish
+## 🆕 What's New in v3.7.1 — Smooth Start-to-Finish (Installer Polish)
 
 > **One command. One window. One running agent.**
 >
-> Every previous version ended at a terminal prompt. **v3.7.0 ends at a live desktop dashboard** with your agent already resumed and thinking out loud.
+> Every previous version ended at a terminal prompt. **v3.7.x ends at a live desktop dashboard** with your agent already resumed and thinking out loud.
+>
+> **v3.7.1** rolls up v3.7.0's feature story with five first-install cleanups (qis-autoconnect watchdog, always-on skip-permissions, self-resolving launcher paths, dual dashboard/headless launchers per project folder, hyperswarm dep safety net) plus time-injection + heartbeat-refresh scope. See `CHANGELOG.md` for the full diff.
 
 - 🖥️ **Bundled Tauri desktop** — native window (Windows today; macOS + Linux next) with a split-pane live terminal (xterm.js + ConPTY) and a schema-aware dashboard
 - 🔁 **Deterministic resume** — the installer captures the agent's Claude Code session at install time; the desktop app resumes by UUID on every launch, so your agent has continuous memory from cycle one
