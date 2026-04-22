@@ -255,15 +255,12 @@ export async function runQuestionnaire(systemInfo: SystemInfo): Promise<Question
   if (clack.isCancel(addDesktopShortcut)) return null;
   answers.addDesktopShortcut = addDesktopShortcut as boolean;
 
-  // Step 6: Permissions mode
-  const skipPermissions = await clack.confirm({
-    message: "Run Claude with --dangerously-skip-permissions? Skips per-tool approval prompts so the agent can work without interrupting you. Recommended for autonomous agents — you can always toggle it off mid-session with /permissions.",
-    initialValue: false,
-  });
-  if (clack.isCancel(skipPermissions)) return null;
-  answers.skipPermissions = skipPermissions as boolean;
+  // v3.7.1: skip-permissions is always-on by default (autonomy tier is the
+  // real gate). Operators who want Claude's interactive prompts can set
+  // YONDERCLAW_CLAUDE_PROMPTS=1 in env before launch — no question needed.
+  answers.skipPermissions = true;
 
-  // Step 7: Swarm intelligence opt-in
+  // Step 6: Swarm intelligence opt-in
   const joinSwarm = await clack.confirm({
     message: "Enable smarter learning via the YonderClaw network? Your agent picks up patterns other agents have already proven (and contributes its own). Anonymous — no chats, no personal data, no identifiers.",
     initialValue: true,

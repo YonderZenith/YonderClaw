@@ -1,0 +1,62 @@
+#!/usr/bin/env node
+/**
+ * scripts/time-injector.cjs
+ *
+ * Claude Code UserPromptSubmit hook — outputs current wall-clock time in multiple
+ * formats so the agent has fresh time-awareness on EVERY prompt (not just session start).
+ *
+ * Solves the classic AI time-blindness: models only see the session's initial timestamp
+ * + whatever the user says; without a hook they never know "the time NOW." With this hook,
+ * every user prompt gets a <current-time> block prepended → the model can't drift on time.
+ *
+ * Wired via .claude/settings.local.json "hooks.UserPromptSubmit" → this script runs
+ * BEFORE the model sees the prompt; stdout is injected into the context.
+ *
+ * Fields emitted:
+ *   - UTC       (ISO-8601, Zulu)
+ *   - Local     (operator timezone — Chris = America/Phoenix)
+ *   - Day       (day of week, human-readable)
+ *   - Epoch     (seconds since 1970-01-01 UTC — useful for duration math)
+ *   - Session   (seconds since session start if SESSION_START_EPOCH env var set)
+ *
+ * Ship status: v0.1 · Brian-Brain subject-1 install 2026-04-21 (D-013).
+ * When the v2 brain architecture ships as a YonderClaw default, this script + hook
+ * become a core capability every new claw gets Day-1.
+ */
+
+const OPERATOR_TZ = process.env.OPERATOR_TIMEZONE || "America/Phoenix";
+const now = new Date();
+const epochSec = Math.floor(now.getTime() / 1000);
+
+const utc = now.toISOString();
+const localStr = now.toLocaleString("en-US", {
+  timeZone: OPERATOR_TZ,
+  year: "numeric",
+  month: "short",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+});
+const dayOfWeek = now.toLocaleString("en-US", { weekday: "long" });
+
+// Session duration (optional — set SESSION_START_EPOCH at session boot if you want this)
+let sessionLine = "";
+if (process.env.SESSION_START_EPOCH) {
+  const startEpoch = parseInt(process.env.SESSION_START_EPOCH, 10);
+  if (!isNaN(startEpoch)) {
+    const sessionSec = epochSec - startEpoch;
+    const sessionMin = Math.floor(sessionSec / 60);
+    const sessionHr = Math.floor(sessionMin / 60);
+    sessionLine = `\nSession:    ${sessionHr}h ${sessionMin % 60}m (${sessionSec}s since boot)`;
+  }
+}
+
+// Output format — compact, tag-delimited so the model parses it as structured context.
+console.log(`<current-time>
+UTC:        ${utc}
+Local (${OPERATOR_TZ}): ${localStr}
+Day:        ${dayOfWeek}
+Epoch:      ${epochSec}${sessionLine}
+</current-time>`);

@@ -1,6 +1,6 @@
 {
   "name": "@yonderclaw/desktop-win32-x64",
-  "version": "3.7.0",
+  "version": "3.7.1",
   "description": "YonderClaw desktop binary for Windows x64 — loaded as an optional dependency of create-yonderclaw",
   "author": "Yonder Zenith LLC",
   "license": "MIT",

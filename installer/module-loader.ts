@@ -290,14 +290,31 @@ export function mergeNpmScripts(packageJson: any, modules: LoadedModule[]): void
 }
 
 /**
- * Merge dependencies from all modules into package.json
+ * Merge dependencies from all modules into package.json.
+ *
+ * v3.7.1: initialize packageJson.dependencies if missing before merging —
+ * Valorie's fresh install (2026-04-20) shipped without `hyperswarm` in
+ * package.json, which broke swarm/dht-client.ts at import time. The root
+ * cause was either (a) a module-load failure that silently skipped the swarm
+ * manifest or (b) a reshape of package.json that dropped the field after
+ * merge. Forcing the key to exist before Object.assign is a cheap insurance
+ * policy against either regression.
  */
 export function mergeDependencies(packageJson: any, modules: LoadedModule[]): void {
+  if (!packageJson.dependencies || typeof packageJson.dependencies !== "object") {
+    packageJson.dependencies = {};
+  }
   for (const mod of modules) {
     const deps = mod.manifest.contributes.dependencies;
     if (deps) {
       Object.assign(packageJson.dependencies, deps);
     }
+  }
+  // Final safety net: if the swarm module ran but somehow hyperswarm didn't
+  // land, backfill it. Matches the version pinned in swarm/yonderclaw-module.json.
+  const hasSwarm = modules.some((m) => m.manifest.name === "swarm");
+  if (hasSwarm && !packageJson.dependencies.hyperswarm) {
+    packageJson.dependencies.hyperswarm = "^4.17.0";
   }
 }
 

@@ -7,9 +7,24 @@
 // this agent before" — the user chooses by hitting Enter on the prompt. We
 // default to --resume-first and never silently pick --continue without the user
 // seeing the mode in the UI.
+//
+// v3.7.1: `--dangerously-skip-permissions` is ALWAYS passed when the desktop
+// spawns Claude for a YonderClaw project. The real permission gate is the
+// operator's autonomy tier in data/state.json, not Claude Code's interactive
+// prompt layer — agents are cron-driven and self-driven, no human is standing
+// by to click "yes" on every tool call. Operators who prefer Claude's prompts
+// can set YONDERCLAW_CLAUDE_PROMPTS=1 in the environment before launch.
 
-import { findClaude, hasAnySession, readSessionId, readSkipPermissions } from "./tauri";
+import { findClaude, hasAnySession, readSessionId } from "./tauri";
 import type { LaunchMode } from "../store";
+
+function skipPermsFlag(): string[] {
+  // Operator opt-out: they can re-enable Claude's interactive prompts by setting
+  // the env var. The Tauri shell reads process.env on boot; Vite strips unknown
+  // names so we check the one we documented rather than a wildcard.
+  const opt = (import.meta.env?.VITE_YONDERCLAW_CLAUDE_PROMPTS as string | undefined) ?? "";
+  return opt === "1" ? [] : ["--dangerously-skip-permissions"];
+}
 
 export async function resolveLaunch(projectDir: string): Promise<{
   claudePath: string;
@@ -19,8 +34,7 @@ export async function resolveLaunch(projectDir: string): Promise<{
 }> {
   const claudePath = await findClaude();
   const sessionId = await readSessionId(projectDir);
-  const skipPerms = await readSkipPermissions(projectDir);
-  const skipFlag = skipPerms ? ["--dangerously-skip-permissions"] : [];
+  const skipFlag = skipPermsFlag();
 
   if (sessionId) {
     return {

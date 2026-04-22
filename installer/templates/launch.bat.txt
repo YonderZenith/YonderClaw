@@ -98,19 +98,26 @@ if not exist "data\qis-deposit-log.json" (
     echo.
 )
 
+REM v3.7.1: --dangerously-skip-permissions is always passed. YonderClaw agents
+REM are cron-driven and self-driven — the permission gate is the operator's
+REM autonomy tier in data/state.json, not Claude Code's interactive prompts.
+REM Operators who prefer prompts can set YONDERCLAW_CLAUDE_PROMPTS=1 in env.
+set "SKIP_PERMS_ARG= --dangerously-skip-permissions"
+if "%YONDERCLAW_CLAUDE_PROMPTS%"=="1" set "SKIP_PERMS_ARG="
+
 if not "!RESUME_ID!"=="" (
     echo   Resuming __AGENT_NAME__ ^(session !RESUME_ID:~0,8!…^)...
     echo.
-    "!CLAUDE_CMD!" --resume !RESUME_ID!__SKIP_PERMS_ARG__
+    "!CLAUDE_CMD!" --resume !RESUME_ID!!SKIP_PERMS_ARG!
 ) else if "!HAS_SESSION!"=="1" (
     echo   Resuming __AGENT_NAME__ ^(most recent session^)...
     echo.
-    "!CLAUDE_CMD!" --continue__SKIP_PERMS_ARG__
+    "!CLAUDE_CMD!" --continue!SKIP_PERMS_ARG!
 ) else (
     echo   First launch — initializing __AGENT_NAME__...
     echo   Claude will read CLAUDE.md and SOUL.md for context.
     echo.
-    "!CLAUDE_CMD!"__SKIP_PERMS_ARG__
+    "!CLAUDE_CMD!"!SKIP_PERMS_ARG!
 )
 
 echo.

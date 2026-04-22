@@ -874,22 +874,72 @@ async function main() {
   const installerDirEarly = path.dirname(new URL(import.meta.url).pathname);
   const desktopBinaryPath = findDesktopBinary(installerDirEarly);
 
-  function buildLauncherBat(): string {
+  // v3.7.1: every project folder gets BOTH launchers by default
+  // (dashboard + headless CLI). Desktop-root is an optional convenience clone.
+  // In-folder launchers use %~dp0 so they survive a project-folder move.
+  // Desktop-root launcher uses the absolute projectDir (must be rewritten if
+  // the project moves).
+  //
+  // The absolute path to yonderclaw-desktop.exe is resolved at install time
+  // from findDesktopBinary(). No D:\ hardcoding — uses the real location on
+  // this machine.
+  function buildDashboardLauncher(absoluteProjectDir: string | null): string {
+    // absoluteProjectDir null → use %~dp0 (self-resolving, for in-folder file).
+    // non-null → bake the absolute path (for Desktop-root convenience shortcut).
+    const projectDirExpr = absoluteProjectDir === null
+      ? ['set "YONDERCLAW_PROJECT_DIR=%~dp0"',
+         'if "%YONDERCLAW_PROJECT_DIR:~-1%"=="\\" set "YONDERCLAW_PROJECT_DIR=%YONDERCLAW_PROJECT_DIR:~0,-1%"']
+      : [`set "YONDERCLAW_PROJECT_DIR=${absoluteProjectDir}"`];
     if (desktopBinaryPath) {
-      // Persistent desktop launcher: set env, start the .exe detached, exit immediately.
-      // Quoting `start ""` as the empty title prevents Windows from treating the path as the title.
       return [
         "@echo off",
-        `set "YONDERCLAW_PROJECT_DIR=${projectDir}"`,
+        "REM YonderClaw dashboard launcher (desktop GUI). Generated v3.7.1.",
+        ...projectDirExpr,
         `start "" "${desktopBinaryPath}"`,
         "",
       ].join("\r\n");
     }
-    // Legacy fallback: keep terminal window open for the embedded launch.bat.
-    return `@echo off\r\nstart "" cmd /k "cd /d ""${projectDir}"" && scripts\\launch.bat"\r\n`;
+    // Fallback when no desktop binary: open the legacy HTML dashboard + run
+    // the headless CLI in a cmd window.
+    const cdTarget = absoluteProjectDir === null ? "%~dp0" : absoluteProjectDir;
+    return [
+      "@echo off",
+      "REM YonderClaw dashboard launcher — desktop binary not installed, using",
+      "REM HTML dashboard fallback. Install @yonderclaw/desktop-<platform> to upgrade.",
+      ...projectDirExpr,
+      `cd /d "${cdTarget}"`,
+      'if exist "dashboard.html" start "" "dashboard.html"',
+      "start \"\" cmd /k scripts\\launch.bat",
+      "",
+    ].join("\r\n");
   }
 
-  // Phase 5.5: Auto-start (Startup folder — no admin needed)
+  function buildHeadlessCliLauncher(absoluteProjectDir: string | null): string {
+    const cdTarget = absoluteProjectDir === null ? "%~dp0" : absoluteProjectDir;
+    return [
+      "@echo off",
+      "REM YonderClaw headless CLI launcher (no GUI). Generated v3.7.1.",
+      "REM Runs scripts/launch.bat directly — operator keeps the terminal window.",
+      `cd /d "${cdTarget}"`,
+      "cmd /k scripts\\launch.bat",
+      "",
+    ].join("\r\n");
+  }
+
+  // Always drop BOTH launchers inside the project folder.
+  const dashboardFilename = `Launch ${agentName} (dashboard).bat`;
+  const headlessFilename = `Launch ${agentName} (headless CLI - no dashboard).bat`;
+  try {
+    fs.writeFileSync(path.join(projectDir, dashboardFilename), buildDashboardLauncher(null));
+    fs.writeFileSync(path.join(projectDir, headlessFilename), buildHeadlessCliLauncher(null));
+    console.log(status.ok(`Project launchers: "${dashboardFilename}" + "${headlessFilename}"`));
+  } catch {
+    console.log(status.warn("Could not create in-folder launchers"));
+  }
+
+  // Phase 5.5: Auto-start (Startup folder — no admin needed). Uses the
+  // absolute-path dashboard launcher because Startup-folder .bats don't run
+  // from the project directory.
   if (wantAutoStart) {
     console.log(sectionHeader("Auto-Start Configuration"));
     const sessionName = (agentName as string).toLowerCase().replace(/[^a-z0-9]/g, "-");
@@ -898,7 +948,7 @@ async function main() {
       if (fs.existsSync(startupDir)) {
         fs.writeFileSync(
           path.join(startupDir, `YonderClaw-${sessionName}.bat`),
-          buildLauncherBat()
+          buildDashboardLauncher(projectDir)
         );
         console.log(status.ok("Auto-start on login: added to Startup folder"));
       }
@@ -907,25 +957,21 @@ async function main() {
     }
   }
 
-  // Phase 5.7: Shortcuts
-  const launcherContent = buildLauncherBat();
-
-  // Always create Agents folder launcher
+  // Phase 5.7: Convenience shortcuts (Desktop\Agents + optional Desktop-root)
   try {
     const agentsDir = path.join(systemInfo.user.desktop, "Agents");
     fs.mkdirSync(agentsDir, { recursive: true });
-    fs.writeFileSync(path.join(agentsDir, `Launch ${agentName}.bat`), launcherContent);
+    fs.writeFileSync(path.join(agentsDir, `Launch ${agentName}.bat`), buildDashboardLauncher(projectDir));
     console.log(status.ok(`Launcher: Desktop/Agents/Launch ${agentName}.bat`));
   } catch {
     console.log(status.warn("Could not create Agents folder launcher"));
   }
 
-  // Desktop shortcut if requested
   if (result.answers.addDesktopShortcut) {
     try {
       fs.writeFileSync(
         path.join(systemInfo.user.desktop, `${agentName}.bat`),
-        launcherContent
+        buildDashboardLauncher(projectDir)
       );
       console.log(status.ok(`Desktop shortcut: ${agentName}.bat`));
     } catch {

@@ -10,6 +10,12 @@
  * Why this matters: if you only update heartbeat at session boundaries, a
  * long-running session or a crashed session looks identical from the outside.
  * A 5-min touch closes that gap.
+ *
+ * v3.7.1 fix (Brian logic-log L-018): the cron previously wrote `current_focus`
+ * only, leaving `current_task` and `status` pinned at first-launch values
+ * forever. Operators checking heartbeat saw a stale `current_task` regardless
+ * of what the agent was actually working on. Now we carry `state.current_focus`
+ * → `heartbeat.current_task` and set `status: "active"` on every refresh.
  */
 
 import fs from "fs";
@@ -34,7 +40,7 @@ function main() {
 
   const heartbeat = readJson<Record<string, unknown>>(HEARTBEAT_PATH, {
     agent: "__AGENT_NAME__",
-    status: "running",
+    status: "active",
     health: "HEALTHY",
     cycle: 0,
   });
@@ -42,7 +48,9 @@ function main() {
   const state = readJson<Record<string, unknown>>(STATE_PATH, {});
 
   heartbeat.last_seen = now;
+  heartbeat.status = "active";
   if (typeof state.current_focus === "string") {
+    heartbeat.current_task = state.current_focus;
     heartbeat.current_focus = state.current_focus;
   }
   if (typeof state.next_priority_action === "string") {

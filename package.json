@@ -1,6 +1,6 @@
 {
   "name": "create-yonderclaw",
-  "version": "3.7.0",
+  "version": "3.7.1",
   "description": "YonderClaw — Autonomous AI Agent Platform by Yonder Zenith LLC",
   "type": "module",
   "bin": {
@@ -61,6 +61,6 @@
     "typescript": "^5.9.3"
   },
   "optionalDependencies": {
-    "@yonderclaw/desktop-win32-x64": "3.7.0"
+    "@yonderclaw/desktop-win32-x64": "3.7.1"
   }
 }

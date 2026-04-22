@@ -142,31 +142,30 @@ export function scaffoldProject(
   // Save initial prompt version to DB-init script
   writePromptInit(projectDir, config);
 
-  // Launch.bat — correct session directory handling
+  // Launch.bat — correct session directory handling.
+  // v3.7.1: the template hardcodes --dangerously-skip-permissions (YonderClaw
+  // agents are autonomous; the autonomy tier in state.json is the real gate).
+  // Operators can opt out by setting YONDERCLAW_CLAUDE_PROMPTS=1 in env —
+  // handled inside the .bat, no scaffold-time branching needed.
   const encodedPath = projectDir.replace(/[:/\\]/g, "-").replace(/^-/, "");
-  const skipPerms = (config as any).skipPermissions === true;
-  const skipPermsArg = skipPerms ? " --dangerously-skip-permissions" : "";
   const launchBat = readTemplate("launch.bat.txt")
     .replace(/__AGENT_NAME__/g, config.name)
     .replace(/__PROJECT_DIR__/g, projectDir)
     .replace(/__ENCODED_PATH__/g, encodedPath)
-    .replace(/__SESSION_NAME__/g, sessionName)
-    .replace(/__SKIP_PERMS_ARG__/g, skipPermsArg);
+    .replace(/__SESSION_NAME__/g, sessionName);
   fs.writeFileSync(path.join(projectDir, "scripts", "launch.bat"), launchBat);
 
-  // Launch config (read by the desktop binary so the React UI's PTY uses
-  // the same flag the legacy launch.bat would).
+  // Launch config (read by the desktop binary). v3.7.1: always true — kept as
+  // a file for the Rust read_skip_permissions fallback + operator introspection.
   fs.writeFileSync(
     path.join(projectDir, "data", "launch-config.json"),
-    JSON.stringify({ skipPermissions: skipPerms }, null, 2),
+    JSON.stringify({ skipPermissions: true }, null, 2),
   );
 
-  // Desktop launcher (opens in its own window)
-  const desktopLauncher = [
-    "@echo off",
-    `start "${config.name}" cmd /k "cd /d ""${projectDir}"" && scripts\\launch.bat"`,
-  ].join("\r\n");
-  fs.writeFileSync(path.join(projectDir, `Launch ${config.name}.bat`), desktopLauncher);
+  // v3.7.1: legacy single in-folder launcher removed. The main installer now
+  // emits both `Launch <Name> (dashboard).bat` + `Launch <Name> (headless CLI
+  // - no dashboard).bat` into the project folder via buildDashboardLauncher /
+  // buildHeadlessCliLauncher in index.ts (after the desktop binary is resolved).
 
   // Dashboard opener (app mode)
   const dashUrl = path.join(projectDir, "dashboard.html").replace(/\\/g, "/");
@@ -187,18 +186,49 @@ export function scaffoldProject(
   // ── QIS Swarm Module (always installed) ─────────────────────────
   copySwarmFiles(projectDir, config);
 
-  // QIS auto-connect script — runs on first boot OR when agent enables swarm later
+  // QIS auto-connect script — runs on first boot OR when agent enables swarm later.
+  //
+  // CRITICAL PROPERTIES (v3.7.1 rewrite — root-cause for the "launcher hangs forever"
+  // bug Brian reported on 2026-04-22): this script MUST terminate cleanly on every
+  // path, including when the relay rejects a deposit or the DHT can't reach peers.
+  //   (a) deposit failures logged but do not throw — launcher moves on.
+  //   (b) data/qis-deposit-log.json is ALWAYS written in finally — so the launcher's
+  //       gate (`if not exist data\qis-deposit-log.json`) doesn't re-hang on retry.
+  //   (c) qis.shutdown() is called in finally to close the DHT socket + sync scheduler.
+  //   (d) explicit process.exit(0) at the end, in case a lingering timer/handle
+  //       would otherwise keep the Node event loop alive.
+  //   (e) a 25-second watchdog force-exits if init() or deposit() hang on I/O.
   const autoconnectContent = [
     '/**',
     ' * QIS Auto-Connect — initializes identity and connects to relay.',
     ' * Runs automatically on first boot (if opted in) or manually via:',
     ' *   npx tsx scripts/qis-autoconnect.ts          — just init identity',
     ' *   npx tsx scripts/qis-autoconnect.ts --enable  — enable swarm (tier 0→2) + connect',
+    ' *',
+    ' * Must terminate cleanly on ALL paths (the launcher blocks on this script).',
     ' */',
+    'import fs from "fs";',
+    'import path from "path";',
     'import { qis } from "../swarm/qis-client.js";',
     'import { initConfig, updateConfig } from "../swarm/qis-config.js";',
     '',
+    'const DEPOSIT_LOG_PATH = path.join(process.cwd(), "data", "qis-deposit-log.json");',
+    'const WATCHDOG_MS = 25_000;',
+    '',
+    'function writeGate(payload: Record<string, unknown>): void {',
+    '  try {',
+    '    fs.mkdirSync(path.dirname(DEPOSIT_LOG_PATH), { recursive: true });',
+    '    fs.writeFileSync(DEPOSIT_LOG_PATH, JSON.stringify(payload, null, 2));',
+    '  } catch (e: any) {',
+    '    console.error("[QIS] Could not write deposit log:", e?.message ?? e);',
+    '  }',
+    '}',
+    '',
     'async function autoconnect() {',
+    '  let agentId = "(unknown)";',
+    '  let result: "ok" | "deposit_skipped" | "deposit_failed" | "init_failed" | "dormant" = "init_failed";',
+    '  let lastError: string | null = null;',
+    '',
     '  try {',
     '    // If --enable flag, upgrade tier from 0 to 2 before full init',
     '    if (process.argv.includes("--enable")) {',
@@ -208,29 +238,106 @@ export function scaffoldProject(
     '    }',
     '',
     '    const status = await qis.init();',
+    '    agentId = qis.getAgentId();',
+    '',
     '    if (status.tier === 0) {',
     '      console.log("[QIS] Swarm is dormant (tier 0). Run with --enable to activate.");',
+    '      result = "dormant";',
     '      return;',
     '    }',
     '',
-    '    const agentId = qis.getAgentId();',
-    '    await qis.deposit({',
-    '      bucket: "claw.first-boot.experience",',
-    '      signal: "positive",',
-    '      confidence: 0.8,',
-    `      insight: \`YonderClaw first boot complete. Agent \${agentId} online. Platform: \${process.platform}, Node: \${process.version}.\`,`,
-    '      context: { platform: process.platform, node_version: process.version },',
-    '      metrics: { boot_timestamp: Date.now() },',
-    '    });',
-    '    console.log("[QIS] Connected to relay. Agent ID:", agentId);',
+    '    // Inner try: deposit failure is tolerated, not fatal. Bucket may not be',
+    '    // registered on the relay yet — that is fine for a first boot.',
+    '    try {',
+    '      await qis.deposit({',
+    '        bucket: "claw.first-boot.experience",',
+    '        signal: "positive",',
+    '        confidence: 0.8,',
+    `        insight: \`YonderClaw first boot complete. Agent \${agentId} online. Platform: \${process.platform}, Node: \${process.version}.\`,`,
+    '        context: { platform: process.platform, node_version: process.version },',
+    '        metrics: { boot_timestamp: Date.now() },',
+    '      });',
+    '      console.log("[QIS] Connected to relay. Agent ID:", agentId);',
+    '      result = "ok";',
+    '    } catch (depErr: any) {',
+    '      lastError = depErr?.message ?? String(depErr);',
+    '      console.log("[QIS] First-boot deposit skipped (bucket not yet provisioned) — agent is still connected. Details:", lastError);',
+    '      result = "deposit_skipped";',
+    '    }',
     '  } catch (e: any) {',
-    '    console.error("[QIS] Auto-connect failed:", e.message);',
+    '    lastError = e?.message ?? String(e);',
+    '    console.error("[QIS] Auto-connect init failed:", lastError);',
+    '    result = "init_failed";',
+    '  } finally {',
+    '    // Always write the gate file so the launcher does not re-run this script',
+    '    // every boot. Subsequent runs (e.g. `npm run qis-connect`) still work.',
+    '    writeGate({',
+    '      agent_id: agentId,',
+    '      last_attempt: new Date().toISOString(),',
+    '      result,',
+    '      error: lastError,',
+    '    });',
+    '    // Close DHT socket + stop sync scheduler so the Node event loop can drain.',
+    '    try { await qis.shutdown(); } catch { /* swallow — we are exiting anyway */ }',
     '  }',
     '}',
     '',
-    'autoconnect();',
+    '// Watchdog: if init/deposit hang on network I/O, force-exit after WATCHDOG_MS',
+    '// so the launcher never blocks forever. The gate will be written on next boot.',
+    'const watchdog = setTimeout(() => {',
+    '  console.error(`[QIS] Watchdog fired after ${WATCHDOG_MS}ms — forcing exit.`);',
+    '  writeGate({ agent_id: "(unknown)", last_attempt: new Date().toISOString(), result: "watchdog_timeout", error: null });',
+    '  process.exit(0);',
+    '}, WATCHDOG_MS);',
+    'watchdog.unref();',
+    '',
+    'autoconnect().finally(() => {',
+    '  clearTimeout(watchdog);',
+    '  // Explicit exit: even after qis.shutdown(), some sockets/timers linger.',
+    '  // The launcher treats non-zero exit as a soft failure — always exit 0 here,',
+    '  // the gate file records the real outcome.',
+    '  process.exit(0);',
+    '});',
   ].join("\n");
   fs.writeFileSync(path.join(projectDir, "scripts", "qis-autoconnect.ts"), autoconnectContent);
+
+  // v3.7.1: time-injection hook (Brian's bundle, adopted as default).
+  // Claude Code's UserPromptSubmit hook injects a <current-time> block before
+  // every human prompt so the model never drifts on wall-clock time. Fires on
+  // human-typed prompts only (CronCreate wake-ups don't trigger the hook — for
+  // those, autonomous wake templates should call `node scripts/time-injector.cjs`
+  // as the first step of their prompt).
+  fs.writeFileSync(
+    path.join(projectDir, "scripts", "time-injector.cjs"),
+    readTemplate("time-injector.cjs.txt"),
+  );
+
+  // Create .claude/settings.local.json with the UserPromptSubmit hook + merge
+  // safely with any hooks that another installer phase might have written.
+  const claudeLocalDir = path.join(projectDir, ".claude");
+  fs.mkdirSync(claudeLocalDir, { recursive: true });
+  const settingsLocalPath = path.join(claudeLocalDir, "settings.local.json");
+  let settingsLocal: any = {};
+  try {
+    if (fs.existsSync(settingsLocalPath)) {
+      settingsLocal = JSON.parse(fs.readFileSync(settingsLocalPath, "utf-8"));
+    }
+  } catch { settingsLocal = {}; }
+  settingsLocal.hooks = settingsLocal.hooks || {};
+  const existingUps = Array.isArray(settingsLocal.hooks.UserPromptSubmit)
+    ? settingsLocal.hooks.UserPromptSubmit : [];
+  const alreadyWired = existingUps.some((entry: any) =>
+    Array.isArray(entry?.hooks) && entry.hooks.some((h: any) =>
+      typeof h?.command === "string" && h.command.includes("time-injector.cjs")
+    ),
+  );
+  if (!alreadyWired) {
+    existingUps.push({
+      hooks: [{ type: "command", command: "node scripts/time-injector.cjs", timeout: 5 }],
+    });
+  }
+  settingsLocal.hooks.UserPromptSubmit = existingUps;
+  fs.writeFileSync(settingsLocalPath, JSON.stringify(settingsLocal, null, 2));
 
   // state.json — shared brain between sessions (AXIOM + Outrace pattern)
   const stateJson = readTemplate("state.json.txt")
