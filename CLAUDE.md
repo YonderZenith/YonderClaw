@@ -9,10 +9,10 @@ installer/index.ts        — Main installer + --update-modules CLI
 installer/module-loader.ts — Module discovery, CLAUDE.md generation, template processing
 installer/modules/        — Module packages (hive/, swarm/, scheduler/, outreach/, core/)
 desktop/                  — Tauri 2 + React UI bundled with every install (v3.7.0+)
-package.json              — v3.7.1, npm: create-yonderclaw
+package.json              — v3.7.2, npm: create-yonderclaw
 
 ## Workspace
-This is `YonderClaw-v3.7.0/`. The legacy `MetaClaw-v3.3/` workspace is the rollback anchor — DO NOT edit it; all new work happens here.
+This is `YonderClaw-v3.7.2-dashboard/` — the v3.7.2 fork off v3.7.1. `MetaClaw-v3.3/` is the rollback anchor for v3.7.1 and `YonderClaw-v3.7.0/` is the earlier snapshot — DO NOT edit either; all new work happens here. Cherry-pick into `MetaClaw-v3.3/` after CT sign-off on live smoke.
 
 ## Key Functions (module-loader.ts)
 - discoverModules()           — finds available modules in installer/modules/

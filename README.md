@@ -15,7 +15,7 @@
   <a href="#quick-start"><img src="https://img.shields.io/badge/get_started-00BEEA?style=for-the-badge&logo=rocket&logoColor=white" alt="Get Started" /></a>
   <a href="https://yonderzenith.github.io/YonderClaw/"><img src="https://img.shields.io/badge/docs-00D9FF?style=for-the-badge&logo=readthedocs&logoColor=white" alt="Docs" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-10B981?style=for-the-badge" alt="MIT License" /></a>
-  <img src="https://img.shields.io/badge/version-3.7.1-FFD700?style=for-the-badge" alt="Version 3.7.1" />
+  <img src="https://img.shields.io/badge/version-3.7.2-FFD700?style=for-the-badge" alt="Version 3.7.2" />
 </p>
 
 <p align="center">
@@ -29,19 +29,18 @@
 
 ---
 
-## 🆕 What's New in v3.7.1 — Smooth Start-to-Finish (Installer Polish)
+## 🆕 What's New in v3.7.2 — Per-Agent Custom Dashboard
 
-> **One command. One window. One running agent.**
+> **One command. One window. One running agent. Your agent's own dashboard.**
 >
-> Every previous version ended at a terminal prompt. **v3.7.x ends at a live desktop dashboard** with your agent already resumed and thinking out loud.
->
-> **v3.7.1** rolls up v3.7.0's feature story with five first-install cleanups (qis-autoconnect watchdog, always-on skip-permissions, self-resolving launcher paths, dual dashboard/headless launchers per project folder, hyperswarm dep safety net) plus time-injection + heartbeat-refresh scope. See `CHANGELOG.md` for the full diff.
+> v3.7.0 shipped the bundled desktop. v3.7.1 polished the install. **v3.7.2 makes every agent's dashboard its own** — the Commissioning Board synthesizes a layout tuned to what the claw actually measures, and the Tauri UI renders it visibly differently per agent. Same YZ brand floor on every window (logo + "YonderClaw by Yonder Zenith" wordmark); everything else is yours to edit.
 
-- 🖥️ **Bundled Tauri desktop** — native window (Windows today; macOS + Linux next) with a split-pane live terminal (xterm.js + ConPTY) and a schema-aware dashboard
-- 🔁 **Deterministic resume** — the installer captures the agent's Claude Code session at install time; the desktop app resumes by UUID on every launch, so your agent has continuous memory from cycle one
-- 🛡️ **Shape-validated launch** — launch.bat rejects garbage / BOM / legacy session IDs before they reach `claude --resume`, so the UI never crash-loops
-- 👀 **Live dashboard** — `data/dashboard.json` is watched via ReadDirectoryChangesW; no polling, no refresh button, changes appear as soon as the agent writes them
-- ✅ **17 hardening tests + 6 E2E tests + 3 smoke variants** all green before we called it done
+- 🎨 **Board-synthesized layout** — `data/dashboard-config.json` is authored at install time from the Commissioning Board's plan. Outreach claws get cyan + email KPIs; research gets purple + sources/cost; support gets green + SLA/queue; social gets orange + engagement; custom gets the starter canvas
+- 🧩 **9 panel types** — `kpi-card`, `metric-series`, `activity-feed`, `stat-grid`, `network-viz`, `timeline`, `status-list`, `progress-bar`, `custom-text`. Add, remove, rearrange at will
+- ⚡ **<50 ms hot reload** — edit `data/dashboard-config.json` (by hand or `node scripts/dashboard-helper.cjs add ...`) and the UI updates instantly. Rust `notify` crate watches both config + live-metrics files
+- 🖥️ **Bundled Tauri desktop** — native window (Windows today; macOS + Linux next) with embedded `claude --resume` terminal + LayoutFrame rendering your panels
+- 🔁 **Deterministic resume** — install-time Claude Code session capture; the desktop resumes by UUID on every launch, so your agent has continuous memory from cycle one
+- ✅ **All v3.7.1 fixes carried forward** — qis-autoconnect watchdog, skip-permissions always-on (env opt-out), self-resolving launcher paths, dual launchers per folder, hyperswarm safety net, time-injection bundle
 
 ```bash
 # That's literally it.

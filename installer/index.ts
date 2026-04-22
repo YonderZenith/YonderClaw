@@ -73,7 +73,7 @@ function findDesktopBinary(installerDir: string): string | null {
 
   // (3) Post-install cache
   const home = process.env.USERPROFILE || process.env.HOME || "";
-  const pkgVersion = "3.7.1";
+  const pkgVersion = "3.7.2";
   if (home) {
     const cached = path.join(home, ".yonderclaw", "bin", pkgVersion, binName);
     if (fs.existsSync(cached)) return cached;
@@ -804,7 +804,7 @@ async function main() {
               session_id: sessionId,
               created_at: new Date().toISOString(),
               seed_prompt: seed,
-              source: "installer-v3.7.1",
+              source: "installer-v3.7.2",
               mode,
             }, null, 2)
           );
