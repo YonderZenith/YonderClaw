@@ -1,0 +1,12 @@
+{
+  "note": "Default support dashboard. Loaded when the Commissioning Board is skipped or produced no panels. Agent can edit freely after install.",
+  "panels": [
+    { "id": "kpi-handled", "type": "kpi-card", "title": "Tickets handled", "position": "top", "priority": 10, "dataKey": "support.tickets_handled", "config": { "format": "int" } },
+    { "id": "kpi-resolved", "type": "kpi-card", "title": "Auto-resolved", "position": "top", "priority": 20, "dataKey": "support.auto_resolved", "config": { "format": "int" } },
+    { "id": "kpi-escalated", "type": "kpi-card", "title": "Escalated", "position": "top", "priority": 30, "dataKey": "support.escalated", "config": { "format": "int" } },
+    { "id": "agent", "type": "stat-grid", "title": "Agent", "position": "right", "priority": 10, "dataKey": "agent", "config": { "fields": [["name", "Name"], ["role", "Role"]] } },
+    { "id": "queue", "type": "activity-feed", "title": "Active queue", "position": "right", "priority": 20, "dataKey": "support.queue", "config": { "limit": 10 } },
+    { "id": "ticket-log", "type": "activity-feed", "title": "Ticket log", "position": "right", "priority": 30, "dataKey": "support.ticket_log", "config": { "limit": 12 } },
+    { "id": "sla", "type": "status-list", "title": "SLA health", "position": "right", "priority": 40, "dataKey": "support.sla" }
+  ]
+}

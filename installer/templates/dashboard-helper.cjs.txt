@@ -1,0 +1,136 @@
+#!/usr/bin/env node
+/**
+ * dashboard-helper — edit data/dashboard-config.json from the CLI.
+ *
+ * Usage:
+ *   node scripts/dashboard-helper.cjs list
+ *   node scripts/dashboard-helper.cjs add --id <id> --type <type> --title <title> --position <top|right|bottom> [--dataKey <path>] [--color <hex>]
+ *   node scripts/dashboard-helper.cjs remove --id <id>
+ *   node scripts/dashboard-helper.cjs set-theme --primary <hex> [--secondary <hex>] [...]
+ *   node scripts/dashboard-helper.cjs set-brand --agentName "..." [--tagline "..."]
+ *   node scripts/dashboard-helper.cjs preview
+ *
+ * The Tauri UI hot-reloads the moment this file is saved. No restart needed.
+ */
+
+const fs = require("fs");
+const path = require("path");
+
+const CONFIG_PATH = path.resolve(__dirname, "..", "data", "dashboard-config.json");
+const VALID_TYPES = ["kpi-card", "metric-series", "activity-feed", "stat-grid", "network-viz", "timeline", "status-list", "progress-bar", "custom-text"];
+const VALID_POSITIONS = ["top", "right", "bottom"];
+
+function readConfig() {
+  if (!fs.existsSync(CONFIG_PATH)) {
+    console.error(`dashboard-config.json not found at ${CONFIG_PATH}`);
+    console.error(`Run the installer first, or create it by hand.`);
+    process.exit(1);
+  }
+  return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
+}
+function writeConfig(cfg) {
+  cfg.meta = { ...(cfg.meta || {}), generatedBy: "hand-edit", generatedAt: new Date().toISOString() };
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2) + "\n");
+}
+function parseArgs(argv) {
+  const out = {};
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i].startsWith("--")) {
+      const key = argv[i].slice(2);
+      const val = argv[i + 1] && !argv[i + 1].startsWith("--") ? argv[i + 1] : "true";
+      out[key] = val;
+      if (val !== "true") i++;
+    }
+  }
+  return out;
+}
+
+const [, , cmd, ...rest] = process.argv;
+const args = parseArgs(rest);
+const cfg = cmd ? readConfig() : null;
+
+switch (cmd) {
+  case "list": {
+    console.log(`Agent: ${cfg.brand.agentName}`);
+    console.log(`Theme primary: ${cfg.theme.primary}`);
+    console.log(`Panels (${cfg.panels.length}):`);
+    for (const p of cfg.panels) {
+      console.log(`  [${p.position}] ${p.id.padEnd(20)} ${p.type.padEnd(14)} "${p.title}" ← ${p.dataKey ?? "(no data)"}`);
+    }
+    break;
+  }
+  case "add": {
+    if (!args.id || !args.type || !args.title || !args.position) {
+      console.error("Required: --id --type --title --position");
+      process.exit(1);
+    }
+    if (!VALID_TYPES.includes(args.type)) {
+      console.error(`Invalid --type. Valid: ${VALID_TYPES.join(", ")}`);
+      process.exit(1);
+    }
+    if (!VALID_POSITIONS.includes(args.position)) {
+      console.error(`Invalid --position. Valid: ${VALID_POSITIONS.join(", ")}`);
+      process.exit(1);
+    }
+    if (cfg.panels.some(p => p.id === args.id)) {
+      console.error(`Panel id "${args.id}" already exists`);
+      process.exit(1);
+    }
+    const panel = { id: args.id, type: args.type, title: args.title, position: args.position };
+    if (args.dataKey) panel.dataKey = args.dataKey;
+    if (args.color) panel.color = args.color;
+    if (args.priority) panel.priority = Number(args.priority);
+    if (args.description) panel.description = args.description;
+    cfg.panels.push(panel);
+    writeConfig(cfg);
+    console.log(`Added panel ${args.id}`);
+    break;
+  }
+  case "remove": {
+    if (!args.id) { console.error("Required: --id"); process.exit(1); }
+    const before = cfg.panels.length;
+    cfg.panels = cfg.panels.filter(p => p.id !== args.id);
+    if (cfg.panels.length === before) {
+      console.error(`No panel with id "${args.id}"`);
+      process.exit(1);
+    }
+    writeConfig(cfg);
+    console.log(`Removed panel ${args.id}`);
+    break;
+  }
+  case "set-theme": {
+    for (const key of ["primary", "secondary", "background", "surface", "text", "muted", "success", "warn", "error"]) {
+      if (args[key]) cfg.theme[key] = args[key];
+    }
+    writeConfig(cfg);
+    console.log(`Theme updated`);
+    break;
+  }
+  case "set-brand": {
+    if (args.agentName) cfg.brand.agentName = args.agentName;
+    if (args.tagline) cfg.brand.tagline = args.tagline;
+    writeConfig(cfg);
+    console.log(`Brand updated`);
+    break;
+  }
+  case "preview": {
+    console.log(JSON.stringify(cfg, null, 2));
+    break;
+  }
+  default: {
+    console.log("dashboard-helper — edit data/dashboard-config.json");
+    console.log("");
+    console.log("Commands:");
+    console.log("  list                                 Show current panels + theme");
+    console.log("  add    --id --type --title --position [--dataKey --color --priority --description]");
+    console.log("  remove --id");
+    console.log("  set-theme [--primary --secondary --background --surface --text --muted --success --warn --error]");
+    console.log("  set-brand [--agentName --tagline]");
+    console.log("  preview                              Dump full config to stdout");
+    console.log("");
+    console.log(`Valid --type values: ${VALID_TYPES.join(", ")}`);
+    console.log(`Valid --position values: ${VALID_POSITIONS.join(", ")}`);
+    console.log("");
+    console.log("See docs/dashboard-panels.md for the full schema.");
+  }
+}

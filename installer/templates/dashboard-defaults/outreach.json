@@ -1,0 +1,12 @@
+{
+  "note": "Default outreach dashboard. Loaded when the Commissioning Board is skipped or produced no panels. Agent can edit freely after install.",
+  "panels": [
+    { "id": "kpi-sent", "type": "kpi-card", "title": "Emails sent today", "position": "top", "priority": 10, "dataKey": "outreach.emails_sent", "config": { "format": "int" } },
+    { "id": "kpi-replies", "type": "kpi-card", "title": "Replies", "position": "top", "priority": 20, "dataKey": "outreach.replies", "config": { "format": "int" } },
+    { "id": "kpi-reply-rate", "type": "progress-bar", "title": "Reply rate", "position": "top", "priority": 30, "dataKey": "outreach.reply_rate", "config": { "max": 1, "unit": "" } },
+    { "id": "agent", "type": "stat-grid", "title": "Agent", "position": "right", "priority": 10, "dataKey": "agent", "config": { "fields": [["name", "Name"], ["role", "Role"]] } },
+    { "id": "pipeline", "type": "stat-grid", "title": "Pipeline", "position": "right", "priority": 20, "dataKey": "outreach.pipeline", "config": { "fields": [["prospected", "Prospected"], ["contacted", "Contacted"], ["qualified", "Qualified"], ["closed", "Closed"]] } },
+    { "id": "recent-sends", "type": "activity-feed", "title": "Recent sends", "position": "right", "priority": 30, "dataKey": "outreach.recent_sends", "config": { "limit": 10 } },
+    { "id": "deliverability", "type": "status-list", "title": "Deliverability", "position": "right", "priority": 40, "dataKey": "outreach.deliverability" }
+  ]
+}

@@ -11,6 +11,7 @@ import { fileURLToPath } from "url";
 import type { ClawConfig } from "./research.js";
 import type { SystemInfo } from "./detect.js";
 import { generateDashboard } from "./dashboard-generator.js";
+import { writeDashboardConfig } from "./dashboard-config-writer.js";
 import { generateStarterTasks } from "./task-generator.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -61,6 +62,17 @@ export function scaffoldProject(
     config.dashboardPanels,
   );
   fs.writeFileSync(path.join(projectDir, "dashboard.html"), dashboardHtml);
+
+  // v3.7.2: also write data/dashboard-config.json so the Tauri UI's
+  // LayoutFrame can render Board-synthesized panels + per-claw theme.
+  writeDashboardConfig(projectDir, config);
+
+  // v3.7.2: ship the agent-editable CLI helper + schema doc so agents can
+  // customize their dashboard without needing to read the source.
+  fs.mkdirSync(path.join(projectDir, "scripts"), { recursive: true });
+  fs.mkdirSync(path.join(projectDir, "docs"), { recursive: true });
+  fs.writeFileSync(path.join(projectDir, "scripts", "dashboard-helper.cjs"), readTemplate("dashboard-helper.cjs.txt"));
+  fs.writeFileSync(path.join(projectDir, "docs", "dashboard-panels.md"), readTemplate("dashboard-panels.md.txt"));
 
   // Copy favicon for dashboard branding
   const faviconSrc = path.join(TEMPLATES_DIR, "..", "assets", "favicon.png");

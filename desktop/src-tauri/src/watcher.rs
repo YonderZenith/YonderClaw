@@ -1,6 +1,7 @@
-//! File watcher — monitors data/dashboard.json + data/logs/*.jsonl and emits
-//! events to the frontend via Tauri's event bus. Uses ReadDirectoryChangesW
-//! on Windows via the `notify` crate (<50ms latency).
+//! File watcher — monitors data/dashboard.json, data/dashboard-config.json,
+//! and data/logs/*.jsonl, and emits events to the frontend via Tauri's event
+//! bus. Uses ReadDirectoryChangesW on Windows via the `notify` crate
+//! (<50ms latency).
 //!
 //! Shutdown: watch_project is idempotent — calling it again with a new project
 //! dir signals the prior watcher to stop, drops the prior `Watcher` (which
@@ -31,6 +32,7 @@ pub fn watch_project(app: AppHandle, project_dir: String) -> Result<(), String> 
     let project_dir = project_dir.trim_matches('\0').trim().to_string();
     let data_dir = PathBuf::from(&project_dir).join("data");
     let dashboard_path = data_dir.join("dashboard.json");
+    let dashboard_config_path = data_dir.join("dashboard-config.json");
     let logs_dir = data_dir.join("logs");
 
     if !data_dir.is_dir() {
@@ -51,11 +53,17 @@ pub fn watch_project(app: AppHandle, project_dir: String) -> Result<(), String> 
             let _ = app.emit("dashboard-updated", &content);
         }
     }
+    if dashboard_config_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&dashboard_config_path) {
+            let _ = app.emit("dashboard-config-updated", &content);
+        }
+    }
 
     let stop = Arc::new(AtomicBool::new(false));
     let stop_for_thread = stop.clone();
     let app_handle = app.clone();
     let dash_path_owned = dashboard_path.clone();
+    let dash_config_path_owned = dashboard_config_path.clone();
 
     let (tx, rx) = mpsc::channel::<Event>();
 
@@ -80,6 +88,11 @@ pub fn watch_project(app: AppHandle, project_dir: String) -> Result<(), String> 
                         if ev.paths.iter().any(|p| p.ends_with("dashboard.json")) {
                             if let Ok(content) = std::fs::read_to_string(&dash_path_owned) {
                                 let _ = app_handle.emit("dashboard-updated", &content);
+                            }
+                        }
+                        if ev.paths.iter().any(|p| p.ends_with("dashboard-config.json")) {
+                            if let Ok(content) = std::fs::read_to_string(&dash_config_path_owned) {
+                                let _ = app_handle.emit("dashboard-config-updated", &content);
                             }
                         }
                         if ev.paths.iter().any(|p|

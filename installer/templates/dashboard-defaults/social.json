@@ -1,0 +1,12 @@
+{
+  "note": "Default social dashboard. Loaded when the Commissioning Board is skipped or produced no panels. Agent can edit freely after install.",
+  "panels": [
+    { "id": "kpi-posts", "type": "kpi-card", "title": "Posts created", "position": "top", "priority": 10, "dataKey": "social.posts_count", "config": { "format": "int" } },
+    { "id": "kpi-scheduled", "type": "kpi-card", "title": "Scheduled", "position": "top", "priority": 20, "dataKey": "social.scheduled_count", "config": { "format": "int" } },
+    { "id": "kpi-engagement", "type": "progress-bar", "title": "Engagement rate", "position": "top", "priority": 30, "dataKey": "social.engagement_rate", "config": { "max": 1 } },
+    { "id": "agent", "type": "stat-grid", "title": "Agent", "position": "right", "priority": 10, "dataKey": "agent", "config": { "fields": [["name", "Name"], ["role", "Role"]] } },
+    { "id": "calendar", "type": "stat-grid", "title": "Calendar", "position": "right", "priority": 20, "dataKey": "social.calendar", "config": { "fields": [["today", "Today"], ["this_week", "This week"], ["next_week", "Next week"]] } },
+    { "id": "post-history", "type": "activity-feed", "title": "Post history", "position": "right", "priority": 30, "dataKey": "social.post_history", "config": { "limit": 10 } },
+    { "id": "channels", "type": "status-list", "title": "Channels", "position": "right", "priority": 40, "dataKey": "social.channels" }
+  ]
+}

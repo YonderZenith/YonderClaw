@@ -1,0 +1,12 @@
+{
+  "note": "Default research dashboard. Loaded when the Commissioning Board is skipped or produced no panels. Agent can edit freely after install.",
+  "panels": [
+    { "id": "kpi-reports", "type": "kpi-card", "title": "Reports generated", "position": "top", "priority": 10, "dataKey": "research.reports_count", "config": { "format": "int" } },
+    { "id": "kpi-sources", "type": "kpi-card", "title": "Sources found", "position": "top", "priority": 20, "dataKey": "research.sources_count", "config": { "format": "int" } },
+    { "id": "kpi-cost", "type": "kpi-card", "title": "Cost today", "position": "top", "priority": 30, "dataKey": "stats.total_cost_usd", "config": { "format": "float", "unit": "USD" } },
+    { "id": "agent", "type": "stat-grid", "title": "Agent", "position": "right", "priority": 10, "dataKey": "agent", "config": { "fields": [["name", "Name"], ["role", "Role"]] } },
+    { "id": "recent-reports", "type": "activity-feed", "title": "Recent reports", "position": "right", "priority": 20, "dataKey": "research.recent_reports", "config": { "limit": 8 } },
+    { "id": "research-log", "type": "activity-feed", "title": "Research log", "position": "right", "priority": 30, "dataKey": "research.log", "config": { "limit": 12 } },
+    { "id": "health", "type": "status-list", "title": "System health", "position": "right", "priority": 40, "dataKey": "health" }
+  ]
+}

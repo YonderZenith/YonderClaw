@@ -1,5 +1,41 @@
 # YonderClaw Changelog
 
+## v3.7.2 (Board-driven dashboard — 2026-04-22, local experiment)
+### Goal: Board-synthesized per-agent dashboard actually reaches the Tauri UI
+v3.7.1 shipped `installer/dashboard-generator.ts` + `research.ts::DashboardPanel[]` but the Tauri desktop's `DashboardPanel.tsx` ignored the Board output entirely — every install rendered the same fixed three-column layout. v3.7.2 closes that gap end-to-end: Board → `data/dashboard-config.json` → Rust file-watcher → Zustand slice → `LayoutFrame` → 9-type panel registry → visibly different UI per agent. YZ brand floor (logo + "YonderClaw by Yonder Zenith" wordmark on the TopBar) stays immutable; theme, colors, layout, panels are all agent-editable via `data/dashboard-config.json` or `scripts/dashboard-helper.cjs`.
+
+### Added
+- **`desktop/src/lib/dashboard-config.ts`** — schema module. `PanelType` union of 9 (`kpi-card`, `metric-series`, `activity-feed`, `stat-grid`, `network-viz`, `timeline`, `status-list`, `progress-bar`, `custom-text`), `PanelPosition` of 3 (`top`/`right`/`bottom`), full `DashboardTheme` + `DashboardBrand` + `DashboardConfig` types, `DEFAULT_DASHBOARD_CONFIG`, and the `readDataKey(data, "stats.actions_taken")` dot-path resolver that panels use to pluck live metrics out of `data/dashboard.json` without crashing on missing intermediates.
+- **9-panel component library** in `desktop/src/components/panels/`: `KpiCard`, `MetricSeries` (SVG sparkline), `ActivityFeed`, `StatGrid`, `NetworkViz` (circular peer graph), `Timeline`, `StatusList`, `ProgressBar`, `CustomText`. Shared `PanelShell` for border-top accent + head/body layout. `PANEL_REGISTRY: Record<PanelType, ComponentType<PanelProps>>` in `index.ts` — LayoutFrame looks up by config `type` string.
+- **`desktop/src/components/LayoutFrame.tsx`** — subscribes to both `dashboard-updated` (metrics) and `dashboard-config-updated` (layout+theme) via `onDashboardUpdate` / `onDashboardConfigUpdate`, applies theme colors as CSS custom properties on `document.documentElement` on every config change, groups panels by `position`, renders three bands (top strip, right column, bottom strip) around the embedded terminal. Missing band collapses cleanly via flex.
+- **Rust watcher extension** (`desktop/src-tauri/src/watcher.rs`) — startup-emit + file-change-emit for `dashboard-config.json` alongside the existing `dashboard.json`. <50 ms reload via `ReadDirectoryChangesW`.
+- **`installer/dashboard-config-writer.ts`** — install-time translator. Consumes the Board's `DashboardPanel[]` (types `kpi|table|feed|health|custom`, colors as CSS vars) and emits the v3.7.2 `DashboardConfig`. `TYPE_MAP`, `COLOR_MAP`, `THEME_BY_TEMPLATE` (outreach cyan / research purple / support green / social orange / custom gold). If Board produced no panels, falls back to `installer/templates/dashboard-defaults/<template>.json`. KPIs go top, other panels right, bottom reserved for agent additions.
+- **Per-claw fallback defaults** (`installer/templates/dashboard-defaults/{outreach,research,support,social,custom}.json`) — 5 hand-tuned layouts the agent gets when the Commissioning Board is skipped or produced no panels. Each visibly reflects the claw's mission (outreach has email KPIs + deliverability checklist; research has cost + sources; support has SLA + queue; social has engagement + channels; custom has a "Make this yours" hint panel).
+- **`installer/templates/dashboard-helper.cjs.txt`** — agent-editable CLI scaffolded into every install at `scripts/dashboard-helper.cjs`. Subcommands: `list`, `add --id --type --title --position [--dataKey --color --priority --description]`, `remove --id`, `set-theme --primary [--secondary --background --surface --text --muted --success --warn --error]`, `set-brand --agentName [--tagline]`, `preview`. Validates panel type + position, writes back with `meta.generatedBy = "hand-edit"` — UI hot-reloads in <50 ms.
+- **`installer/templates/dashboard-panels.md.txt`** — full schema reference scaffolded to `docs/dashboard-panels.md`. Panel-type table (type → what it shows → expected `dataKey` shape → valid `config` keys), position semantics, priority ordering, `dataKey` dot-path rules, theme fields, CLI examples.
+
+### Changed
+- **`desktop/src/App.tsx`** — replaced the old `.split` two-pane layout with `<div className="app"><TopBar/><LayoutFrame><Terminal/></LayoutFrame></div>`. TopBar agent name prefers `dashboardConfig.brand.agentName` over the project folder name so Board-authored branding wins.
+- **`desktop/src/store.ts`** — Zustand slice extended with `dashboardConfig: DashboardConfig` (initial `DEFAULT_DASHBOARD_CONFIG`), `dashboardConfigError: string | null`, and a `setDashboardConfig(cfg)` action. Kept prior `dashboard` metrics slice intact so Brian's v3.7.1 fixes aren't regressed.
+- **`desktop/src/lib/tauri.ts`** — added `onDashboardConfigUpdate(cb)` listener symmetric to `onDashboardUpdate`.
+- **`desktop/src/styles.css`** — added `.workspace`, `.workspace-main` (flex row, not grid — missing right band collapses), `.workspace-term`, `.panel-band-row` / `.panel-band-column`, `.panel`, and the nine per-type panel styles. Renamed `.status-dot` (new StatusList panel) → `.status-pip` to avoid class collision with TopBar's existing `.status-dot.ok/.stale/.off`. Legacy `.split`/`.dash`/`.card`/`.bootstrap` kept for now pending verified-dead sweep.
+- **`installer/core-scaffold.ts`** — after writing `dashboard.html` (legacy, preserved for headless mode), now also calls `writeDashboardConfig(projectDir, config)` and scaffolds `scripts/dashboard-helper.cjs` + `docs/dashboard-panels.md` with `mkdirSync({recursive:true})` guards.
+
+### Forward-compatibility note
+- The legacy `dashboard.html` is still generated (headless build-dashboard.cjs still consumes it). v3.7.2's DashboardConfig and v3.7.1's dashboard.html coexist: the Tauri UI ignores the .html, the headless CLI ignores the .json. Dead-code pass deferred to v3.8.
+- Per-agent AXIOM Body face as cross-product avatar (dashboard + Hive) — **roadmap**, not this release. Tracked in `project_axiom_body_face_avatar.md`.
+
+### Version bumps
+- `package.json` 3.7.1 → 3.7.2 (root + `optionalDependencies["@yonderclaw/desktop-win32-x64"]`).
+- `desktop/package.json` 3.7.1 → 3.7.2.
+- `desktop/src-tauri/Cargo.toml` + `tauri.conf.json` 3.7.1 → 3.7.2.
+- `desktop-packages/win32-x64/package.json` 3.7.1 → 3.7.2 — binary rebuild required.
+
+### Verification
+- `npx tsc` spot-check on edited installer files and new desktop files — 0 errors (pre-existing strict-mode complaints unchanged).
+- Rust compile started on `yonderclaw-desktop v3.7.2` — PE metadata to be verified post-link.
+- E2E with outreach + research + support — pending Phase 8.
+
 ## v3.7.1 (installer cleanup — 2026-04-22)
 ### Goal: Fix the five bugs Brian caught post-v3.7.0 before Axiom publishes
 v3.7.0 was pushed to GitHub 2026-04-20 (da91afe) but held for Axiom npm publish after Brian (QA agent) found five issues on a clean install. This point release rolls up all five fixes plus two polish items (time-injection adoption + heartbeat-refresh scope) so the first npm-published v3.7.x ships clean.

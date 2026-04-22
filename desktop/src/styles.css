@@ -68,6 +68,132 @@ html, body, #root { height: 100%; background: var(--bg); color: var(--text); ove
 .stat-label { color: var(--text-muted); font-size: 12px; }
 .stat-val { font-variant-numeric: tabular-nums; font-weight: 500; }
 
+/* ---------- v3.7.2 LayoutFrame: wrap-around workspace ---------- */
+
+.workspace {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg);
+}
+.workspace-main {
+  display: flex; flex-direction: row;
+  min-height: 0;
+  overflow: hidden;
+}
+.workspace-term {
+  flex: 1 1 auto;
+  background: var(--bg);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+.workspace-main .panel-band-column { flex: 0 0 360px; }
+/* Terminal renders its own scroll inside xterm-viewport. */
+.workspace-term > * { height: 100%; }
+
+.panel-band {
+  background: var(--bg-elevated);
+  overflow: auto;
+}
+.panel-band-row {
+  display: flex; flex-direction: row;
+  padding: 10px 12px; gap: 10px;
+  border-bottom: 1px solid var(--border);
+  min-height: 90px;
+}
+.panel-band-row .panel { flex: 1 1 180px; min-width: 160px; }
+.panel-band-column {
+  display: flex; flex-direction: column;
+  padding: 10px 12px; gap: 10px;
+  border-left: 1px solid var(--border);
+  min-width: 0;
+}
+
+.panel {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--accent);
+  border-radius: var(--panel-radius, 8px);
+  padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 6px;
+  min-height: 0;
+}
+.panel-head { display: flex; align-items: baseline; justify-content: space-between; }
+.panel-title {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--text-muted); font-weight: 600;
+}
+.panel-body { display: flex; flex-direction: column; gap: 4px; min-height: 0; }
+.panel-empty { color: var(--text-muted); font-style: italic; font-size: 12px; }
+
+/* kpi-card */
+.kpi-value { font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
+.kpi-unit { font-size: 14px; color: var(--text-muted); font-weight: 400; }
+.kpi-desc { font-size: 11px; color: var(--text-muted); }
+
+/* metric-series */
+.series-latest { font-size: 11px; color: var(--text-muted); }
+
+/* activity-feed */
+.feed { list-style: none; display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow: auto; }
+.feed-row { display: flex; gap: 6px; align-items: baseline; font-size: 12px; }
+.feed-row-err { color: var(--bad); }
+.feed-ts { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.feed-kind { color: var(--accent); font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.08em; }
+.feed-msg { color: var(--text); flex: 1; }
+
+/* stat-grid */
+.stat-grid { display: flex; flex-direction: column; gap: 2px; }
+
+/* network-viz */
+.net-count { font-size: 11px; color: var(--text-muted); text-align: center; }
+
+/* timeline */
+.timeline { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.timeline-row { display: flex; gap: 8px; align-items: flex-start; }
+.timeline-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-top: 5px; flex-shrink: 0; }
+.timeline-body { flex: 1; font-size: 12px; }
+.timeline-head strong { color: var(--accent); }
+.timeline-ts { color: var(--text-muted); }
+.timeline-title { color: var(--text); }
+.timeline-note { color: var(--text-muted); font-size: 11px; }
+
+/* status-list */
+.status-list { list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.status-row { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.status-pip { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.status-label { flex: 1; color: var(--text); }
+.status-note { color: var(--text-muted); font-size: 11px; }
+
+/* progress-bar */
+.progress-track { width: 100%; height: 10px; background: var(--border); border-radius: 5px; overflow: hidden; }
+.progress-fill { height: 100%; transition: width 0.4s ease; }
+.progress-label { font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+/* custom-text */
+.custom-text p { font-size: 12px; color: var(--text); margin-bottom: 4px; }
+.custom-text p:last-child { margin-bottom: 0; }
+
+.config-error {
+  position: absolute; bottom: 10px; left: 10px; right: 10px;
+  background: var(--bad); color: white; padding: 8px 12px;
+  font-size: 12px; font-family: monospace; border-radius: 6px;
+  z-index: 999;
+}
+
+/* ---------- legacy .dash classes kept for compatibility ---------- */
+
+.dash { padding: 16px; display: grid; gap: 14px; }
+.dash-empty { color: var(--text-muted); font-style: italic; padding: 12px; }
+.card { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+.card h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); margin-bottom: 8px; }
+.stat-row { display: flex; justify-content: space-between; align-items: baseline; padding: 4px 0; }
+.stat-label { color: var(--text-muted); font-size: 12px; }
+.stat-val { font-variant-numeric: tabular-nums; font-weight: 500; }
+
 .bootstrap {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   height: 100%; padding: 40px; text-align: center; gap: 12px;

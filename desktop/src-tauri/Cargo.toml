@@ -1,6 +1,6 @@
 [package]
 name = "yonderclaw-desktop"
-version = "3.7.1"
+version = "3.7.2"
 description = "YonderClaw desktop shell"
 authors = ["Yonder Zenith LLC"]
 edition = "2021"

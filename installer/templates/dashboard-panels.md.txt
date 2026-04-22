@@ -1,0 +1,96 @@
+# Dashboard Panels — Reference
+
+Your dashboard is driven by `data/dashboard-config.json`. The Tauri UI
+watches this file and hot-reloads the moment it changes — no restart.
+
+There are two files that matter:
+
+- **`data/dashboard-config.json`** — layout, theme, brand. You own this.
+  Edit it by hand, or via `scripts/dashboard-helper.cjs`.
+- **`data/dashboard.json`** — live metrics. Your heartbeat script writes
+  this. Panels read values from it via `dataKey`.
+
+## Schema
+
+```json
+{
+  "version": 1,
+  "theme": {
+    "primary": "#f5c518",
+    "secondary": "#eab308",
+    "background": "#0b0d12",
+    "surface": "#151923",
+    "text": "#e8ecf1",
+    "muted": "#7a8699",
+    "success": "#4ade80",
+    "warn": "#fbbf24",
+    "error": "#f87171",
+    "radius": "10px"
+  },
+  "brand": {
+    "agentName": "Your Name",
+    "tagline": "Optional short tagline"
+  },
+  "panels": [
+    {
+      "id": "unique-id",
+      "type": "kpi-card",
+      "title": "Emails sent",
+      "position": "top",
+      "priority": 10,
+      "dataKey": "outreach.emails_sent",
+      "color": "#6ee7ff",
+      "config": { "format": "int", "unit": "today" }
+    }
+  ]
+}
+```
+
+The YZ logo and "YonderClaw by Yonder Zenith" wordmark are always shown in
+the top bar — they're not controlled by this file.
+
+## Panel types
+
+| type            | what it shows                                     | `dataKey` expects      | `config` keys                                        |
+|-----------------|---------------------------------------------------|------------------------|------------------------------------------------------|
+| `kpi-card`      | One big number                                    | `number`               | `unit: string`, `format: "int" \| "float" \| "pct"`  |
+| `metric-series` | Sparkline of recent values                        | `number[]`             | —                                                    |
+| `activity-feed` | Reverse-chron event list                          | `[{ts, kind, message, ok}]` | `limit: number`                                 |
+| `stat-grid`     | Key/value rows                                    | `object`               | `fields: [["key","Label"] ...]`                      |
+| `network-viz`   | Peer/connection graph                             | `[{id, label, online}]`| —                                                    |
+| `timeline`      | Release/version history                           | `[{version, ts, title, note}]` | —                                           |
+| `status-list`   | Checklist of statuses                             | `[{label, status, note}]` where status is `"ok"\|"warn"\|"error"\|"idle"` | — |
+| `progress-bar`  | 0..1 fraction with label                          | `number` or `{value, max}` | `max: number`, `unit: string`                   |
+| `custom-text`   | Plain text / paragraphs                           | `string` (via dataKey) OR baked `config.body`  | `body: string`        |
+
+## Positions
+
+- `top` — horizontal strip above the terminal
+- `right` — vertical column beside the terminal
+- `bottom` — horizontal strip below the terminal
+
+`priority` determines order within a position band (lower first).
+
+## dataKey
+
+A dot-path into `data/dashboard.json`. Example: `"stats.actions_taken"`
+reads `dashboardJson.stats.actions_taken`. Missing intermediates render as
+empty — no crash.
+
+## Theme
+
+All color fields accept any CSS color. Hex recommended. `radius` is a
+CSS length (e.g. `"10px"`).
+
+## CLI helper
+
+```bash
+node scripts/dashboard-helper.cjs list
+node scripts/dashboard-helper.cjs add --id my-panel --type kpi-card --title "My metric" --position top --dataKey stats.my_metric
+node scripts/dashboard-helper.cjs remove --id my-panel
+node scripts/dashboard-helper.cjs set-theme --primary "#6ee7ff"
+node scripts/dashboard-helper.cjs set-brand --agentName "Your Name"
+node scripts/dashboard-helper.cjs preview
+```
+
+Or edit the JSON file directly — the UI will pick up changes within 50 ms.

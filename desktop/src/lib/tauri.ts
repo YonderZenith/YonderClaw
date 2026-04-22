@@ -35,6 +35,10 @@ export async function onDashboardUpdate(cb: (raw: string) => void): Promise<Unli
   return listen<string>("dashboard-updated", (e) => cb(e.payload));
 }
 
+export async function onDashboardConfigUpdate(cb: (raw: string) => void): Promise<UnlistenFn> {
+  return listen<string>("dashboard-config-updated", (e) => cb(e.payload));
+}
+
 export async function onPtyOutput(cb: (chunk: string) => void): Promise<UnlistenFn> {
   return listen<string>("pty-output", (e) => cb(e.payload));
 }

@@ -1,0 +1,12 @@
+{
+  "note": "Default baseline dashboard. Loaded for custom claws or when the Commissioning Board is skipped. Agent can (and should) edit this to reflect what their mission actually measures.",
+  "panels": [
+    { "id": "kpi-actions", "type": "kpi-card", "title": "Actions today", "position": "top", "priority": 10, "dataKey": "stats.actions_taken", "config": { "format": "int" } },
+    { "id": "kpi-succeeded", "type": "kpi-card", "title": "Succeeded", "position": "top", "priority": 20, "dataKey": "stats.succeeded", "config": { "format": "int" } },
+    { "id": "kpi-failed", "type": "kpi-card", "title": "Failed", "position": "top", "priority": 30, "dataKey": "stats.failed", "config": { "format": "int" } },
+    { "id": "agent", "type": "stat-grid", "title": "Agent", "position": "right", "priority": 10, "dataKey": "agent", "config": { "fields": [["name", "Name"], ["role", "Role"]] } },
+    { "id": "status", "type": "stat-grid", "title": "Status", "position": "right", "priority": 20, "dataKey": "status", "config": { "fields": [["online", "Online"], ["last_seen_iso", "Last seen"], ["pending_tasks", "Pending tasks"]] } },
+    { "id": "activity-stats", "type": "stat-grid", "title": "Activity", "position": "right", "priority": 30, "dataKey": "stats", "config": { "fields": [["actions_taken", "Actions taken"], ["succeeded", "Succeeded"], ["failed", "Failed"], ["last_action_iso", "Last action"]] } },
+    { "id": "getting-started", "type": "custom-text", "title": "Make this yours", "position": "bottom", "priority": 10, "config": { "body": "This dashboard is a starting template. Edit data/dashboard-config.json to add panels, rearrange positions, or change colors. Run `node scripts/dashboard-helper.cjs` for quick edits." } }
+  ]
+}
