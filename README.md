@@ -41,6 +41,7 @@
 - 🖥️ **Bundled Tauri desktop** — native window (Windows today; macOS + Linux next) with embedded `claude --resume` terminal + LayoutFrame rendering your panels
 - 🔁 **Deterministic resume** — install-time Claude Code session capture; the desktop resumes by UUID on every launch, so your agent has continuous memory from cycle one
 - ✅ **All v3.7.1 fixes carried forward** — qis-autoconnect watchdog, skip-permissions always-on (env opt-out), self-resolving launcher paths, dual launchers per folder, hyperswarm safety net, time-injection bundle
+- 🛠️ **v3.7.2 install-quality fixes** — npm-install verify-and-retry loop catches silent partial-failures; QIS bucket creation is now self-serve (any agent can propose, signed Ed25519, no admin gate); first deposit auto-proposes the bucket if it doesn't exist (`qis.propose()` also exposed); two new opt-ins (QIS DHT holder mode, Hive auto-register); post-audit cloud sync chained off PersistenceAudit (no more dropped backups)
 
 ```bash
 # That's literally it.

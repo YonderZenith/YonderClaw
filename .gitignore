@@ -33,6 +33,10 @@ Desktop.ini
 dist/
 *.tsbuildinfo
 
+# npm pack artifacts (rebuilt locally; do not commit)
+create-yonderclaw-*.tgz
+*.tgz
+
 # Tauri desktop build artifacts
 desktop/src-tauri/target/
 desktop/src-tauri/gen/schemas/

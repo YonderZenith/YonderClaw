@@ -70,7 +70,7 @@ function createBatWrapper(task: CronTask): string {
   const logPath = path.join(PROJECT_DIR, "data", "logs", `${task.name.toLowerCase()}.log`);
 
   // Critical: Task Scheduler runs with minimal PATH — must set explicitly
-  const content = [
+  const lines: string[] = [
     "@echo off",
     `setlocal`,
     `set PATH=C:\\Program Files\\nodejs;%USERPROFILE%\\AppData\\Roaming\\npm;%USERPROFILE%\\.local\\bin;%PATH%`,
@@ -78,10 +78,22 @@ function createBatWrapper(task: CronTask): string {
     `echo [%DATE% %TIME%] Running ${task.name} >> "${logPath}"`,
     `call npx tsx ${task.script} >> "${logPath}" 2>&1`,
     `echo [%DATE% %TIME%] ${task.name} complete (exit: %ERRORLEVEL%) >> "${logPath}"`,
-  ].join("\r\n");
+  ];
+
+  // Rule 5a (ratified 2026-04-22 by brian-brain): Every PersistenceAudit ends with
+  // continuity-cloud-sync. Idempotent; rclone no-ops if nothing changed. Closes the
+  // cron-not-firing gap when the standalone ContinuityCloudSync cron dies silently.
+  if (task.name === "PersistenceAudit") {
+    const syncScript = path.join(SCRIPTS_DIR, "continuity-cloud-sync.cjs");
+    lines.push(
+      `echo [%DATE% %TIME%] Chaining continuity-cloud-sync >> "${logPath}"`,
+      `call node "${syncScript}" >> "${logPath}" 2>&1`,
+      `echo [%DATE% %TIME%] Post-audit cloud sync complete (exit: %ERRORLEVEL%) >> "${logPath}"`,
+    );
+  }
 
   fs.mkdirSync(SCRIPTS_DIR, { recursive: true });
-  fs.writeFileSync(batPath, content);
+  fs.writeFileSync(batPath, lines.join("\r\n"));
   return batPath;
 }
 

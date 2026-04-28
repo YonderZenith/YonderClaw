@@ -37,6 +37,11 @@
 **9. ANYTHING ELSE AT ALL** — Literally anything that a future session wouldn't know if I died right now?
   → If YES, pick the most appropriate file and write it. If unsure, default to `data/logic-log.md`.
 
+**10. CHANGES TO CLOUD** — Have any files changed since the last Continuity Layer-3 sync?
+  → The post-audit hook handles this automatically. You do NOT need to trigger manually.
+    `continuity-cloud-sync.cjs` runs after every audit regardless of other answers.
+    If sync fails 3 consecutive audits, escalate to operator + brian-brain.
+
 ---
 
 ## If all 9 are NO

@@ -1,0 +1,169 @@
+#!/usr/bin/env node
+/**
+ * scripts/continuity-cloud-sync.cjs
+ *
+ * Layer-3 cloud sync for Project Continuity (the Indestructible Claw).
+ *
+ * What this does:
+ *   Syncs the local Layer-2 mirror dir (`~/.brian-brain-backup/<agent-id>/`) to an operator-chosen
+ *   cloud backend via `rclone sync`. Since Layer-2 already produces signed + libsodium-encrypted
+ *   content-addressed blobs, the cloud gets CIPHERTEXT ONLY — operator sovereignty preserved even
+ *   if the cloud provider is compromised.
+ *
+ * Prerequisites:
+ *   1. `rclone` installed (https://rclone.org/install/) — on Windows: `winget install Rclone.Rclone`
+ *   2. An rclone remote configured — `rclone config` interactively; pick provider (Proton Drive /
+ *      Cloudflare R2 / Backblaze B2 / S3 / any rclone-supported backend); save the config
+ *   3. Config at `data/continuity-cloud-config.json` pointing at the remote name
+ *
+ * Chris-action needed (one-time):
+ *   - Install rclone (winget command above)
+ *   - Run `rclone config` → pick Cloudflare R2 (recommended — free egress + $0.015/GB-month) OR
+ *     Proton Drive OR whichever provider matches your preference
+ *   - Give me the rclone remote name (e.g. `r2-yonderclaw` or `proton-brian-brain`)
+ *   - I'll wire the rest via this script
+ *
+ * After initial setup, this runs hourly alongside the Layer-2 continuity-daemon — same cadence.
+ *
+ * Status: v0.1 scaffold (Phase-3 Layer-3 WIP). Awaits Chris's rclone install + provider choice.
+ */
+
+const { execFileSync } = require("node:child_process");
+const fs = require("node:fs");
+const path = require("node:path");
+const os = require("node:os");
+
+const CONFIG_PATH = path.join(process.cwd(), "data", "continuity-cloud-config.json");
+const LOG_PATH = path.join(process.cwd(), "data", "continuity-cloud-log.jsonl");
+
+function loadConfig() {
+  if (!fs.existsSync(CONFIG_PATH)) {
+    console.error(
+      `[continuity-cloud-sync] config missing at ${CONFIG_PATH}.\n` +
+        `Chris-action required: fill in provider, remote-name, remote-path, local-mirror-path, then retry.`
+    );
+    process.exit(1);
+  }
+  const raw = fs.readFileSync(CONFIG_PATH, "utf8");
+  return JSON.parse(raw);
+}
+
+function rcloneVersion(rcloneBin) {
+  try {
+    const out = execFileSync(rcloneBin, ["version"], { encoding: "utf8", stdio: "pipe" });
+    return out.split("\n")[0];
+  } catch (e) {
+    return null;
+  }
+}
+
+function appendLog(entry) {
+  fs.mkdirSync(path.dirname(LOG_PATH), { recursive: true });
+  fs.appendFileSync(LOG_PATH, JSON.stringify(entry) + "\n", "utf8");
+}
+
+function main() {
+  const started = Date.now();
+  const config = loadConfig();
+  const rcloneBin = config.rclone_bin || "rclone";
+
+  const rcloneCheck = rcloneVersion(rcloneBin);
+  if (!rcloneCheck) {
+    const entry = {
+      ts: new Date().toISOString(),
+      status: "error",
+      reason: `rclone not found at '${rcloneBin}'. Install via \`winget install Rclone.Rclone\` (Windows) or https://rclone.org/install/ — then set config.rclone_bin to full path or put rclone on system PATH.`,
+      duration_ms: Date.now() - started,
+    };
+    appendLog(entry);
+    console.error("[continuity-cloud-sync]", entry.reason);
+    process.exit(2);
+  }
+
+  const localPath = config.local_mirror_path.replace(/^~/, os.homedir());
+  if (!fs.existsSync(localPath)) {
+    const entry = {
+      ts: new Date().toISOString(),
+      status: "error",
+      reason: `local mirror dir missing: ${localPath}. Run continuity-daemon first to create it.`,
+      duration_ms: Date.now() - started,
+    };
+    appendLog(entry);
+    console.error("[continuity-cloud-sync]", entry.reason);
+    process.exit(3);
+  }
+  // Fast-fail sanity check — if the mirror exists but has no blobs/ subdir, something's wrong with the config
+  // (Annie hit a 12-min rclone timeout because her config pointed at a double-nested path with nothing to sync).
+  const blobsDir = path.join(localPath, "blobs");
+  if (!fs.existsSync(blobsDir)) {
+    const entry = {
+      ts: new Date().toISOString(),
+      status: "error",
+      reason: `mirror path ${localPath} has no blobs/ subdir. Check local_mirror_path in data/continuity-cloud-config.json — it should be the PARENT that contains blobs/ + manifests/, not a nested dir. Run continuity-daemon to regenerate if in doubt.`,
+      duration_ms: Date.now() - started,
+    };
+    appendLog(entry);
+    console.error("[continuity-cloud-sync]", entry.reason);
+    process.exit(5);
+  }
+
+  const remoteTarget = `${config.remote_name}:${config.remote_path}`;
+
+  console.log(`[continuity-cloud-sync] rclone: ${rcloneCheck}`);
+  console.log(`[continuity-cloud-sync] local:  ${localPath}`);
+  console.log(`[continuity-cloud-sync] remote: ${remoteTarget}`);
+  console.log(`[continuity-cloud-sync] running sync...`);
+
+  try {
+    const args = [
+      "sync",
+      localPath,
+      remoteTarget,
+      "--verbose",
+      "--stats", "1m",
+      "--transfers", "4",
+      "--checkers", "8",
+    ];
+
+    // Optional: bandwidth-limit if configured
+    if (config.bandwidth_limit_mbps) {
+      args.push("--bwlimit", `${config.bandwidth_limit_mbps}M`);
+    }
+
+    const out = execFileSync(rcloneBin, args, {
+      encoding: "utf8",
+      stdio: "pipe",
+      timeout: 10 * 60 * 1000, // 10 min max
+    });
+
+    const durationMs = Date.now() - started;
+    const entry = {
+      ts: new Date().toISOString(),
+      status: "ok",
+      local_path: localPath,
+      remote_target: remoteTarget,
+      duration_ms: durationMs,
+      summary_line: out.split("\n").filter((l) => l.includes("Transferred") || l.includes("Errors")).slice(-3).join(" | "),
+    };
+    appendLog(entry);
+    console.log(`[continuity-cloud-sync] SUCCESS in ${durationMs}ms`);
+  } catch (e) {
+    const durationMs = Date.now() - started;
+    const entry = {
+      ts: new Date().toISOString(),
+      status: "error",
+      local_path: localPath,
+      remote_target: remoteTarget,
+      duration_ms: durationMs,
+      error: (e && e.message) || String(e),
+      stderr: (e && e.stderr && e.stderr.toString().slice(0, 500)) || "",
+    };
+    appendLog(entry);
+    console.error(`[continuity-cloud-sync] FAILED after ${durationMs}ms: ${entry.error}`);
+    process.exit(4);
+  }
+}
+
+if (require.main === module) {
+  main();
+}

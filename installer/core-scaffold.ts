@@ -131,6 +131,12 @@ export function scaffoldProject(
   fs.mkdirSync(path.join(projectDir, "scripts"), { recursive: true });
   fs.writeFileSync(path.join(projectDir, "scripts", "build-dashboard.cjs"), readTemplate("build-dashboard.cjs.txt"));
 
+  // continuity-cloud-sync.cjs — Rule 5a (2026-04-22): PersistenceAudit cron chains
+  // this script as the last step so any changed file reaches R2 within an hour.
+  // Operator must install rclone + run `rclone config` once + write
+  // data/continuity-cloud-config.json; the script no-ops cleanly until then.
+  fs.writeFileSync(path.join(projectDir, "scripts", "continuity-cloud-sync.cjs"), readTemplate("continuity-cloud-sync.cjs.txt"));
+
   // Agent cycle .bat — specific numbered instructions for cron agent (AXIOM pattern)
   const cycleBat = readTemplate("agent-cycle.bat.txt")
     .replace(/__AGENT_NAME__/g, config.name)
@@ -472,6 +478,7 @@ function writeClaudeMd(dir: string, config: ClawConfig) {
     "3. **Stop on failure loops.** Same action fails twice → stop. Apply recursive meta-resolution: name the gap, research the gap, recurse until you hit solid ground. Log the loop in `data/logs/stuck-patterns.jsonl`.",
     "4. **Operator directive beats prior rules.** Every correction becomes a `data/logic-log.md` entry immediately. Same mistake twice is on you; same mistake three times is on the system.",
     "5. **Run the 9-question persistence audit** at session boundary or hourly via cron. See `data/persistence-audit.md`. It's the safety net, not the primary mechanism.",
+    "5a. **Persistence audit ends with cloud sync.** Hourly PersistenceAudit cron MUST chain a `continuity-cloud-sync.cjs` call after the 9 questions. This catches any changed file and pushes to R2. Defense-in-depth over the standalone ContinuityCloudSync cron which has been unreliable across the fleet. Rule ratified 2026-04-22 after audit discovered 4 agents with stale syncs 42-46h old and 3 with no current-identity backup.",
     "6. **Never paste credentials into message bodies.** Save to a local path, reference by path. Z: is shared — anything in a message body can be snapshotted.",
     "7. **Cross-machine deliverables go to `Z:/shared/<topic>/`.** Never cite C:\\ paths to other agents — their local paths differ from yours.",
     "8. **Evidence tagging.** For any inferential claim, tag PROVEN / INFERRED / SPECULATIVE. An unlabeled claim is a future mistake.",
@@ -513,6 +520,7 @@ function writeClaudeMd(dir: string, config: ClawConfig) {
     "## Scripts",
     "- `scripts/launch.bat` — Launch this agent in Claude Code (resumes session)",
     "- `scripts/open-dashboard.bat` — Open Command Center in app mode",
+    "- `scripts/continuity-cloud-sync.cjs` — Layer-3 cloud sync (called by PersistenceAudit cron per Rule 5a). One-time operator setup: `winget install Rclone.Rclone` → `rclone config` → write `data/continuity-cloud-config.json` → done.",
     "- `Launch " + config.name + ".bat` — Quick launcher (opens in own window)",
     "",
     "## Two-Agent Architecture",
@@ -794,13 +802,50 @@ function buildQisClaudeMdSection(config: ClawConfig): string {
   const domain = domainMap[config.template] || "ops";
   const relayUrl = (config as any).relayUrl || QIS_RELAY_URL;
   const joinSwarm = (config as any).joinSwarm === true;
+  const becomeHolder = (config as any).becomeQisHolder === true;
 
   const lines = [
     "## YonderClaw Intelligence Network",
     "",
   ];
 
-  if (joinSwarm) {
+  if (joinSwarm && becomeHolder) {
+    // Holder mode — tier 3: stores + serves protocol data on the DHT
+    lines.push(
+      "Swarm: **HOLDER** (tier 3 — read + write + hold)",
+      `Relay: ${relayUrl}`,
+      "",
+      "### What holder mode means",
+      "This agent is a **full QIS node**: it stores protocol data in a local SQLite database,",
+      "serves packets to other swarm peers over the DHT, and keeps a background peer alive",
+      "whenever YonderClaw is running. Think of it like running a Bitcoin node — you're not",
+      "just using the network, you're helping carry it.",
+      "",
+      "### Responsibilities",
+      "- **Keep the agent running.** Every hour of uptime = more swarm resilience.",
+      "- **Don't wipe data/.** The SQLite store in `data/dht-holder.db` is the protocol's memory.",
+      "- **Respect disk budget.** If the holder DB grows past ~1 GB, tell the operator.",
+      "",
+      "### Usage (same as tier 2, plus holder duties run automatically)",
+      "```typescript",
+      'import { qis } from "./swarm/qis-client.js";',
+      "await qis.init();  // starts DHT peer in HOLDER mode",
+      `const packets = await qis.query("${domain}.example.bucket");`,
+      "const results = qis.tally(packets);",
+      "await qis.deposit({ bucket: \"...\", signal: \"positive\", confidence: 0.85, insight: \"...\" });",
+      "```",
+      "",
+      "### Creating new buckets",
+      "If the bucket you deposit to doesn't exist yet, `qis.deposit()` auto-proposes it and retries — no manual step needed. For explicit control: `qis.propose({ path, title, description })`. Relay auto-approves when path is well-formed + PII-clean + <80% similar to existing.",
+      "",
+      "### Before starting work",
+      `Search for relevant insights: \`await qis.search("${domain}")\``,
+      "Pull and tally packets from matching buckets. Use consensus to inform your approach.",
+      "",
+      "### After completing work",
+      "Deposit what you learned. Be specific — include numbers, what worked, what didn't.",
+    );
+  } else if (joinSwarm) {
     // Active mode — swarm is enabled
     lines.push(
       "Swarm: **ACTIVE** (tier 2 — read + write)",
@@ -814,6 +859,13 @@ function buildQisClaudeMdSection(config: ClawConfig): string {
       "const results = qis.tally(packets);",
       "await qis.deposit({ bucket: \"...\", signal: \"positive\", confidence: 0.85, insight: \"...\" });",
       "```",
+      "",
+      "### Creating new buckets",
+      "If the bucket you deposit to doesn't exist yet, `qis.deposit()` auto-proposes it and retries — no manual step needed. For explicit control:",
+      "```typescript",
+      `await qis.propose({ path: "${domain}.cold-email.response-rate", title: "Cold email response rate", description: "What gets >2% reply on cold emails to local businesses" });`,
+      "```",
+      "Relay auto-approves when the path is well-formed, PII-clean, and <80% similar to existing buckets. On duplicate, the response carries `similar_to` — prefer using that bucket.",
       "",
       "### Before starting work",
       `Search for relevant insights: \`await qis.search("${domain}")\``,
@@ -886,7 +938,10 @@ function copySwarmFiles(dir: string, config: ClawConfig): void {
   const relayUrl = (config as any).relayUrl || QIS_RELAY_URL;
   const agentName = config.name;
   const joinSwarm = (config as any).joinSwarm === true;
-  const qisTier = joinSwarm ? 2 : 0;
+  const becomeHolder = (config as any).becomeQisHolder === true;
+  // Tier 3 (holder) implies tier 2 (read+write). Holder requires swarm enabled;
+  // guarded in questionnaire but double-gate here for safety.
+  const qisTier = joinSwarm && becomeHolder ? 3 : joinSwarm ? 2 : 0;
 
   // Create swarm/ directory
   const swarmDir = path.join(dir, "swarm");

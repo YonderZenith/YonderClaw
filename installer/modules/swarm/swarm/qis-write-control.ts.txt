@@ -56,6 +56,23 @@ export interface DepositResult {
   template_hints?: Array<{ key: string; type: string }>;
 }
 
+export interface ProposeInput {
+  path: string;
+  title: string;
+  description?: string;
+  schema_template?: Record<string, any>;
+}
+
+export interface ProposeResult {
+  ok: boolean;
+  bucket_id?: string;
+  proposal_id?: string;
+  status: "approved" | "pending_review" | "duplicate" | "exists";
+  path: string;
+  closest_match?: { bucket_id: string; path: string; similarity: number };
+  similar_to?: { bucket_id: string; path: string; similarity: number };
+}
+
 // ── PII Patterns (7 total, matches relay-server.ts:77-84 exactly) ──
 
 const PII_PATTERNS = [
@@ -242,7 +259,10 @@ function postJSON(url: string, body: any): Promise<any> {
         try {
           const json = JSON.parse(body);
           if (res.statusCode && res.statusCode >= 400) {
-            reject(new Error(json.error || `HTTP ${res.statusCode}`));
+            const err: any = new Error(json.error || `HTTP ${res.statusCode}`);
+            err.status = res.statusCode;
+            err.payload = json;
+            reject(err);
           } else {
             resolve(json);
           }
@@ -290,7 +310,33 @@ export async function deposit(input: DepositInput): Promise<DepositResult> {
     signature: packet.signature,
   };
 
-  const result = await postJSON(`${config.relayUrl}/packets`, relayBody);
+  let result: any;
+  try {
+    result = await postJSON(`${config.relayUrl}/packets`, relayBody);
+  } catch (err: any) {
+    // v3.7.2 rev-4: auto-propose on 404. Fresh agents hit "Bucket does not exist"
+    // on their first deposit because the bucket hasn't been created yet. Instead
+    // of forcing the agent to hand-roll a signed /buckets/propose call, we propose
+    // the bucket automatically (using the deposit's insight as the proposal body)
+    // and retry the deposit once. Idempotent: if another agent proposed the same
+    // bucket first, the retry sees it exists and succeeds.
+    if (err?.status === 404 && /bucket does not exist/i.test(err.message || "")) {
+      try {
+        await proposeBucket({
+          path: input.bucket,
+          title: input.bucket.split(".").pop() || input.bucket,
+          description: input.insight.slice(0, 240),
+        });
+      } catch (proposeErr: any) {
+        // If propose also failed, surface the original 404 with added context.
+        throw new Error(`Deposit failed: bucket does not exist and auto-propose failed — ${proposeErr.message}`);
+      }
+      // Retry deposit now that bucket exists.
+      result = await postJSON(`${config.relayUrl}/packets`, relayBody);
+    } else {
+      throw err;
+    }
+  }
 
   // Update deposit log
   const log = loadDepositLog();
@@ -308,5 +354,77 @@ export async function deposit(input: DepositInput): Promise<DepositResult> {
     was_upsert: wasUpsert,
     schema_completeness: result.schema_completeness,
     template_hints: result.template_hints,
+  };
+}
+
+/**
+ * Propose a new bucket to the relay. Signed Ed25519 proposal.
+ * The relay auto-approves when the path is well-formed, PII passes, and similarity
+ * to existing buckets is < 80%. Self-serve since v3.7.2.
+ *
+ * Signing: signs a canonical "packet" where bucket=path and outcome is a neutral
+ * stub ({signal:"neutral", confidence:0, insight:title}). Relay's auth check
+ * reconstructs this exact shape to verify.
+ *
+ * @throws Error on relay error, PII, or invalid path.
+ */
+export async function proposeBucket(input: ProposeInput): Promise<ProposeResult> {
+  const config = getConfig();
+  if (config.tier < 2) {
+    throw new Error(`QIS tier is ${config.tier} (read-only). Proposing a bucket requires tier 2+.`);
+  }
+  if (!input.path || !input.path.trim()) throw new Error("Bucket path is required.");
+  if (!input.title || !input.title.trim()) throw new Error("Title is required.");
+
+  // PII check on title + description
+  const proposalText = `${input.title} ${input.description || ""}`;
+  const piiHits = checkPII(proposalText);
+  if (piiHits.length > 0) {
+    throw new Error(`PII detected: ${piiHits.slice(0, 3).join(", ")}. Remove before proposing.`);
+  }
+
+  const identity = getIdentity();
+  const ts = Math.floor(Date.now() / 1000);
+
+  // Sign the canonical packet shape the relay reconstructs on verify.
+  // Matches relay-server.ts::verifyEd25519Packet — bucket=path, synthetic outcome.
+  const unsigned: Record<string, any> = {
+    bucket: input.path,
+    agent_id: identity.agentId,
+    public_key: identity.publicKeyHex,
+    signal: "neutral",
+    confidence: 0,
+    insight: input.title,
+    context: {},
+    metrics: {},
+    ts,
+  };
+  const payload = JSON.stringify(unsigned, Object.keys(unsigned).sort());
+  const signature = signPayload(payload, identity.privateKeyHex);
+
+  const body: Record<string, any> = {
+    path: input.path,
+    bucket: input.path,
+    domain: input.path.split(".")[0] || input.path,
+    title: input.title,
+    description: input.description || "",
+    proposed_by: identity.agentId,
+    agent_id: identity.agentId,
+    public_key: identity.publicKeyHex,
+    ts,
+    signature,
+  };
+  if (input.schema_template) body.schema_template = input.schema_template;
+
+  const result = await postJSON(`${config.relayUrl}/buckets/propose`, body);
+
+  return {
+    ok: true,
+    bucket_id: result.bucket_id,
+    proposal_id: result.proposal_id,
+    status: (result.status as ProposeResult["status"]) || "approved",
+    path: input.path,
+    closest_match: result.closest_match,
+    similar_to: result.similar_to,
   };
 }

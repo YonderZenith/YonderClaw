@@ -16,7 +16,7 @@ import http from "http";
 import https from "https";
 import { initIdentity, getIdentity, getAgentId, getPublicKeyHex, exportIdentity, importIdentity } from "./qis-identity.js";
 import { initConfig, getConfig, updateConfig, isAllowed, getMonitoredDomains, type QISConfig } from "./qis-config.js";
-import { deposit as httpDeposit, buildSignedPacket, verifyPacketSignature, checkPII, hasPII, hasDeposited, getDepositHistory, type DepositInput, type DepositResult, type SignedPacket } from "./qis-write-control.js";
+import { deposit as httpDeposit, proposeBucket, buildSignedPacket, verifyPacketSignature, checkPII, hasPII, hasDeposited, getDepositHistory, type DepositInput, type DepositResult, type ProposeInput, type ProposeResult, type SignedPacket } from "./qis-write-control.js";
 import { tally, runSyncCycle, startSyncScheduler, stopSyncScheduler, getSyncLogs, type TallyResult, type SyncCycleResult } from "./qis-sync.js";
 import { DHTClient } from "./dht-client.js";
 
@@ -336,6 +336,7 @@ export const qis = {
 
   // Deposit (hardcoded rules — cannot be bypassed)
   deposit,
+  propose: proposeBucket,
   hasDeposited,
   getDepositHistory,
 

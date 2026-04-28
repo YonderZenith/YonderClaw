@@ -656,6 +656,8 @@ async function main() {
   finalConfig.name = agentName as string;
   (finalConfig as any).selfUpdateIntervalHours = 6;
   (finalConfig as any).joinSwarm = result.answers.joinSwarm === true;
+  (finalConfig as any).becomeQisHolder = result.answers.becomeQisHolder === true;
+  (finalConfig as any).autoRegisterHive = result.answers.autoRegisterHive !== false;
   (finalConfig as any).skipPermissions = result.answers.skipPermissions === true;
   (finalConfig as any).answers = result.answers;
 
@@ -677,11 +679,61 @@ async function main() {
       {
         title: "Installing dependencies",
         task: async (ctx, task) => {
+          // v3.7.2: Install + verify + retry loop.
+          // Valorie (2026-04-20) + second-agent (2026-04-22) both shipped without
+          // hyperswarm despite opting into QIS tier 2. Root cause was silent npm
+          // install failure (network hiccup, timeout, or dep resolution). Fix:
+          // (a) always run npm install, (b) verify every manifest dep actually
+          // landed in node_modules, (c) retry just the missing deps by name,
+          // (d) hard-error if still missing so the operator sees it immediately.
           task.output = "Running npm install...";
+          let installOk = false;
           try {
             execSync("npm install", { cwd: projectDir, stdio: "pipe", timeout: 180000 });
-            task.output = "Dependencies installed";
-          } catch { task.output = "npm install had issues — may need manual retry"; }
+            installOk = true;
+          } catch { installOk = false; }
+
+          // Enumerate all deps the installer promised from every merged manifest.
+          const pkg = JSON.parse(fs.readFileSync(path.join(projectDir, "package.json"), "utf-8"));
+          const allDeps: Record<string, string> = { ...(pkg.dependencies || {}) };
+          const missing: string[] = [];
+          for (const dep of Object.keys(allDeps)) {
+            if (!fs.existsSync(path.join(projectDir, "node_modules", dep, "package.json"))) {
+              missing.push(dep);
+            }
+          }
+
+          if (missing.length > 0) {
+            task.output = `Retrying ${missing.length} missing dep(s): ${missing.slice(0, 4).join(", ")}${missing.length > 4 ? "..." : ""}`;
+            try {
+              const specs = missing.map(d => `${d}@${allDeps[d]}`).join(" ");
+              execSync(`npm install ${specs}`, { cwd: projectDir, stdio: "pipe", timeout: 180000 });
+            } catch { /* fall through to final check */ }
+            // Re-verify
+            const stillMissing = missing.filter(
+              dep => !fs.existsSync(path.join(projectDir, "node_modules", dep, "package.json"))
+            );
+            if (stillMissing.length > 0) {
+              // Write a loud beacon so the agent's CLAUDE.md + reboot-prompt can show it.
+              const beacon = {
+                generated_at: new Date().toISOString(),
+                missing_dependencies: stillMissing,
+                message: "npm install did not complete. Run `npm install` in the project directory and then re-run the launcher.",
+              };
+              try {
+                fs.mkdirSync(path.join(projectDir, "data"), { recursive: true });
+                fs.writeFileSync(
+                  path.join(projectDir, "data", ".install-issues.json"),
+                  JSON.stringify(beacon, null, 2),
+                );
+              } catch { /* ignore — best effort */ }
+              task.output = `MISSING: ${stillMissing.join(", ")} — run \`npm install\` in ${projectDir}`;
+              throw new Error(`Missing deps after install+retry: ${stillMissing.join(", ")}`);
+            }
+            task.output = "Dependencies installed (after retry)";
+          } else {
+            task.output = installOk ? "Dependencies installed" : "Dependencies verified (cache hit)";
+          }
         },
         options: { bottomBar: 1 },
       },
@@ -818,6 +870,14 @@ async function main() {
       },
       {
         title: "Registering with The Hive",
+        skip: () => {
+          // v3.7.2 rev-3: Hive registration is now opt-in via questionnaire.
+          // Default is true, but operators who want a solo agent can decline.
+          if ((finalConfig as any).autoRegisterHive === false) {
+            return "Skipped — operator declined Hive auto-registration";
+          }
+          return false;
+        },
         task: async (ctx, task) => {
           try {
             const hiveUrl = "https://hive.yonderzenith.com";

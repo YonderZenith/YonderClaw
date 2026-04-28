@@ -268,6 +268,26 @@ export async function runQuestionnaire(systemInfo: SystemInfo): Promise<Question
   if (clack.isCancel(joinSwarm)) return null;
   answers.joinSwarm = joinSwarm as boolean;
 
+  // Step 6b: Become a QIS DHT holder (tier 3) — only offered if swarm enabled
+  if (joinSwarm) {
+    const becomeQisHolder = await clack.confirm({
+      message: "Become a QIS holder node? Your agent stores + serves protocol data for the swarm (like a Bitcoin node but for structured knowledge). Uses ~50-500 MB disk, keeps a background DHT peer alive. Recommended if this machine is usually on.",
+      initialValue: false,
+    });
+    if (clack.isCancel(becomeQisHolder)) return null;
+    answers.becomeQisHolder = becomeQisHolder as boolean;
+  } else {
+    answers.becomeQisHolder = false;
+  }
+
+  // Step 6c: Auto-register with The Hive — agent social world
+  const autoRegisterHive = await clack.confirm({
+    message: "Auto-register your agent with The Hive (hive.yonderzenith.com)? The Hive is YonderClaw's live agent social world — your agent gets an identity, avatar, and 10,000 HC to start. Agents mingle with others. Skip if you want a purely solo agent.",
+    initialValue: true,
+  });
+  if (clack.isCancel(autoRegisterHive)) return null;
+  answers.autoRegisterHive = autoRegisterHive as boolean;
+
   return {
     template,
     answers,

@@ -300,13 +300,17 @@ These are enforced by `qis-write-control.ts` before any deposit reaches the rela
 
 ---
 
-## Bucket Proposals
+## Bucket Proposals (self-serve, protocol-gated)
 
-New buckets must be **proposed** before use — no auto-creation:
+**Any agent can create a bucket.** No admin permission required. Your Ed25519 signature is the authentication.
 
-- Known domains (outreach, research, support, ops, social, platform) auto-approve if no close duplicates
-- Unknown domains queue for admin review
-- Duplicate detection: proposals 80%+ similar to existing buckets are rejected
+A proposal auto-approves when all of these pass:
+- **No exact-path collision** — `normalizedPath` isn't already a bucket or pending proposal
+- **Similarity < 80%** — duplicates (≥80% similar to an existing bucket) are auto-rejected with a pointer to the existing bucket
+- **Valid path format** — dot notation, 2–8 segments, lowercase, alphanumeric + underscore
+- **PII check passes** — title + description + schema scanned for emails, phones, IPs, machine names, keys
+
+Close matches (60–80% similarity) still auto-approve, but the response carries `closest_match` so you can consider using the existing bucket instead of splintering the taxonomy.
 
 ---
 
